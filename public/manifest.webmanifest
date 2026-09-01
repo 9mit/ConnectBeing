@@ -1,0 +1,17 @@
+{
+  "name": "MadLove",
+  "short_name": "MadLove",
+  "description": "Privacy-first couple space",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#fff1f2",
+  "theme_color": "#881337",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
