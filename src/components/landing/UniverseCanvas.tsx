@@ -241,13 +241,10 @@ function Scene({
 }) {
   useFrame(({ scene }) => {
     const p = progressRef.current;
-    const targetBg = getTimelineColor(p);
-    
-    // Set background color
-    scene.background = targetBg;
     
     // Smoothly update fog matches
     if (scene.fog) {
+      const targetBg = getTimelineColor(p);
       scene.fog.color.copy(targetBg);
       if (p > 0.82) {
         (scene.fog as THREE.FogExp2).density = THREE.MathUtils.lerp(0.015, 0.045, (p - 0.82) / 0.18);
@@ -336,16 +333,14 @@ export default function UniverseCanvas({
         frameloop={frameloop}
         gl={{
           antialias: false,
-          alpha: false,
+          alpha: true,
           powerPreference: "default",
           failIfMajorPerformanceCaveat: false,
           stencil: false,
           depth: true,
         }}
-        onCreated={({ gl, scene }) => {
-          const deep = new THREE.Color("#03010a");
-          gl.setClearColor(deep, 1);
-          scene.background = deep;
+        onCreated={({ gl }) => {
+          gl.setClearColor(0x000000, 0);
 
           const canvas = gl.domElement;
           const onLost = (event: Event) => {
@@ -360,7 +355,7 @@ export default function UniverseCanvas({
           canvas.addEventListener("webglcontextlost", onLost, false);
           canvas.addEventListener("webglcontextrestored", onRestored, false);
         }}
-        style={{ width: "100%", height: "100%", background: "#03010a" }}
+        style={{ width: "100%", height: "100%", background: "transparent" }}
       >
         <Suspense fallback={null}>
           <Scene

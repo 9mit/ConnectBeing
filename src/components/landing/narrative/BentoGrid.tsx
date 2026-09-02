@@ -1,137 +1,130 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Lock, MapPin, Camera, Dog, Radio, Sparkles, Brain, Heart, Shield } from "lucide-react";
+import {
+  Lock,
+  Radio,
+  Camera,
+  Dog,
+  MapPin,
+  Sparkles,
+} from "lucide-react";
 
-import { LANDING_FEATURES } from "@/content/site";
-
-const ICONS = {
-  lock: Lock,
-  map: MapPin,
-  camera: Camera,
-  pet: Dog,
-  together: Radio,
-  radio: Radio,
-} as const;
-
-// Define column span configurations for a 6-column layout
-const GRID_SPANS = {
-  chat: "md:col-span-3",      // Row 1, Left (Half-width)
-  mood: "md:col-span-3",      // Row 1, Right (Half-width)
-  memories: "md:col-span-2",  // Row 2, Left (Third-width)
-  pet: "md:col-span-2",       // Row 2, Center (Third-width)
-  together: "md:col-span-2",  // Row 2, Right (Third-width)
-} as const;
-
-const ACCENTS = {
-  chat: {
+const FEATURES = [
+  {
+    id: "chat",
+    title: "Zero-Knowledge Secret Chat",
     icon: Lock,
-    tag: "ECDH P-256 E2EE",
-    gradient: "from-amber-400/20 to-purple-600/20",
-    border: "group-hover:border-amber-400/50",
-    iconBg: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
+    accent: "from-sky-500/20 to-blue-600/20",
+    border: "group-hover:border-sky-400/50",
+    badge: "E2EE Private",
+    description:
+      "Client-side encrypted messages that only you two can read. No ads, no feeds, zero data shared with third parties.",
+    span: "md:col-span-8",
   },
-  mood: {
-    icon: MapPin,
-    tag: "Sub-Second Sync",
-    gradient: "from-rose-500/20 to-pink-600/20",
-    border: "group-hover:border-rose-400/50",
-    iconBg: "bg-rose-500/20 text-rose-300 border border-rose-500/30",
-  },
-  memories: {
-    icon: Camera,
-    tag: "Time-Locked",
-    gradient: "from-amber-500/20 to-yellow-600/20",
-    border: "group-hover:border-amber-400/50",
-    iconBg: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
-  },
-  pet: {
-    icon: Dog,
-    tag: "Interactive Bond",
-    gradient: "from-purple-500/20 to-pink-500/20",
-    border: "group-hover:border-purple-400/50",
-    iconBg: "bg-purple-500/20 text-purple-300 border border-purple-500/30",
-  },
-  together: {
+  {
+    id: "together",
+    title: "Synchronized 4K Theater",
     icon: Radio,
-    tag: "4K Synchronized",
-    gradient: "from-cyan-500/20 to-blue-600/20",
-    border: "group-hover:border-cyan-400/50",
-    iconBg: "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30",
+    accent: "from-rose-500/20 to-pink-600/20",
+    border: "group-hover:border-rose-400/50",
+    badge: "Sub-Second Sync",
+    description:
+      "Watch movies, listen to music, and react side-by-side with zero audio lag or video desynchronization.",
+    span: "md:col-span-4",
   },
-};
+  {
+    id: "mood",
+    title: "Live Mood & Distance",
+    icon: MapPin,
+    accent: "from-violet-500/20 to-purple-600/20",
+    border: "group-hover:border-violet-400/50",
+    badge: "Real-Time Vibe",
+    description:
+      "Broadcast how you feel and see distance shrink in real-time with gentle celestial presence vibrations.",
+    span: "md:col-span-4",
+  },
+  {
+    id: "memories",
+    title: "Memory Vault & Time Capsules",
+    icon: Camera,
+    accent: "from-amber-500/20 to-yellow-600/20",
+    border: "group-hover:border-amber-400/50",
+    badge: "Date-Locked",
+    description:
+      "Photos, whispered voice letters, and milestone capsules that unlock only when your special anniversary arrives.",
+    span: "md:col-span-4",
+  },
+  {
+    id: "pet",
+    title: "Shared Spirit Companion",
+    icon: Dog,
+    accent: "from-emerald-500/20 to-teal-600/20",
+    border: "group-hover:border-emerald-400/50",
+    badge: "Living Bond",
+    description:
+      "Raise a digital pet together — a living reflection of your shared connection rituals and daily check-ins.",
+    span: "md:col-span-4",
+  },
+];
 
 export function BentoGrid() {
   return (
-    <section
-      className="landing-section relative z-10"
-      aria-label="What MadLove holds for you"
-    >
-      <div className="mx-auto w-full max-w-6xl px-5 md:px-8">
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.4 }}
-          transition={{ duration: 0.9 }}
-          className="max-w-2xl mb-16 md:mb-20 text-left"
-        >
-          <div className="stardust-pill mb-4">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+    <section id="sanctuary" className="landing-section relative py-20 px-5 md:px-8">
+      <div className="relative z-10 mx-auto max-w-6xl">
+        <div className="max-w-2xl mb-12">
+          <div className="sanctuary-pill mb-3 inline-flex">
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
             <span>Curated Sanctuary Architecture</span>
           </div>
-          <h2 className="display-lg text-white font-serif tracking-tight">
-            Everything intimate.
-            <br />
-            <span className="glow-text-gold italic font-medium">Nothing public.</span>
+          <h2 className="display-lg text-[#fbf9f4] tracking-tight">
+            Everything Intimate. <br />
+            <span className="italic font-light text-sky-400">Nothing Public.</span>
           </h2>
-          <p className="mt-5 text-sm md:text-base text-slate-300 font-sans font-light leading-relaxed max-w-lg">
+          <p className="mt-3 text-sm md:text-base text-zinc-300 font-sans font-light leading-relaxed">
             Every feature is architected strictly within your private couple boundary — zero cloud training, zero telemetry leak.
           </p>
-        </motion.div>
+        </div>
 
-        <ul className="grid grid-cols-1 md:grid-cols-6 gap-6">
-          {LANDING_FEATURES.map((f, idx) => {
-            const accent = ACCENTS[f.id as keyof typeof ACCENTS] || ACCENTS.chat;
-            const Icon = accent.icon;
-            const spanClass = GRID_SPANS[f.id as keyof typeof GRID_SPANS] || "md:col-span-3";
-
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+          {FEATURES.map((f, idx) => {
+            const Icon = f.icon;
             return (
-              <motion.li
+              <motion.div
                 key={f.id}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 16 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, amount: 0.2 }}
-                transition={{ duration: 0.7, delay: idx * 0.08 }}
-                className={`group relative overflow-hidden rounded-3xl glass-card-luxury p-8 md:p-10 shadow-2xl transition-all duration-500 ${spanClass} ${accent.border}`}
+                transition={{ duration: 0.6, delay: idx * 0.08 }}
+                className={`sanctuary-card p-7 flex flex-col justify-between ${f.span} group relative overflow-hidden ${f.border}`}
               >
                 {/* Background Ambient Glow */}
                 <div
-                  className={`absolute -right-16 -top-16 w-48 h-48 rounded-full bg-gradient-to-br ${accent.gradient} blur-3xl opacity-50 group-hover:opacity-100 transition-opacity pointer-events-none`}
+                  className={`absolute -right-16 -top-16 w-52 h-52 rounded-full bg-gradient-to-br ${f.accent} blur-3xl opacity-40 group-hover:opacity-100 transition-opacity pointer-events-none`}
                 />
 
-                <div className="flex flex-col h-full justify-between items-start gap-8 relative z-10">
-                  <div className="flex items-center justify-between w-full">
-                    <div className={`p-3.5 rounded-2xl ${accent.iconBg} shadow-inner transition-transform duration-300 group-hover:scale-110`}>
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between pb-4">
+                    <div className="p-3 rounded-xl bg-white/10 text-white shadow-inner">
                       <Icon className="w-5 h-5" />
                     </div>
-                    <span className="text-[9px] font-bold uppercase tracking-widest font-sans text-amber-200/80 bg-purple-950/80 border border-amber-500/20 px-3 py-1 rounded-full shadow-sm">
-                      {accent.tag}
+                    <span className="text-[11px] font-semibold text-zinc-300 bg-white/10 px-3 py-1 rounded-full border border-white/10">
+                      {f.badge}
                     </span>
                   </div>
 
-                  <div>
-                    <h3 className="text-2xl font-serif font-bold text-white tracking-wide text-glow-gold">
-                      {f.title}
-                    </h3>
-                    <p className="mt-3 text-sm text-slate-300 font-sans font-light leading-relaxed">
-                      {f.description}
-                    </p>
-                  </div>
+                  <h3 className="mt-4 font-serif text-2xl font-bold text-[#fbf9f4] tracking-wide">
+                    {f.title}
+                  </h3>
+
+                  <p className="mt-3 text-sm text-zinc-300 font-sans leading-relaxed">
+                    {f.description}
+                  </p>
                 </div>
-              </motion.li>
+              </motion.div>
             );
           })}
-        </ul>
+        </div>
       </div>
     </section>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Camera, Lock, Sparkles, Heart, Clock } from "lucide-react";
+import { Camera, Lock, Clock, Heart, Sparkles, Mic } from "lucide-react";
 
 import { LANDING_CHAPTERS } from "@/content/site";
 
@@ -9,102 +9,92 @@ export function SectionMemories() {
   const { aria, lines } = LANDING_CHAPTERS.memories;
 
   return (
-    <section className="landing-section relative z-10" aria-label={aria}>
-      <div className="mx-auto max-w-4xl text-center px-4 space-y-12">
-        {/* Chapter Header Chip */}
+    <section className="landing-section relative py-20 px-4 text-center" aria-label={aria}>
+      <div className="mx-auto max-w-4xl flex flex-col items-center space-y-10">
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
+          initial={{ opacity: 0, y: 10 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.5 }}
-          className="flex justify-center"
         >
-          <div className="stardust-pill">
-            <Camera className="w-3.5 h-3.5 text-amber-400" />
-            <span>Chapter II · Memory Vault</span>
+          <div className="sanctuary-pill">
+            <Camera className="w-3.5 h-3.5 text-amber-300" />
+            <span>Chapter II · Memory Vault &amp; Time Capsules</span>
           </div>
         </motion.div>
 
-        {/* 3D Floating Memory Cards & Time Capsule Preview */}
+        {/* Luminous Memory Cards */}
         <motion.div
-          initial={{ opacity: 0, y: 24 }}
+          initial={{ opacity: 0, y: 18 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.3 }}
-          transition={{ duration: 1.1 }}
-          className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto text-left"
+          transition={{ duration: 0.8 }}
+          className="grid grid-cols-1 sm:grid-cols-3 gap-5 w-full max-w-4xl text-left"
         >
-          {/* Card 1: Polaroid Memory */}
-          <div className="polaroid-card p-4 rounded-3xl transform -rotate-2 hover:rotate-0 transition-transform duration-300">
-            <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-rose-500/20 via-purple-600/20 to-amber-500/20 flex flex-col items-center justify-center p-4 border border-white/10 relative overflow-hidden">
-              <Heart className="w-8 h-8 text-rose-400 fill-rose-400/30 mb-2" />
-              <span className="text-[10px] font-sans uppercase font-bold tracking-widest text-amber-200">
-                First Sunset
-              </span>
-            </div>
-            <div className="mt-3 flex justify-between items-center px-1">
-              <span className="text-xs font-serif text-slate-200">Sealed in Vault</span>
-              <span className="text-[10px] font-mono text-amber-400/80">Oct 14</span>
-            </div>
-          </div>
-
-          {/* Card 2: Time Capsule (Locked) */}
-          <div className="polaroid-card p-4 rounded-3xl transform sm:translate-y-4 hover:translate-y-0 transition-transform duration-300 border-amber-500/30 bg-purple-950/60 shadow-[0_0_30px_rgba(212,175,55,0.15)]">
-            <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-amber-500/20 to-purple-900/40 flex flex-col items-center justify-center p-4 border border-amber-500/30 relative overflow-hidden">
-              <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-400/50 flex items-center justify-center mb-2 shadow-inner">
-                <Lock className="w-4 h-4 text-amber-300" />
+          {/* Card 1 */}
+          <div className="sanctuary-card p-5 flex flex-col justify-between space-y-4">
+            <div>
+              <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-rose-500/20 via-purple-600/20 to-sky-500/20 flex flex-col items-center justify-center p-4 border border-white/10 relative overflow-hidden">
+                <Heart className="w-7 h-7 text-rose-400 fill-rose-400/40 mb-2" />
+                <span className="text-xs font-semibold text-zinc-100">First Sunset</span>
               </div>
-              <span className="text-[10px] font-sans uppercase font-bold tracking-widest text-amber-300">
-                Time Capsule
-              </span>
+              <p className="mt-3 text-xs text-zinc-300 font-sans leading-relaxed">
+                High-resolution memories encrypted and stored in your private couple vault.
+              </p>
             </div>
-            <div className="mt-3 flex justify-between items-center px-1">
-              <span className="text-xs font-serif text-amber-200 font-bold">Unlocks 1st Anniversary</span>
-              <Clock className="w-3 h-3 text-amber-400" />
+            <div className="pt-3 border-t border-white/10 flex justify-between text-xs text-zinc-400">
+              <span>Sealed in Vault</span>
+              <span className="text-sky-300 font-medium">Oct 14</span>
             </div>
           </div>
 
-          {/* Card 3: Voice Letter */}
-          <div className="polaroid-card p-4 rounded-3xl transform rotate-2 hover:rotate-0 transition-transform duration-300">
-            <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-cyan-500/20 via-indigo-600/20 to-purple-800/20 flex flex-col items-center justify-center p-4 border border-white/10 relative overflow-hidden">
-              <Sparkles className="w-8 h-8 text-cyan-300 mb-2" />
-              <span className="text-[10px] font-sans uppercase font-bold tracking-widest text-cyan-200">
-                Midnight Audio
-              </span>
+          {/* Card 2: Time Capsule */}
+          <div className="sanctuary-card p-5 flex flex-col justify-between space-y-4 border-amber-400/40 bg-[#160f26]/80 shadow-amber-500/10 shadow-xl">
+            <div>
+              <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-amber-500/20 to-purple-900/40 flex flex-col items-center justify-center p-4 border border-amber-500/30 relative overflow-hidden">
+                <div className="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-400/50 flex items-center justify-center mb-2">
+                  <Lock className="w-4 h-4 text-amber-300" />
+                </div>
+                <span className="text-xs font-semibold text-amber-200">Time Capsule</span>
+              </div>
+              <p className="mt-3 text-xs text-zinc-300 font-sans leading-relaxed">
+                Two-way letters and photos that open only when your milestone arrives.
+              </p>
             </div>
-            <div className="mt-3 flex justify-between items-center px-1">
-              <span className="text-xs font-serif text-slate-200">Whispered Note</span>
-              <span className="text-[10px] font-mono text-cyan-400/80">0:48</span>
+            <div className="pt-3 border-t border-white/10 flex justify-between text-xs text-amber-300 font-medium">
+              <span>Unlocks 1st Anniversary</span>
+              <Clock className="w-3.5 h-3.5" />
+            </div>
+          </div>
+
+          {/* Card 3: Voice Note */}
+          <div className="sanctuary-card p-5 flex flex-col justify-between space-y-4">
+            <div>
+              <div className="aspect-[4/3] rounded-lg bg-gradient-to-br from-sky-500/20 via-indigo-600/20 to-purple-800/20 flex flex-col items-center justify-center p-4 border border-white/10 relative overflow-hidden">
+                <Mic className="w-7 h-7 text-sky-400 mb-2" />
+                <span className="text-xs font-semibold text-zinc-100">Midnight Audio</span>
+              </div>
+              <p className="mt-3 text-xs text-zinc-300 font-sans leading-relaxed">
+                Whispered voice letters recorded in quiet moments, preserved forever.
+              </p>
+            </div>
+            <div className="pt-3 border-t border-white/10 flex justify-between text-xs text-zinc-400">
+              <span>Whispered Note</span>
+              <span className="text-sky-300 font-medium">0:48</span>
             </div>
           </div>
         </motion.div>
 
-        {/* Narrative Poetic Typography */}
-        <div className="space-y-6 pt-4 max-w-2xl mx-auto">
+        {/* Narrative Poetic Lines */}
+        <div className="space-y-4 pt-2 max-w-2xl">
           <motion.p
-            className="display-md text-white font-serif"
+            className="display-lg text-[#fbf9f4] tracking-tight"
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true, amount: 0.5 }}
-            transition={{ duration: 1.3 }}
+            transition={{ duration: 0.8 }}
           >
-            {lines[0]}
-          </motion.p>
-          <motion.p
-            className="display-md text-slate-300 font-serif"
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 0.9 }}
-            viewport={{ once: true, amount: 0.5 }}
-            transition={{ duration: 1.3, delay: 0.2 }}
-          >
-            {lines[1]}
-          </motion.p>
-          <motion.p
-            className="display-lg text-white font-serif tracking-tight pt-4"
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.5 }}
-            transition={{ duration: 1.2, delay: 0.4 }}
-          >
-            <span className="glow-text-gold italic font-medium">{lines[2]}</span>
+            Letters. Light. The sound of a voice. <br />
+            <span className="italic text-sky-400 font-light">Everything you keep.</span>
           </motion.p>
         </div>
       </div>

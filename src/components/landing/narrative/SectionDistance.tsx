@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Compass, Heart, Navigation } from "lucide-react";
+import { Compass, Radio, Heart } from "lucide-react";
 
 import { LANDING_CHAPTERS } from "@/content/site";
 
@@ -9,86 +9,78 @@ export function SectionDistance() {
   const { aria, words } = LANDING_CHAPTERS.distance;
 
   return (
-    <section className="landing-section relative z-10" aria-label={aria}>
-      <div className="mx-auto max-w-3xl text-center px-4 space-y-12">
-        {/* Chapter Header Chip */}
+    <section className="landing-section relative py-20 px-4 text-center" aria-label={aria}>
+      <div className="mx-auto max-w-4xl flex flex-col items-center space-y-8">
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
+          initial={{ opacity: 0, y: 10 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.5 }}
-          className="flex justify-center"
         >
-          <div className="stardust-pill">
-            <Compass className="w-3.5 h-3.5 text-amber-400" />
-            <span>Chapter I · Distance</span>
+          <div className="sanctuary-pill">
+            <Compass className="w-3.5 h-3.5 text-sky-400" />
+            <span>Chapter I · Real-Time Distance &amp; Presence</span>
           </div>
         </motion.div>
 
-        {/* Live Distance Orbital Visualization */}
+        {/* Luminous Distance Diagram */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
+          initial={{ opacity: 0, scale: 0.96 }}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true, amount: 0.4 }}
-          transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-          className="relative max-w-md mx-auto p-8 rounded-3xl glass-card-luxury border border-amber-500/30 overflow-hidden shadow-2xl"
+          transition={{ duration: 0.8 }}
+          className="w-full max-w-lg p-6 sanctuary-card text-left space-y-4 relative overflow-hidden"
         >
-          {/* Ambient Glow */}
-          <div className="absolute inset-0 bg-gradient-to-r from-purple-600/10 via-amber-500/10 to-rose-600/10 pointer-events-none" />
+          <div className="flex items-center justify-between text-xs text-zinc-400 pb-3 border-b border-white/10">
+            <span className="text-sky-400 font-semibold">Live Orbit Resonance</span>
+            <span>Sub-Second Sync</span>
+          </div>
 
-          <div className="relative z-10 flex items-center justify-between gap-4">
-            {/* You Node */}
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-400 to-yellow-600 flex items-center justify-center text-purple-950 font-bold shadow-[0_0_20px_rgba(212,175,55,0.5)]">
+          <div className="p-4 bg-black/40 border border-white/10 rounded-xl flex items-center justify-between gap-4">
+            <div className="flex flex-col items-center gap-1.5 text-xs">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-black font-bold shadow-lg shadow-sky-500/30">
                 You
               </div>
-              <span className="text-[10px] uppercase font-bold tracking-wider text-amber-300">Here</span>
+              <span className="text-zinc-200 font-medium">Here</span>
             </div>
 
-            {/* Glowing Distance Pulse Beam */}
-            <div className="flex-1 flex flex-col items-center relative">
-              <div className="w-full h-0.5 bg-gradient-to-r from-amber-400 via-rose-400 to-amber-400 relative overflow-hidden">
+            <div className="flex-1 flex flex-col items-center relative px-2">
+              <div className="w-full h-0.5 bg-gradient-to-r from-sky-400 via-rose-400 to-sky-400 relative overflow-hidden">
                 <motion.div
-                  className="absolute top-0 bottom-0 w-8 bg-white blur-[2px]"
-                  animate={{ left: ["-20%", "120%"] }}
-                  transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+                  className="absolute top-0 bottom-0 w-12 bg-white blur-[2px]"
+                  animate={{ left: ["-25%", "125%"] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                 />
               </div>
-              <div className="mt-3 flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-950/80 border border-amber-500/30 shadow-inner">
+              <div className="mt-2.5 text-[11px] text-zinc-300 flex items-center gap-1.5 bg-white/5 border border-white/10 px-3 py-1 rounded-full">
                 <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400 animate-pulse" />
-                <span className="text-[11px] font-mono font-bold text-amber-200">
-                  Zero Space Between Souls
-                </span>
+                <span>Zero Space Between Souls</span>
               </div>
             </div>
 
-            {/* Partner Node */}
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-rose-400 to-pink-600 flex items-center justify-center text-white font-bold shadow-[0_0_20px_rgba(244,63,94,0.5)]">
+            <div className="flex flex-col items-center gap-1.5 text-xs">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-rose-400 to-pink-600 flex items-center justify-center text-white font-bold shadow-lg shadow-rose-500/30">
                 Partner
               </div>
-              <span className="text-[10px] uppercase font-bold tracking-wider text-rose-300">Always</span>
+              <span className="text-zinc-200 font-medium">Always</span>
             </div>
           </div>
         </motion.div>
 
-        {/* Poetic Lines */}
-        <div className="space-y-6">
-          {words.map((word, i) => (
-            <motion.p
-              key={`${word}-${i}`}
-              className="display-lg text-white font-serif tracking-tight"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, amount: 0.5 }}
-              transition={{ duration: 1.1, delay: i * 0.15, ease: [0.22, 1, 0.36, 1] }}
-            >
-              {i === 1 ? (
-                <span className="glow-text-gold italic font-semibold">{word}</span>
-              ) : (
-                word
-              )}
-            </motion.p>
-          ))}
+        {/* Poetic Typography */}
+        <div className="space-y-4 pt-2 max-w-2xl">
+          <motion.p
+            className="display-lg text-[#fbf9f4] tracking-tight"
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, amount: 0.5 }}
+            transition={{ duration: 0.8 }}
+          >
+            Love isn&apos;t found.{" "}
+            <span className="italic text-sky-400 font-light">It is built.</span>
+          </motion.p>
+          <p className="text-sm text-zinc-300 leading-relaxed font-light">
+            When you are continents or rooms apart, distance is transformed from an empty gap into an intentional, shared presence.
+          </p>
         </div>
       </div>
     </section>

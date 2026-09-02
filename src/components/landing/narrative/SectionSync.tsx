@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Film, Radio, Heart, Sparkles, Volume2 } from "lucide-react";
+import { Film, Radio, Play, Pause, Heart } from "lucide-react";
 
 import { LANDING_CHAPTERS } from "@/content/site";
 
@@ -9,106 +9,69 @@ export function SectionSync() {
   const { aria, lines } = LANDING_CHAPTERS.sync;
 
   return (
-    <section className="landing-section relative z-10" aria-label={aria}>
-      <div className="mx-auto max-w-4xl text-center px-4 space-y-12">
-        {/* Chapter Header Chip */}
+    <section className="landing-section relative py-20 px-4 text-center" aria-label={aria}>
+      <div className="mx-auto max-w-4xl flex flex-col items-center space-y-10">
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
+          initial={{ opacity: 0, y: 10 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.5 }}
-          className="flex justify-center"
         >
-          <div className="stardust-pill">
-            <Film className="w-3.5 h-3.5 text-amber-400" />
-            <span>Chapter III · Virtual Theater</span>
+          <div className="sanctuary-pill">
+            <Film className="w-3.5 h-3.5 text-rose-400" />
+            <span>Chapter III · Virtual 4K Theater</span>
           </div>
         </motion.div>
 
-        {/* Synchronized Theater Player Simulation */}
+        {/* Luminous Theater Deck */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.94 }}
+          initial={{ opacity: 0, scale: 0.96 }}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true, amount: 0.3 }}
-          transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-          className="max-w-2xl mx-auto rounded-3xl glass-card-luxury p-6 sm:p-8 border border-amber-500/30 shadow-2xl relative overflow-hidden text-left"
+          transition={{ duration: 0.8 }}
+          className="w-full max-w-2xl sanctuary-card p-6 text-left space-y-4"
         >
-          {/* Simulated Screen */}
-          <div className="relative aspect-video w-full rounded-2xl bg-gradient-to-br from-purple-950 via-[#100624] to-black border border-white/10 flex flex-col justify-between p-5 overflow-hidden shadow-inner">
-            {/* Top Badges */}
-            <div className="flex justify-between items-center z-10">
-              <div className="flex items-center gap-2 bg-purple-950/80 border border-amber-500/30 px-3 py-1 rounded-full text-[10px] font-bold text-amber-300 uppercase tracking-wider backdrop-blur-md">
-                <Radio className="w-3 h-3 text-rose-400 animate-pulse" />
-                <span>Synchronized · 4K Stream</span>
+          <div className="p-6 rounded-xl bg-gradient-to-br from-purple-950/70 via-black/80 to-sky-950/50 border border-white/10 flex flex-col justify-between min-h-[220px] space-y-4">
+            <div className="flex justify-between items-center text-xs text-zinc-300">
+              <div className="flex items-center gap-2">
+                <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                <span className="font-semibold">Synchronized Streaming Room</span>
               </div>
-
-              <div className="flex items-center -space-x-2">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-yellow-600 border border-purple-950 flex items-center justify-center text-[10px] font-bold text-purple-950 shadow-md">
-                  You
-                </div>
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-rose-400 to-pink-600 border border-purple-950 flex items-center justify-center text-[10px] font-bold text-white shadow-md">
-                  Her
-                </div>
-              </div>
+              <div className="text-sky-400 font-mono text-[11px]">Sub-Frame Sync</div>
             </div>
 
-            {/* Center Floating Reactions */}
-            <div className="flex justify-center items-center gap-4 py-4 z-10">
-              <motion.div
-                animate={{ y: [0, -10, 0] }}
-                transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                className="text-4xl filter drop-shadow-[0_0_15px_rgba(244,63,94,0.5)]"
-              >
-                🍿
-              </motion.div>
-              <motion.div
-                animate={{ y: [0, -14, 0] }}
-                transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut", delay: 0.3 }}
-                className="text-3xl filter drop-shadow-[0_0_15px_rgba(212,175,55,0.5)]"
-              >
-                ✨
-              </motion.div>
-              <motion.div
-                animate={{ y: [0, -8, 0] }}
-                transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
-                className="text-4xl filter drop-shadow-[0_0_15px_rgba(244,63,94,0.5)]"
-              >
-                ❤️
-              </motion.div>
+            <div className="text-center py-4 space-y-1">
+              <h4 className="font-serif text-2xl text-zinc-100 font-bold">Midnight in Paris</h4>
+              <p className="text-xs text-zinc-400">Zero audio lag · Shared live reactions</p>
             </div>
 
-            {/* Bottom Controls */}
-            <div className="space-y-2 z-10">
-              <div className="flex justify-between items-center text-[10px] font-mono text-slate-300">
-                <span className="font-bold text-amber-200">Interstellar (2014)</span>
-                <span>48:20 / 2:49:00</span>
+            <div className="space-y-2">
+              <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-rose-400 via-purple-400 to-sky-400 w-[74%]" />
               </div>
-              <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                <div className="h-full w-[35%] bg-gradient-to-r from-amber-400 to-rose-400 rounded-full shadow-[0_0_8px_#fbbf24]" />
+              <div className="flex justify-between text-[11px] text-zinc-400">
+                <span>01:34:12</span>
+                <span className="text-emerald-400">Both Devices Locked</span>
+                <span>02:10:00</span>
               </div>
             </div>
           </div>
         </motion.div>
 
-        {/* Narrative Poetic Typography */}
-        <div className="space-y-6 pt-4 max-w-2xl mx-auto">
+        {/* Narrative Poetic Lines */}
+        <div className="space-y-4 pt-2 max-w-2xl">
           <motion.p
-            className="display-md text-white font-serif"
+            className="display-lg text-[#fbf9f4] tracking-tight"
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true, amount: 0.5 }}
-            transition={{ duration: 1.3 }}
+            transition={{ duration: 0.8 }}
           >
-            {lines[0]}
+            When one moves… <br />
+            <span className="italic text-sky-400 font-light">the other already knows.</span>
           </motion.p>
-          <motion.p
-            className="display-lg text-white font-serif tracking-tight"
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.5 }}
-            transition={{ duration: 1.3, delay: 0.3 }}
-          >
-            <span className="glow-text-gold italic font-medium">{lines[1]}</span>
-          </motion.p>
+          <p className="text-sm text-zinc-300 leading-relaxed font-light">
+            Watch together in perfect synchrony from any browser. Even if you pause or scrub, both screens stay exactly in frame.
+          </p>
         </div>
       </div>
     </section>

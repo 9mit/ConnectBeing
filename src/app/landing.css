@@ -1,330 +1,224 @@
-/* Scoped to .madlove-landing — does not affect app chrome */
+/* Scoped to .madlove-landing — Full-Bleed End-to-End Animated Cosmic Atmosphere */
 
 .madlove-landing {
-  --universe-warmth: 0;
-  --bg-deep: #05010b;
-  --bg-indigo: #0b0318;
-  --bg-violet: #150628;
-  --bg-purple: #230b3f;
-  --bg-royal-dark: #371260;
-  --bg-gold: #d4af37;
-  --bg-morning: #fef08a;
-  --bg-sunrise: #fffbeb;
-  --text-star: rgba(255, 251, 235, 0.96);
-  --text-dusk: rgba(255, 251, 235, 0.65);
-  --text-ink: #291804;
-  --display: var(--font-landing-display), "Cormorant Garamond", Georgia, serif;
-  --quiet: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --bg-dark: #07020f;
+  --paper-cream: #fbf9f4;
+  --paper-warm: #f4efe4;
 
-  color: var(--text-star);
-  background: var(--bg-deep);
-  font-family: var(--display);
+  --text-primary: #fbf9f4;
+  --text-secondary: rgba(251, 249, 244, 0.78);
+  --text-tertiary: rgba(251, 249, 244, 0.48);
+
+  --color-sky: #38bdf8;
+  --color-gold: #fbbf24;
+  --color-rose: #f43f5e;
+  --color-violet: #a855f7;
+  --color-emerald: #10b981;
+
+  --font-serif-display: var(--font-landing-display), "Cormorant Garamond", Georgia, serif;
+  --font-body-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-tech-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  color: var(--text-primary);
+  background-color: var(--bg-dark);
+  font-family: var(--font-body-sans);
   min-height: 100vh;
   overflow-x: hidden;
+  position: relative;
 }
 
-.madlove-landing .landing-bg-fallback {
+/* ==========================================================================
+   GLOBAL FULL-BLEED ANIMATED COSMIC ATMOSPHERE (END-TO-END FLOW)
+   ========================================================================== */
+
+.madlove-landing .global-cosmic-atmosphere {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
   pointer-events: none;
-  background: radial-gradient(
-      circle at 20% 15%,
-      rgba(147, 51, 234, 0.22) 0%,
-      transparent 45%
-    ),
-    radial-gradient(
-      circle at 80% 55%,
-      rgba(212, 175, 55, 0.18) 0%,
-      transparent 50%
-    ),
-    radial-gradient(
-      circle at 50% 85%,
-      rgba(244, 63, 94, 0.15) 0%,
-      transparent 50%
-    ),
-    linear-gradient(
-      180deg,
-      #05010b 0%,
-      #0b0318 35%,
-      #150628 65%,
-      #05010b 100%
-    );
-  transition: background 0.4s linear;
+  z-index: 0;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 50%, #090314 0%, #03010a 100%);
 }
+
+/* Fluid Animated Aurora Nebula Waves */
+.madlove-landing .aurora-nebula-flow {
+  position: absolute;
+  inset: -25%;
+  background: 
+    radial-gradient(ellipse 55% 45% at 20% 20%, rgba(56, 189, 248, 0.28) 0%, transparent 60%),
+    radial-gradient(ellipse 65% 50% at 80% 25%, rgba(244, 63, 94, 0.25) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 60% at 30% 70%, rgba(168, 85, 247, 0.26) 0%, transparent 65%),
+    radial-gradient(ellipse 60% 55% at 75% 80%, rgba(251, 191, 36, 0.24) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 45% at 50% 40%, rgba(14, 165, 233, 0.2) 0%, transparent 55%);
+  filter: blur(55px);
+  animation: cosmicNebulaFlow 20s ease-in-out infinite alternate;
+  will-change: transform, filter;
+}
+
+@keyframes cosmicNebulaFlow {
+  0% {
+    transform: rotate(0deg) scale(1) translate(0, 0);
+    filter: blur(55px) hue-rotate(0deg) saturate(140%);
+  }
+  33% {
+    transform: rotate(2.5deg) scale(1.08) translate(35px, -25px);
+    filter: blur(65px) hue-rotate(25deg) saturate(175%);
+  }
+  66% {
+    transform: rotate(-3deg) scale(0.96) translate(-30px, 40px);
+    filter: blur(58px) hue-rotate(-20deg) saturate(150%);
+  }
+  100% {
+    transform: rotate(1.5deg) scale(1.05) translate(20px, -20px);
+    filter: blur(55px) hue-rotate(20deg) saturate(165%);
+  }
+}
+
+/* Floating Radiant Color Fields Covering the Entire Height */
+.madlove-landing .aurora-glow-field-1 {
+  position: absolute;
+  top: -12%;
+  left: 5%;
+  width: 75vw;
+  height: 60vh;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(56, 189, 248, 0.32) 0%, rgba(147, 51, 234, 0.22) 40%, transparent 70%);
+  filter: blur(75px);
+  animation: floatField1 14s ease-in-out infinite alternate;
+}
+
+.madlove-landing .aurora-glow-field-2 {
+  position: absolute;
+  top: 25%;
+  right: -5%;
+  width: 70vw;
+  height: 70vh;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(244, 63, 94, 0.28) 0%, rgba(168, 85, 247, 0.24) 45%, transparent 70%);
+  filter: blur(80px);
+  animation: floatField2 16s ease-in-out infinite alternate-reverse;
+}
+
+.madlove-landing .aurora-glow-field-3 {
+  position: absolute;
+  top: 55%;
+  left: -8%;
+  width: 80vw;
+  height: 65vh;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(251, 191, 36, 0.26) 0%, rgba(244, 63, 94, 0.22) 40%, transparent 75%);
+  filter: blur(75px);
+  animation: floatField3 20s ease-in-out infinite alternate;
+}
+
+.madlove-landing .aurora-glow-field-4 {
+  position: absolute;
+  bottom: -15%;
+  right: 10%;
+  width: 85vw;
+  height: 60vh;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(254, 240, 138, 0.28) 0%, rgba(56, 189, 248, 0.22) 45%, transparent 70%);
+  filter: blur(85px);
+  animation: floatField4 18s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes floatField1 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(60px, 45px) scale(1.15); }
+}
+
+@keyframes floatField2 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-70px, -55px) scale(1.12); }
+}
+
+@keyframes floatField3 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(50px, -40px) scale(1.18); }
+}
+
+@keyframes floatField4 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-60px, 35px) scale(1.1); }
+}
+
+/* ==========================================================================
+   3D UNIVERSE CANVAS (TRANSPARENT, FULL SCREEN, FIXED BEHIND CONTENT)
+   ========================================================================== */
 
 .madlove-landing .landing-canvas {
   position: fixed;
   inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: #05010b;
   width: 100vw;
+  height: 100vh;
   height: 100dvh;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 1;
+  mix-blend-mode: screen;
 }
 
 .madlove-landing .landing-scroll {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
+/* ==========================================================================
+   SECTION & CONTENT LAYOUT
+   ========================================================================== */
+
 .madlove-landing .landing-section {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: clamp(4rem, 8vw, 8rem) clamp(1.25rem, 5vw, 4rem);
   position: relative;
+  width: 100%;
+  padding-top: clamp(4rem, 8vw, 7rem);
+  padding-bottom: clamp(4rem, 8vw, 7rem);
+  background: transparent;
 }
 
 .madlove-landing .landing-hero {
-  min-height: 100vh;
   min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding-top: clamp(6rem, 10vw, 8.5rem);
+  padding-bottom: clamp(4rem, 6vw, 6rem);
+  background: transparent;
 }
 
-/* Glassmorphism Luxury Tokens */
-.madlove-landing .glass-card {
-  background: rgba(18, 6, 34, 0.55);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(212, 175, 55, 0.2);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-.madlove-landing .glass-card:hover {
-  border-color: rgba(212, 175, 55, 0.5);
-  box-shadow: 0 24px 70px rgba(212, 175, 55, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-}
-
-.madlove-landing .glass-card-luxury {
-  background: radial-gradient(
-      circle at 0% 0%,
-      rgba(212, 175, 55, 0.12) 0%,
-      transparent 50%
-    ),
-    radial-gradient(
-      circle at 100% 100%,
-      rgba(147, 51, 234, 0.12) 0%,
-      transparent 50%
-    ),
-    rgba(14, 4, 27, 0.65);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  border: 1px solid rgba(212, 175, 55, 0.25);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75), inset 0 1px 1px rgba(255, 255, 255, 0.12);
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.madlove-landing .glass-card-luxury:hover {
-  border-color: rgba(212, 175, 55, 0.6);
-  transform: translateY(-3px);
-  box-shadow: 0 30px 80px rgba(212, 175, 55, 0.25), inset 0 1px 2px rgba(255, 255, 255, 0.2);
-}
-
-.madlove-landing .glass-pill {
-  background: rgba(212, 175, 55, 0.08);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(212, 175, 55, 0.25);
-}
-
-.madlove-landing .stardust-pill {
+/* Elegant Pill Badge */
+.madlove-landing .sanctuary-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  background: rgba(212, 175, 55, 0.1);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(212, 175, 55, 0.35);
-  padding: 0.45rem 1.1rem;
-  border-radius: 9999px;
-  font-family: var(--quiet);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.22em;
+  font-family: var(--font-body-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #fef08a;
-  box-shadow: 0 0 20px rgba(212, 175, 55, 0.25);
-}
-
-/* Glow Text Utilities */
-.madlove-landing .glow-text-gold {
-  background: linear-gradient(135deg, #fffbeb 0%, #fde047 35%, #d4af37 80%, #b45309 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 30px rgba(212, 175, 55, 0.65));
-}
-
-.madlove-landing .glow-text-rose {
-  background: linear-gradient(135deg, #fff1f2 0%, #fda4af 35%, #f43f5e 80%, #9f1239 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 30px rgba(244, 63, 94, 0.65));
-}
-
-.madlove-landing .glow-text-cyan {
-  background: linear-gradient(135deg, #ecfeff 0%, #67e8f9 35%, #06b6d4 80%, #0e7490 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 30px rgba(6, 182, 212, 0.65));
-}
-
-/* Typography Hierarchy */
-.madlove-landing .display-xl {
-  font-size: clamp(3rem, 9vw, 6.5rem);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.08;
-  text-wrap: balance;
-}
-
-.madlove-landing .display-lg {
-  font-size: clamp(2.35rem, 5.5vw, 4.5rem);
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  line-height: 1.18;
-}
-
-.madlove-landing .display-md {
-  font-size: clamp(1.35rem, 3.2vw, 2.35rem);
-  font-weight: 300;
-  letter-spacing: 0.02em;
-  line-height: 1.45;
-}
-
-.madlove-landing .whisper {
-  font-family: var(--quiet);
-  font-size: 0.75rem;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: #fde047;
-  font-weight: 700;
-}
-
-.madlove-landing .skip-link {
-  position: absolute;
-  left: -9999px;
-  top: 0;
-  z-index: 100;
-  padding: 0.75rem 1rem;
-  background: var(--bg-sunrise);
-  color: var(--text-ink);
-  font-family: var(--quiet);
-}
-
-.madlove-landing .skip-link:focus {
-  left: 1rem;
-  top: 1rem;
-}
-
-.madlove-landing .ripple-btn {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  border: 1px solid rgba(255, 215, 0, 0.5);
-  cursor: pointer;
-  font-family: var(--quiet);
-  font-size: clamp(0.95rem, 1.8vw, 1.15rem);
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 1.15rem 3rem;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  backdrop-filter: blur(12px);
+  padding: 0.35rem 1.1rem;
   border-radius: 9999px;
-  color: #07020f;
-  background: linear-gradient(135deg, #ffffff 0%, #fef08a 25%, #fde047 60%, #d4af37 100%);
-  box-shadow:
-    0 0 35px rgba(212, 175, 55, 0.5),
-    0 0 70px rgba(147, 51, 234, 0.35);
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 24px rgba(251, 191, 36, 0.22);
 }
 
-.madlove-landing .ripple-btn:hover,
-.madlove-landing .ripple-btn:focus-visible {
-  transform: scale(1.05);
-  box-shadow:
-    0 0 55px rgba(212, 175, 55, 0.8),
-    0 0 100px rgba(147, 51, 234, 0.6);
-}
-
-.madlove-landing .ripple-btn .ripple-wave {
-  position: absolute;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.9), transparent 70%);
-  pointer-events: none;
-  transform: scale(0);
-  animation: landing-ripple 0.9s ease-out forwards;
-}
-
-@keyframes landing-ripple {
-  to {
-    transform: scale(4);
-    opacity: 0;
-  }
-}
-
-.madlove-landing .cursor-burst {
-  position: fixed;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #fde047;
-  box-shadow: 0 0 10px #d4af37;
-  pointer-events: none;
-  z-index: 50;
-  animation: star-burst 0.7s ease-out forwards;
-}
-
-@keyframes star-burst {
-  to {
-    opacity: 0;
-    transform: translate(var(--dx), var(--dy)) scale(0.2);
-  }
-}
-
-.madlove-landing a.login-whisper {
-  color: inherit;
-  text-decoration: none;
-  opacity: 0.8;
-  transition: opacity 0.3s ease, text-shadow 0.3s ease, color 0.3s ease;
-  font-family: var(--quiet);
-  font-size: 0.875rem;
-  letter-spacing: 0.05em;
-}
-
-.madlove-landing a.login-whisper:hover,
-.madlove-landing a.login-whisper:focus-visible {
-  opacity: 1;
-  color: #fde047;
-  text-shadow: 0 0 22px rgba(212, 175, 55, 0.8);
-  outline: none;
-}
-
-/* Floating animation */
-@keyframes floatSlow {
-  0%, 100% {
-    transform: translateY(0px) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-12px) rotate(0.8deg);
-  }
-}
-
-.madlove-landing .animate-float-slow {
-  animation: floatSlow 6s ease-in-out infinite;
-}
-
-/* Narrative flow guidelines to lead the eye between chapters */
+/* Section Flow Lines */
 .madlove-landing .flow-line-container {
   position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
   width: 100%;
-  height: 140px;
+  height: 80px;
   pointer-events: none;
   z-index: 5;
-  overflow: hidden;
 }
 
 .madlove-landing .flow-line {
@@ -332,8 +226,10 @@
   height: 100%;
   background: linear-gradient(
     to bottom,
-    rgba(212, 175, 55, 0.45) 0%,
-    rgba(147, 51, 234, 0.35) 50%,
+    transparent 0%,
+    rgba(255, 255, 255, 0.25) 35%,
+    var(--color-sky) 50%,
+    rgba(255, 255, 255, 0.25) 65%,
     transparent 100%
   );
 }
@@ -342,33 +238,174 @@
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: #fde047;
-  box-shadow: 
-    0 0 14px #d4af37,
-    0 0 28px rgba(212, 175, 55, 0.6);
+  background: var(--color-sky);
+  box-shadow: 0 0 14px var(--color-sky);
 }
 
-/* Polaroids in Memory Section */
-.madlove-landing .polaroid-card {
-  background: rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(20px);
+/* Typography Scale */
+.madlove-landing .display-hero {
+  font-family: var(--font-serif-display);
+  font-size: clamp(3rem, 7.5vw, 5.8rem);
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.madlove-landing .display-lg {
+  font-family: var(--font-serif-display);
+  font-size: clamp(2.2rem, 4.5vw, 3.6rem);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+}
+
+.madlove-landing .display-md {
+  font-family: var(--font-serif-display);
+  font-size: clamp(1.25rem, 2.4vw, 1.85rem);
+  font-weight: 300;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+}
+
+/* Translucent Frosted Sanctuary Cards (Unboxed, Flowing) */
+.madlove-landing .sanctuary-card {
+  background: rgba(18, 12, 28, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 25px rgba(212, 175, 55, 0.1);
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.madlove-landing .polaroid-card:hover {
-  border-color: rgba(212, 175, 55, 0.5);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7), 0 0 35px rgba(212, 175, 55, 0.25);
+.madlove-landing .sanctuary-card:hover {
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65), 0 0 28px rgba(56, 189, 248, 0.2);
+  transform: translateY(-2px);
+}
+
+/* Buttons */
+.madlove-landing .btn-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  background: linear-gradient(135deg, #fbf9f4 0%, #f4efe4 100%);
+  color: #0c0d0e;
+  font-family: var(--font-body-sans);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.85rem 2rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 25px rgba(251, 191, 36, 0.25);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  text-decoration: none;
+}
+
+.madlove-landing .btn-cta-primary:hover {
+  background: #ffffff;
+  box-shadow: 0 6px 28px rgba(56, 189, 248, 0.35), 0 0 32px rgba(56, 189, 248, 0.35);
+  transform: scale(1.02);
+}
+
+.madlove-landing .btn-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-body-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+  padding: 0.85rem 1.8rem;
+  border-radius: 9999px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.madlove-landing .btn-cta-secondary:hover {
+  color: #ffffff;
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+/* Console Frame */
+.madlove-landing .console-frame {
+  background: rgba(14, 9, 24, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65), 0 0 44px rgba(168, 85, 247, 0.18);
+}
+
+.madlove-landing .console-titlebar {
+  background: rgba(10, 6, 18, 0.75);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.madlove-landing .console-tab {
+  font-family: var(--font-body-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.madlove-landing .console-tab.active {
+  background: rgba(56, 189, 248, 0.2);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+}
+
+.madlove-landing .console-tab:not(.active) {
+  color: var(--text-tertiary);
+}
+
+.madlove-landing .console-tab:not(.active):hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Accessibility */
+.madlove-landing .skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.65rem 1.25rem;
+  background: var(--paper-cream);
+  color: #0c0d0e;
+  font-weight: 600;
+  border-radius: 4px;
+}
+
+.madlove-landing .skip-link:focus {
+  left: 1rem;
+  top: 1rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .madlove-landing .ripple-btn .ripple-wave,
-  .madlove-landing .cursor-burst,
-  .madlove-landing .animate-float-slow {
+  .madlove-landing .aurora-nebula-flow,
+  .madlove-landing .aurora-glow-field-1,
+  .madlove-landing .aurora-glow-field-2,
+  .madlove-landing .aurora-glow-field-3,
+  .madlove-landing .aurora-glow-field-4 {
     animation: none;
   }
 }
