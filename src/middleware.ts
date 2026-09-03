@@ -29,6 +29,12 @@ export async function middleware(request: NextRequest) {
 
   const session = token ? await verifyAuthToken(token) : null;
 
+  if (session && (pathname === "/login" || pathname === "/register")) {
+    const redirect = request.nextUrl.clone();
+    redirect.pathname = "/dashboard";
+    return NextResponse.redirect(redirect);
+  }
+
   if (!session && !isPublic(pathname)) {
     const redirect = request.nextUrl.clone();
     redirect.pathname = "/login";

@@ -50,7 +50,8 @@ export async function POST(request: NextRequest) {
       message: "Too many registration attempts. Try again later.",
     });
 
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+    const { getAppUrl } = await import("@/lib/app-url");
+    const appUrl = getAppUrl();
 
     const pendingCookies: Parameters<typeof applyCookies>[1] = [];
     const supabase = createServerClient(url, anonKey, {

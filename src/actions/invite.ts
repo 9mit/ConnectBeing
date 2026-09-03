@@ -68,14 +68,8 @@ export async function generateInviteLinkAction(): Promise<
       ex: INVITE_TOKEN_TTL_SECONDS,
     });
 
-    const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-    if (!base) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Invite links are temporarily unavailable.",
-        503,
-      );
-    }
+    const { getAppUrl } = await import("@/lib/app-url");
+    const base = getAppUrl();
 
     return ok({
       url: `${base}/invite/${raw}`,

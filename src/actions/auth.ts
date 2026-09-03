@@ -28,11 +28,12 @@ export async function forgotPasswordAction(
       message: "Too many reset requests. Try again later.",
     });
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const { getAppUrl } = await import("@/lib/app-url");
+    const appUrl = getAppUrl();
 
     const supabase = createClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${appUrl.replace(/\/$/, "")}/auth/callback?next=/update-password`,
+      redirectTo: `${appUrl}/auth/callback?next=/update-password`,
     });
 
     if (error) {

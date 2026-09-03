@@ -7,8 +7,8 @@ import { redirectPathForAuthError, requireActiveCouple } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Support & Membership — MadLove",
-  description: "Manage your MadLove couple universe membership and premium perks.",
+  title: "Sanctuary & Support — MadLove",
+  description: "MadLove is 100% free for all couples. Support the open-source infrastructure.",
 };
 
 export default async function BillingPage() {
@@ -25,14 +25,14 @@ export default async function BillingPage() {
     <AppShell coupleId={couple.id} userId={user.id}>
       <div className="max-w-3xl mx-auto space-y-6">
         <header className="mb-6">
-          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-amber-400">
-            Membership & Love Tier
+          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-sky-400">
+            Open Sanctuary · 100% Free Forever
           </span>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-white font-display mt-1 text-glow-gold">
-            Support & Subscription
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-white font-serif mt-1">
+            Zero Paywalls. Full Access.
           </h1>
-          <p className="mt-2 text-sm text-slate-300 font-medium">
-            Manage your MadLove universe membership and unlocked features.
+          <p className="mt-2 text-sm text-zinc-300 font-sans">
+            Every capability in MadLove is completely unlocked for you and your partner.
           </p>
         </header>
         <BillingPanel />
