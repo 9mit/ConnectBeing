@@ -112,18 +112,7 @@ export const personaSchema = z.object({
 });
 
 export const createWatchSessionSchema = z.object({
-  provider: z.enum([
-    "netflix",
-    "prime",
-    "disney",
-    "apple",
-    "jiohotstar",
-    "sonyliv",
-    "zee5",
-    "crunchyroll",
-    "youtube",
-    "other",
-  ]),
+  provider: z.string().trim().min(1).max(50),
   title: z.string().trim().min(1).max(100),
   posterUrl: z.string().url().optional().or(z.literal("")),
   scheduledFor: z.string().datetime().optional(), // ISO string

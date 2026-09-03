@@ -20,6 +20,22 @@ import {
 } from "@/lib/validations";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import type { UnifiedContentItem } from "@/features/together/discovery/catalog";
+
+export async function searchEntertainmentAction(
+  query: string,
+): Promise<ActionResult<UnifiedContentItem[]>> {
+  try {
+    await requireVerifiedCouple();
+    const { searchUnifiedCatalog } = await import(
+      "@/features/together/discovery/catalog"
+    );
+    const results = await searchUnifiedCatalog(query);
+    return ok(results);
+  } catch (e) {
+    return fail(e);
+  }
+}
 
 export async function createWatchSessionAction(
   input: unknown,
@@ -30,10 +46,29 @@ export async function createWatchSessionAction(
 
     const sessionId = createId();
 
+    const validDbEnum = [
+      "netflix",
+      "prime",
+      "disney",
+      "apple",
+      "jiohotstar",
+      "sonyliv",
+      "zee5",
+      "crunchyroll",
+      "youtube",
+      "other",
+    ] as const;
+
+    const dbProvider = (validDbEnum as readonly string[]).includes(
+      parsed.provider.toLowerCase(),
+    )
+      ? (parsed.provider.toLowerCase() as (typeof validDbEnum)[number])
+      : "other";
+
     await db.insert(watchSessions).values({
       id: sessionId,
       coupleId: couple.id,
-      provider: parsed.provider,
+      provider: dbProvider,
       title: parsed.title,
       posterUrl: parsed.posterUrl,
       scheduledFor: parsed.scheduledFor ? new Date(parsed.scheduledFor) : new Date(),
