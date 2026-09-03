@@ -31,7 +31,8 @@ export async function GET(request: NextRequest) {
 
   const isLocalEnv = process.env.NODE_ENV === "development";
   const forwardedHost = request.headers.get("x-forwarded-host");
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const { getAppUrl } = await import("@/lib/app-url");
+  const appUrl = getAppUrl();
   let allowedHost: string | null = null;
   try {
     allowedHost = appUrl ? new URL(appUrl).host : null;
