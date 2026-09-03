@@ -67,8 +67,8 @@ export async function POST(request: NextRequest) {
 
     let createdViaAdmin = false;
 
-    // Pre-confirm via admin only outside production.
-    if (process.env.SUPABASE_SERVICE_ROLE_KEY && isNonProductionRuntime()) {
+    // Pre-confirm via admin when service role key is configured.
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
       try {
         const { createAdminClient } = await import("@/lib/supabase/admin");
         const admin = createAdminClient();

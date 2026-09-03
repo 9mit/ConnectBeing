@@ -113,8 +113,7 @@ export async function POST(request: NextRequest) {
 
     if (
       (error || !data.user) &&
-      process.env.SUPABASE_SERVICE_ROLE_KEY &&
-      isNonProductionRuntime()
+      process.env.SUPABASE_SERVICE_ROLE_KEY
     ) {
       try {
         const { createAdminClient } = await import("@/lib/supabase/admin");
@@ -157,8 +156,16 @@ export async function POST(request: NextRequest) {
         }
         await db.update(users).set(patch).where(eq(users.id, existing.id));
       }
+
+      const rawMsg = error?.message || "Invalid email or password.";
+      const message = rawMsg.toLowerCase().includes("confirm")
+        ? "Please check your inbox to confirm your email before signing in."
+        : rawMsg.toLowerCase().includes("invalid login credentials")
+          ? "Invalid email or password. Please verify your credentials or use Forgot Password."
+          : rawMsg;
+
       return NextResponse.json(
-        { ok: false, error: { message: "Invalid email or password." } },
+        { ok: false, error: { message } },
         { status: 401 },
       );
     }
