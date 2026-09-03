@@ -108,8 +108,9 @@ export function DashboardClient({ data }: DashboardProps) {
     recentUs,
     partnerName,
     daysTogetherLabel,
+    daysTogether,
   } = data;
-  const { partnerOnline, nudgePartner, nudgePending } = usePresence();
+  const { partnerOnline, myStatus, toggleMyStatus, nudgePartner, nudgePending } = usePresence();
   const [mounted, setMounted] = useState(false);
   const [nudgeToast, setNudgeToast] = useState<string | null>(null);
 
@@ -131,7 +132,7 @@ export function DashboardClient({ data }: DashboardProps) {
 
   async function handleNudge() {
     const res = await nudgePartner();
-    setNudgeToast(res.message || (res.ok ? "Nudge sent!" : "Failed"));
+    setNudgeToast(res.message || (res.ok ? "🔔 Ping sent!" : "Failed"));
     setTimeout(() => setNudgeToast(null), 3000);
   }
 
@@ -155,6 +156,29 @@ export function DashboardClient({ data }: DashboardProps) {
       animate="show"
       className="space-y-10"
     >
+      {/* Partner Joined Welcome Banner */}
+      {daysTogether <= 1 && partnerName && (
+        <div className="p-4 sm:p-5 rounded-3xl border border-amber-500/40 bg-gradient-to-r from-purple-950/70 via-[#0d0218] to-purple-950/70 backdrop-blur-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-[0_0_30px_rgba(212,175,55,0.15)] animate-in fade-in slide-in-from-top-4 duration-500">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl animate-bounce">🎉</span>
+            <div>
+              <h3 className="text-sm font-bold text-amber-200">
+                Your partner is here! {partnerName} has joined your sanctuary.
+              </h3>
+              <p className="text-xs text-slate-300">
+                Your private 2-person digital home is now live. Everything is completely synced.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/chat"
+            className="py-2 px-4 rounded-xl border border-amber-500/40 bg-amber-500/20 text-xs font-bold uppercase tracking-wider text-amber-200 hover:bg-amber-500 hover:text-purple-950 transition-all flex-shrink-0"
+          >
+            Say Hello in Chat ❤️
+          </Link>
+        </div>
+      )}
+
       <motion.header variants={itemVariants} className="relative z-10">
         <p className="text-[11px] uppercase tracking-[0.22em] text-amber-400 font-bold mb-2">
           {daysTogetherLabel}
@@ -169,9 +193,10 @@ export function DashboardClient({ data }: DashboardProps) {
         </p>
 
         <div className="flex flex-wrap items-center gap-3 mt-4">
-          <span className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-950/40 border border-amber-500/20 text-xs font-bold uppercase tracking-wider">
+          {/* Partner Status */}
+          <span className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-950/40 border border-amber-500/20 text-xs font-bold uppercase tracking-wider shadow-inner">
             <span
-              className={`h-2.5 w-2.5 rounded-full ${
+              className={`h-2.5 w-2.5 rounded-full transition-all ${
                 partnerOnline
                   ? "bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]"
                   : "bg-slate-500"
@@ -179,19 +204,46 @@ export function DashboardClient({ data }: DashboardProps) {
             />
             <span className={partnerOnline ? "text-amber-300" : "text-slate-400"}>
               {partnerName ? partnerName : "Partner"} is{" "}
-              {partnerOnline ? "Online" : "Offline"}
+              {partnerOnline ? "Online" : "Away"}
             </span>
           </span>
+
+          {/* User On/Off Presence Switch */}
+          <button
+            type="button"
+            onClick={toggleMyStatus}
+            title={
+              myStatus === "online"
+                ? "Your status is ONLINE. Click to toggle OFF (appear offline)"
+                : "Your status is OFFLINE. Click to toggle ON (appear online)"
+            }
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-bold uppercase tracking-wider transition-all active:scale-95 ${
+              myStatus === "online"
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+                : "border-slate-700 bg-slate-900/80 text-slate-400"
+            }`}
+          >
+            <span className="text-[10px] opacity-75">You:</span>
+            <span
+              className={`h-2 w-2 rounded-full transition-all ${
+                myStatus === "online" ? "bg-emerald-400 animate-pulse" : "bg-slate-500"
+              }`}
+            />
+            <span>{myStatus === "online" ? "Online (ON)" : "Offline (OFF)"}</span>
+          </button>
+
+          {/* Ping Partner Button */}
           <button
             type="button"
             disabled={nudgePending}
             onClick={handleNudge}
             className="flex items-center gap-2 px-4 py-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-xs font-bold uppercase tracking-wider text-amber-300 hover:bg-amber-500 hover:text-purple-950 transition-all active:scale-95 disabled:opacity-50 shadow-[0_0_12px_rgba(212,175,55,0.2)]"
           >
-            {nudgePending ? "Sending…" : "Ping Partner"}
+            <span>🔔</span>
+            <span>{nudgePending ? "Pinging…" : "Ping Partner"}</span>
           </button>
           {nudgeToast ? (
-            <span className="text-xs font-bold text-amber-300 bg-purple-950/80 border border-amber-500/40 px-3 py-1.5 rounded-full">
+            <span className="text-xs font-bold text-amber-300 bg-purple-950/80 border border-amber-500/40 px-3 py-1.5 rounded-full animate-bounce">
               {nudgeToast}
             </span>
           ) : null}

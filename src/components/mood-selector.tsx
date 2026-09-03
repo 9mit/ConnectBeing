@@ -40,7 +40,7 @@ export function MoodSelector({ coupleId }: { coupleId: string }) {
     }
 
     const topic = `couple:${coupleId}:moods`;
-    const channel = supabase.channel(topic, { config: { private: true } });
+    const channel = supabase.channel(topic);
 
     void authorizeRealtimeTopicAction(topic).then((auth) => {
       if (disposed || !auth.ok) return;

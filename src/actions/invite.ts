@@ -1,9 +1,9 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
 import { db } from "@/db";
-import { inviteTokens, onboardingProfiles, users } from "@/db/schema";
+import { inAppNotifications, inviteTokens, onboardingProfiles, users } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireAppUser, requireOnboardedUser } from "@/lib/auth";
 import {
@@ -153,7 +153,75 @@ export async function redeemInviteToken(
 
     await redis.del(redisKey);
 
+    // Notify inviter that their partner has entered using the invite link
+    const joinerProfile = await db.query.onboardingProfiles.findFirst({
+      where: eq(onboardingProfiles.userId, user.id),
+    });
+    const partnerName = joinerProfile?.name?.trim() || "Your partner";
+
+    await db.insert(inAppNotifications).values({
+      id: createId(),
+      coupleId,
+      userId: inviter.id,
+      title: "🎉 Your Partner Is Here!",
+      body: `${partnerName} entered using your invite link! Your sanctuary is now live ❤️`,
+      kind: "general",
+      link: "/dashboard",
+      read: false,
+    });
+
+    await redis.set(
+      `partner-joined:${inviter.id}`,
+      JSON.stringify({ partnerName, coupleId, timestamp: Date.now() }),
+      { ex: 86400 },
+    );
+
     return ok({ coupleId });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function checkPartnerJoinedAction(): Promise<
+  ActionResult<{
+    hasJoined: boolean;
+    partnerName?: string;
+    coupleId?: string;
+  }>
+> {
+  try {
+    const user = await requireAppUser();
+    if (user.coupleId) {
+      const partner = await db.query.users.findFirst({
+        where: and(
+          eq(users.coupleId, user.coupleId),
+          ne(users.id, user.id),
+        ),
+        with: { onboardingProfile: true },
+      });
+      const partnerName = partner?.onboardingProfile?.name || "Your partner";
+      return ok({
+        hasJoined: true,
+        partnerName,
+        coupleId: user.coupleId,
+      });
+    }
+
+    const raw = await redis.get<string>(`partner-joined:${user.id}`);
+    if (raw) {
+      try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        return ok({
+          hasJoined: true,
+          partnerName: parsed.partnerName || "Your partner",
+          coupleId: parsed.coupleId,
+        });
+      } catch {
+        return ok({ hasJoined: true, partnerName: "Your partner" });
+      }
+    }
+
+    return ok({ hasJoined: false });
   } catch (e) {
     return fail(e);
   }

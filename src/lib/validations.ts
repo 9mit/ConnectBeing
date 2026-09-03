@@ -36,8 +36,9 @@ export const updatePasswordSchema = z.object({
 
 export const onboardingSchema = z.object({
   name: z.string().trim().min(1).max(80),
-  age: z.coerce.number().int().min(18).max(120),
+  age: z.coerce.number().int().min(18, "You must be at least 18 years old").max(120),
   gender: z.string().trim().min(1).max(40),
+  countryCode: z.string().trim().length(2).toUpperCase().default("IN"),
   hobbies: z.array(z.string().trim().min(1).max(40)).min(1).max(20),
   selfDescription: z.string().trim().min(1).max(500),
   partnerExpectation: z.string().trim().min(1).max(500),

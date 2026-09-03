@@ -109,7 +109,9 @@ export function VirtualRoom({
     }
 
     const topic = `room:${sessionId}`;
-    const channel = supabase.channel(topic, { config: { private: true } });
+    const channel = supabase.channel(topic, {
+      config: { broadcast: { self: false } },
+    });
     channelRef.current = channel;
 
     const applyReaction = (emoji: string) => {
@@ -131,7 +133,7 @@ export function VirtualRoom({
       if (disposed || !auth.ok) return;
 
       channel
-        .on("broadcast", { event: "protocol_sync" }, ({ payload }) => {
+        .on("broadcast", { event: "protocol_sync" }, ({ payload }: { payload: any }) => {
           const validated = protocol.processIncoming(payload as SyncMessage);
           if (!validated) return;
 
@@ -192,7 +194,7 @@ export function VirtualRoom({
             }
           }
         })
-        .on("broadcast", { event: "reaction" }, ({ payload }) => {
+        .on("broadcast", { event: "reaction" }, ({ payload }: { payload: any }) => {
           if (payload.userId === userId) return;
           applyReaction(payload.emoji);
         })
@@ -204,7 +206,7 @@ export function VirtualRoom({
             table: "watch_messages",
             filter: `session_id=eq.${sessionId}`,
           },
-          (payload) => {
+          (payload: any) => {
             const row = payload.new as {
               id: string;
               content: string;

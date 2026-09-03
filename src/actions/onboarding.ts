@@ -45,6 +45,7 @@ export async function completeOnboardingAction(
       name: parsed.name,
       age: parsed.age,
       gender: parsed.gender,
+      countryCode: parsed.countryCode,
       hobbies: parsed.hobbies,
       selfDescription: parsed.selfDescription,
       partnerExpectation: parsed.partnerExpectation,
@@ -78,7 +79,7 @@ export async function completeOnboardingAction(
       return ok({ redirectTo: "/dashboard" });
     }
 
-    return ok({ redirectTo: "/invite" });
+    return ok({ redirectTo: "/onboarding/decision" });
   } catch (e) {
     return fail(e);
   }

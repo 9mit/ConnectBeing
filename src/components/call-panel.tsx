@@ -265,7 +265,7 @@ export function CallPanel({
     });
 
     const channel = supabase.channel(topic, {
-      config: { private: true },
+      config: { broadcast: { self: false } },
     });
     channelRef.current = channel;
 
@@ -281,7 +281,7 @@ export function CallPanel({
     };
 
     channel
-      .on("broadcast", { event: "call:offer" }, async ({ payload }) => {
+      .on("broadcast", { event: "call:offer" }, async ({ payload }: { payload: any }) => {
         if (payload.userId === userId) return;
         if (!isLeaderRef.current) return;
         if (payload.callId && payload.callId === callIdRef.current && !payload.iceRestart) {
@@ -305,14 +305,14 @@ export function CallPanel({
         sendSignal("call:answer", { sdp: answer });
         setStatus("calling");
       })
-      .on("broadcast", { event: "call:answer" }, async ({ payload }) => {
+      .on("broadcast", { event: "call:answer" }, async ({ payload }: { payload: any }) => {
         if (payload.userId === userId) return;
         const pc = pcRef.current;
         if (!pc) return;
         await pc.setRemoteDescription(payload.sdp);
         await flushIce(pc);
       })
-      .on("broadcast", { event: "call:ice-candidate" }, async ({ payload }) => {
+      .on("broadcast", { event: "call:ice-candidate" }, async ({ payload }: { payload: any }) => {
         if (payload.userId === userId) return;
         const pc = pcRef.current;
         if (!pc?.remoteDescription) {
@@ -325,14 +325,14 @@ export function CallPanel({
           /* ignore */
         }
       })
-      .on("broadcast", { event: "call:end" }, ({ payload }) => {
+      .on("broadcast", { event: "call:end" }, ({ payload }: { payload: any }) => {
         if (payload.userId !== userId) {
           cleanup();
           setStatus("idle");
           callIdRef.current = crypto.randomUUID();
         }
       })
-      .subscribe((status) => {
+      .subscribe((status: string) => {
         if (disposed) return;
         setSubscribed(status === "SUBSCRIBED");
       });

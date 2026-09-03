@@ -123,6 +123,26 @@ export const relationshipEventTypeEnum = pgEnum("relationship_event_type", [
   "challenge_completed",
 ]);
 
+export const matchmakingStatusEnum = pgEnum("matchmaking_status", [
+  "active",
+  "paused",
+  "disabled",
+]);
+
+export const matchmakingActionEnum = pgEnum("matchmaking_action", [
+  "interested",
+  "passed",
+  "saved_later",
+  "blocked",
+  "reported",
+]);
+
+export const connectionStatusEnum = pgEnum("connection_status", [
+  "connected",
+  "disconnected",
+  "blocked",
+]);
+
 // ---------------------------------------------------------------------------
 // users
 // Passwords live exclusively in Supabase Auth — never duplicated here.
@@ -169,6 +189,7 @@ export const onboardingProfiles = pgTable("onboarding_profiles", {
   avatarUrl: text("avatar_url"),
   age: integer("age").notNull(),
   gender: text("gender").notNull(),
+  countryCode: text("country_code").notNull().default("IN"),
   hobbies: text("hobbies").array().notNull().default([]),
   selfDescription: text("self_description").notNull(),
   partnerExpectation: text("partner_expectation").notNull(),
@@ -866,6 +887,175 @@ export const verificationAttemptLogs = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Matchmaking Engine ("I Wanna Try My Luck")
+// ---------------------------------------------------------------------------
+
+export const matchmakingProfiles = pgTable(
+  "matchmaking_profiles",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    countryCode: text("country_code").notNull().default("IN"),
+    age: integer("age").notNull(),
+    ageRangeMin: integer("age_range_min").notNull().default(18),
+    ageRangeMax: integer("age_range_max").notNull().default(99),
+    interests: jsonb("interests").$type<string[]>().notNull().default([]),
+    hobbies: jsonb("hobbies").$type<string[]>().notNull().default([]),
+    personalityTraits: jsonb("personality_traits")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    communicationStyle: text("communication_style")
+      .notNull()
+      .default("thoughtful"),
+    relationshipGoals: text("relationship_goals")
+      .notNull()
+      .default("meaningful_connection"),
+    lifestylePreferences: jsonb("lifestyle_preferences")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    conversationPreferences: jsonb("conversation_preferences")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    behavioralVector: jsonb("behavioral_vector")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    matchmakingEnabled: boolean("matchmaking_enabled").notNull().default(false),
+    matchmakingPaused: boolean("matchmaking_paused").notNull().default(false),
+    enabledAt: timestamp("enabled_at", { withTimezone: true }),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    algorithmVersion: integer("algorithm_version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("matchmaking_profiles_country_age_idx").on(
+      table.countryCode,
+      table.age,
+    ),
+    index("matchmaking_profiles_enabled_idx").on(
+      table.matchmakingEnabled,
+      table.matchmakingPaused,
+    ),
+  ],
+);
+
+export const matchmakingInteractions = pgTable(
+  "matchmaking_interactions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    candidateId: text("candidate_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    action: matchmakingActionEnum("action").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("matchmaking_interactions_user_candidate_idx").on(
+      table.userId,
+      table.candidateId,
+    ),
+    index("matchmaking_interactions_candidate_action_idx").on(
+      table.candidateId,
+      table.action,
+    ),
+  ],
+);
+
+export const matchmakingConnections = pgTable(
+  "matchmaking_connections",
+  {
+    id: text("id").primaryKey(),
+    userAId: text("user_a_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    userBId: text("user_b_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: connectionStatusEnum("status").notNull().default("connected"),
+    compatibilityScore: integer("compatibility_score").notNull().default(85),
+    compatibilityReasons: jsonb("compatibility_reasons")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("matchmaking_connections_pair_idx").on(
+      table.userAId,
+      table.userBId,
+    ),
+    index("matchmaking_connections_user_a_idx").on(table.userAId),
+    index("matchmaking_connections_user_b_idx").on(table.userBId),
+  ],
+);
+
+export const matchmakingMessages = pgTable(
+  "matchmaking_messages",
+  {
+    id: text("id").primaryKey(),
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => matchmakingConnections.id, { onDelete: "cascade" }),
+    senderId: text("sender_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("matchmaking_messages_connection_idx").on(
+      table.connectionId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const matchmakingReports = pgTable(
+  "matchmaking_reports",
+  {
+    id: text("id").primaryKey(),
+    reporterId: text("reporter_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reportedUserId: text("reported_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    category: text("category").notNull(),
+    details: text("details"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("matchmaking_reports_reported_idx").on(table.reportedUserId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
@@ -1213,4 +1403,19 @@ export type NewTimeCapsule = typeof timeCapsules.$inferInsert;
 
 export type InAppNotification = typeof inAppNotifications.$inferSelect;
 export type NewInAppNotification = typeof inAppNotifications.$inferInsert;
+
+export type MatchmakingProfile = typeof matchmakingProfiles.$inferSelect;
+export type NewMatchmakingProfile = typeof matchmakingProfiles.$inferInsert;
+
+export type MatchmakingInteraction = typeof matchmakingInteractions.$inferSelect;
+export type NewMatchmakingInteraction = typeof matchmakingInteractions.$inferInsert;
+
+export type MatchmakingConnection = typeof matchmakingConnections.$inferSelect;
+export type NewMatchmakingConnection = typeof matchmakingConnections.$inferInsert;
+
+export type MatchmakingMessage = typeof matchmakingMessages.$inferSelect;
+export type NewMatchmakingMessage = typeof matchmakingMessages.$inferInsert;
+
+export type MatchmakingReport = typeof matchmakingReports.$inferSelect;
+export type NewMatchmakingReport = typeof matchmakingReports.$inferInsert;
 

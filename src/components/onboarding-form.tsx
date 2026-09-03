@@ -20,6 +20,7 @@ export function OnboardingForm() {
         name: String(fd.get("name") ?? ""),
         age: Number(fd.get("age")),
         gender: String(fd.get("gender") ?? ""),
+        countryCode: String(fd.get("countryCode") ?? "IN").toUpperCase(),
         hobbies: String(fd.get("hobbies") ?? "")
           .split(",")
           .map((s) => s.trim())
@@ -54,27 +55,50 @@ export function OnboardingForm() {
             className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-3 text-base text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
           />
         </div>
-        <div className="grid gap-6 grid-cols-2">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Age</label>
-            <input
-              name="age"
-              type="number"
-              required
-              placeholder="28"
-              className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-3 text-base text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Gender</label>
-            <input
-              name="gender"
-              type="text"
-              required
-              placeholder="female"
-              className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-3 text-base text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
-            />
-          </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Country (ISO)</label>
+          <select
+            name="countryCode"
+            defaultValue="IN"
+            className="w-full rounded-xl border border-amber-500/30 bg-purple-950/80 px-4 py-3 text-base text-slate-100 focus:outline-none focus:border-amber-400 focus:bg-purple-900/90 transition-all"
+          >
+            <option value="IN">India (IN)</option>
+            <option value="US">United States (US)</option>
+            <option value="GB">United Kingdom (GB)</option>
+            <option value="CA">Canada (CA)</option>
+            <option value="AU">Australia (AU)</option>
+            <option value="DE">Germany (DE)</option>
+            <option value="FR">France (FR)</option>
+            <option value="SG">Singapore (SG)</option>
+            <option value="AE">United Arab Emirates (AE)</option>
+            <option value="JP">Japan (JP)</option>
+            <option value="WW">Other / Global</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid gap-6 grid-cols-2">
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Age (18+)</label>
+          <input
+            name="age"
+            type="number"
+            min={18}
+            max={120}
+            required
+            placeholder="24"
+            className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-3 text-base text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Gender</label>
+          <input
+            name="gender"
+            type="text"
+            required
+            placeholder="female / male / non-binary"
+            className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-3 text-base text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
+          />
         </div>
       </div>
 

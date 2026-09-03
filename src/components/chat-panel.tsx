@@ -303,7 +303,7 @@ export function ChatPanel({
     });
 
     const channel = supabase.channel(topic, {
-      config: { private: true, presence: { key: userId } },
+      config: { presence: { key: userId } },
     });
     channelRef.current = channel;
 
@@ -316,7 +316,7 @@ export function ChatPanel({
           table: "messages",
           filter: `couple_id=eq.${coupleId}`,
         },
-        (payload) => {
+        (payload: any) => {
           const row = payload.new as Record<string, unknown>;
           const msg: Msg = {
             id: String(row.id),
@@ -351,7 +351,7 @@ export function ChatPanel({
           table: "messages",
           filter: `couple_id=eq.${coupleId}`,
         },
-        (payload) => {
+        (payload: any) => {
           const row = payload.new as Record<string, unknown>;
           setMessages((prev) =>
             prev.map((m) =>
@@ -369,10 +369,10 @@ export function ChatPanel({
           );
         },
       )
-      .on("broadcast", { event: "typing:start" }, ({ payload }) => {
+      .on("broadcast", { event: "typing:start" }, ({ payload }: { payload: any }) => {
         if (payload.userId !== userId) setTyping(true);
       })
-      .on("broadcast", { event: "typing:stop" }, ({ payload }) => {
+      .on("broadcast", { event: "typing:stop" }, ({ payload }: { payload: any }) => {
         if (payload.userId !== userId) setTyping(false);
       })
       .on("presence", { event: "sync" }, () => {
@@ -381,7 +381,7 @@ export function ChatPanel({
         setPartnerOnline(others.length > 0);
       });
 
-    channel.subscribe(async (status) => {
+    channel.subscribe(async (status: string) => {
       if (disposed) return;
       if (status === "SUBSCRIBED") {
         setHealth("connected");

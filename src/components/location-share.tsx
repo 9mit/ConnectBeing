@@ -55,20 +55,18 @@ export function LocationShare({
     }
 
     const topic = `couple:${coupleId}:location`;
-    const channel = supabase.channel(topic, {
-      config: { private: true },
-    });
+    const channel = supabase.channel(topic);
     channelRef.current = channel;
 
     void authorizeRealtimeTopicAction(topic).then((auth) => {
       if (disposed || !auth.ok) return;
       channel
-        .on("broadcast", { event: "location" }, ({ payload }) => {
+        .on("broadcast", { event: "location" }, ({ payload }: { payload: any }) => {
           if (payload.userId !== userId) {
             setPartnerPos({ lat: payload.lat, lng: payload.lng });
           }
         })
-        .on("broadcast", { event: "location:off" }, ({ payload }) => {
+        .on("broadcast", { event: "location:off" }, ({ payload }: { payload: any }) => {
           if (payload.userId !== userId) setPartnerPos(null);
         })
         .subscribe();

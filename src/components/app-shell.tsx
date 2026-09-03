@@ -57,20 +57,21 @@ const moreGroups: Array<{
 const allMoreLinks = moreGroups.flatMap((g) => g.links);
 
 function HeaderPresenceControl() {
-  const { partnerOnline, nudgePartner, nudgePending } = usePresence();
+  const { partnerOnline, myStatus, toggleMyStatus, nudgePartner, nudgePending } = usePresence();
   const [toast, setToast] = useState<string | null>(null);
 
   async function handleNudge() {
     const res = await nudgePartner();
-    setToast(res.message || (res.ok ? "Nudge sent!" : "Failed"));
+    setToast(res.message || (res.ok ? "🔔 Ping sent!" : "Failed"));
     setTimeout(() => setToast(null), 3000);
   }
 
   return (
-    <div className="flex items-center gap-2 relative">
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-950/40 border border-amber-500/20 text-[10px] font-bold uppercase tracking-wider shadow-inner">
+    <div className="flex items-center gap-2 relative flex-wrap">
+      {/* Partner Presence Badge */}
+      <div className="flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full bg-purple-950/40 border border-amber-500/20 text-[10px] font-bold uppercase tracking-wider shadow-inner">
         <span
-          className={`h-2 w-2 rounded-full ${
+          className={`h-2 w-2 rounded-full transition-all ${
             partnerOnline
               ? "bg-amber-400 animate-pulse shadow-[0_0_10px_#fbbf24]"
               : "bg-slate-500"
@@ -81,12 +82,37 @@ function HeaderPresenceControl() {
         </span>
       </div>
 
+      {/* Manual On / Off Toggle Switch */}
+      <button
+        type="button"
+        onClick={toggleMyStatus}
+        title={
+          myStatus === "online"
+            ? "Your status is ONLINE. Click to turn OFF (appear offline)"
+            : "Your status is OFFLINE. Click to turn ON (appear online)"
+        }
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 ${
+          myStatus === "online"
+            ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+            : "border-slate-700 bg-slate-900/80 text-slate-400"
+        }`}
+      >
+        <span className="text-[9px] opacity-75">You:</span>
+        <span
+          className={`h-2 w-2 rounded-full transition-all ${
+            myStatus === "online" ? "bg-emerald-400 animate-pulse" : "bg-slate-500"
+          }`}
+        />
+        <span>{myStatus === "online" ? "ON" : "OFF"}</span>
+      </button>
+
+      {/* Ping / Nudge Button */}
       <button
         type="button"
         disabled={nudgePending}
         onClick={handleNudge}
         title="Ping your partner to connect"
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-[10px] font-bold uppercase tracking-widest text-amber-300 hover:bg-amber-500 hover:text-purple-950 transition-all active:scale-95 disabled:opacity-50 shadow-[0_0_12px_rgba(212,175,55,0.2)]"
+        className="flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-[10px] font-bold uppercase tracking-widest text-amber-300 hover:bg-amber-500 hover:text-purple-950 transition-all active:scale-95 disabled:opacity-50 shadow-[0_0_12px_rgba(212,175,55,0.2)]"
       >
         <span>🔔</span>
         <span>{nudgePending ? "Pinging…" : "Nudge"}</span>
@@ -122,24 +148,10 @@ export function AppShell({
     <PresenceProvider coupleId={coupleId} userId={userId}>
       <div className="min-h-screen bg-[#07020f] text-slate-100 flex flex-col font-sans select-none pb-24 md:pb-12 overflow-x-hidden selection:bg-amber-500/30 selection:text-amber-200">
         
-        {/* Background Ambient Glows */}
+        {/* Background Ambient Glows (Optimized CSS GPU Compositing — Zero Lag) */}
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-          <motion.div 
-            animate={{ 
-              opacity: [0.12, 0.22, 0.12],
-              scale: [1, 1.06, 1],
-            }}
-            transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute -top-[20%] -left-[10%] w-[55%] h-[55%] rounded-full bg-purple-900/30 blur-[130px]"
-          />
-          <motion.div 
-            animate={{ 
-              opacity: [0.08, 0.16, 0.08],
-              scale: [1, 1.08, 1],
-            }}
-            transition={{ duration: 16, repeat: Infinity, ease: "easeInOut", delay: 2 }}
-            className="absolute top-[40%] -right-[10%] w-[45%] h-[60%] rounded-full bg-amber-500/15 blur-[140px]"
-          />
+          <div className="absolute -top-[20%] -left-[10%] w-[55%] h-[55%] rounded-full bg-purple-900/20 blur-[120px] opacity-75 transform-gpu pointer-events-none" />
+          <div className="absolute top-[40%] -right-[10%] w-[45%] h-[60%] rounded-full bg-amber-500/10 blur-[130px] opacity-75 transform-gpu pointer-events-none" />
         </div>
 
         {/* Cinematic Top Navigation */}
@@ -203,11 +215,12 @@ export function AppShell({
             {/* Tools & Auth Controls */}
             <div className="flex items-center gap-3 relative z-10">
               {coupleId && userId ? (
-                <div className="hidden sm:flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3">
                   <HeaderPresenceControl />
-                  <Link
-                    href="/search"
-                    aria-label="Search"
+                  <div className="hidden sm:flex items-center gap-3">
+                    <Link
+                      href="/search"
+                      aria-label="Search"
                     className="p-2 rounded-full border border-amber-500/20 bg-purple-950/40 text-slate-300 hover:text-amber-300 hover:border-amber-500/40 transition-all"
                   >
                     <Search className="w-3.5 h-3.5" />
@@ -226,6 +239,7 @@ export function AppShell({
                   >
                     <User className="w-3.5 h-3.5" />
                   </Link>
+                  </div>
                 </div>
               ) : null}
 
