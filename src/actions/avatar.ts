@@ -117,15 +117,31 @@ export async function confirmAvatarUploadAction(
   }
 }
 
-/** Short-lived signed URL for an avatar storage key owned by a couple member. */
+/** Short-lived signed URL for an avatar storage key owned by the user or their couple partner. */
 export async function resolveAvatarUrlAction(
   storageKey: string | null | undefined,
 ): Promise<ActionResult<{ url: string | null }>> {
   try {
-    await requireOnboardedUser();
+    const user = await requireOnboardedUser();
     if (!storageKey || !storageKey.startsWith("avatars/")) {
       return ok({ url: null });
     }
+
+    const parts = storageKey.split("/");
+    if (parts.length < 3) {
+      throw new AppError("VALIDATION_ERROR", "Invalid avatar storage key format.", 400);
+    }
+
+    const targetUserId = parts[1];
+    const isOwnAvatar = targetUserId === user.id;
+    const isPartnerAvatar =
+      user.couple &&
+      (user.couple.userAId === targetUserId || user.couple.userBId === targetUserId);
+
+    if (!isOwnAvatar && !isPartnerAvatar) {
+      throw new AppError("FORBIDDEN", "Not authorized to access this avatar.", 403);
+    }
+
     const admin = createAdminClient();
     const { data: signed } = await admin.storage
       .from(AVATAR_BUCKET)

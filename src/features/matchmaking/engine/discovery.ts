@@ -70,21 +70,32 @@ export async function getNextCandidateForUser(
   if (!best) return null;
 
   // 6. Apply Strict Privacy Filter
-  return toPrivacySafeMatchCard(best.candidate, best.result.reasons, best.result.compatibilityLevel);
+  return toPrivacySafeMatchCard(
+    best.candidate,
+    best.result.reasons,
+    best.result.compatibilityLevel,
+    userId,
+  );
 }
 
 /**
  * Strict Privacy Filter:
  * Strips all personal identifiers, email, real names, exact locations,
- * and returns only high-level compatibility themes.
+ * and returns only high-level compatibility themes with an opaque token.
  */
 export function toPrivacySafeMatchCard(
   candidate: MatchmakingProfile,
   matchReasons: string[],
   compatibilityLevel: PrivacySafeMatchCard["compatibilityLevel"],
+  viewerUserId?: string,
 ): PrivacySafeMatchCard {
+  const { generateCandidateToken } = require("./tokens");
+  const candidateToken = viewerUserId
+    ? generateCandidateToken(candidate.userId, viewerUserId)
+    : candidate.userId;
+
   return {
-    candidateId: candidate.userId, // Will be mapped to opaque candidate token in action
+    candidateId: candidateToken,
     countryCode: candidate.countryCode.toUpperCase(),
     age: candidate.age,
     interests: candidate.interests || [],

@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, lt, or } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 import { db } from "@/db";
@@ -252,9 +252,13 @@ export async function getEphemeralSignedUrlAction(
       throw new AppError("NOT_FOUND", "Media no longer available.", 404);
     }
 
-    // Recipient-only: sender should not re-open view-once media
-    if (media.senderId === user.id && media.status !== "delivered") {
-      throw new AppError("FORBIDDEN", "Already viewed or unavailable.", 403);
+    // View-once media is strictly recipient-only. Senders cannot re-open.
+    if (media.senderId === user.id) {
+      throw new AppError("FORBIDDEN", "View-once media can only be opened by the recipient.", 403);
+    }
+
+    if (media.status !== "delivered") {
+      throw new AppError("FORBIDDEN", "Media has already been viewed or has expired.", 403);
     }
 
     const admin = createAdminClient();
@@ -266,17 +270,51 @@ export async function getEphemeralSignedUrlAction(
       throw new AppError("INTERNAL_ERROR", "Could not sign media URL.", 500);
     }
 
-    if (media.senderId !== user.id && media.status === "delivered") {
-      await db
-        .update(ephemeralMedia)
-        .set({ status: "viewed", viewedAt: new Date() })
-        .where(eq(ephemeralMedia.id, media.id));
-    }
+    // Mark as viewed immediately to prevent repeated opens
+    await db
+      .update(ephemeralMedia)
+      .set({ status: "viewed", viewedAt: new Date() })
+      .where(eq(ephemeralMedia.id, media.id));
 
     return ok({ url: data.signedUrl });
   } catch (e) {
     return fail(e);
   }
+}
+
+/**
+ * Server-only background cleaner: Deletes expired ephemeral media storage objects
+ * (e.g., viewed > 10 mins ago, or unviewed > 24 hours).
+ */
+export async function purgeExpiredEphemeralMedia(): Promise<{ purged: number }> {
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const expiredRows = await db.query.ephemeralMedia.findMany({
+    where: or(
+      and(eq(ephemeralMedia.status, "viewed"), lt(ephemeralMedia.viewedAt, tenMinutesAgo)),
+      and(eq(ephemeralMedia.status, "delivered"), lt(ephemeralMedia.createdAt, twentyFourHoursAgo)),
+    ),
+    limit: 50,
+  });
+
+  let purged = 0;
+  for (const row of expiredRows) {
+    if (row.storageKey) {
+      try {
+        await removeStorageObject(row.storageKey);
+      } catch {
+        // Storage object may already be removed
+      }
+    }
+    await db
+      .update(ephemeralMedia)
+      .set({ status: "deleted", deletedAt: new Date(), storageKey: null })
+      .where(eq(ephemeralMedia.id, row.id));
+    purged++;
+  }
+
+  return { purged };
 }
 
 export async function confirmMemoryUploadAction(

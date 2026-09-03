@@ -199,5 +199,14 @@ export async function runNightlyCalibrationJob() {
     console.error("[cron] verification rotate failed");
   }
 
-  return { processed, verification };
+  let ephemeralPurged = 0;
+  try {
+    const { purgeExpiredEphemeralMedia } = await import("@/actions/media");
+    const res = await purgeExpiredEphemeralMedia();
+    ephemeralPurged = res.purged;
+  } catch {
+    console.error("[cron] ephemeral media purge failed");
+  }
+
+  return { processed, verification, ephemeralPurged };
 }

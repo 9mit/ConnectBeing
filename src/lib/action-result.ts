@@ -31,8 +31,7 @@ export function fail(error: unknown): ActionResult<never> {
       ok: false,
       error: {
         code: "INTERNAL_ERROR",
-        message:
-          "Database is temporarily unavailable. Check DATABASE_URL uses the Supabase pooler.",
+        message: "Database is temporarily unavailable. Please try again shortly.",
       },
     };
   }

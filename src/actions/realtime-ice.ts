@@ -37,9 +37,6 @@ export async function getTurnCredentialsAction(): Promise<
     const turnSecret = process.env.TURN_SECRET;
     const turnUsername = process.env.TURN_USERNAME;
     const turnCredential = process.env.TURN_CREDENTIAL;
-    // Legacy fallback only for local/dev migration
-    const publicUser = process.env.NEXT_PUBLIC_TURN_USERNAME;
-    const publicCred = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
 
     const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
 
@@ -58,12 +55,6 @@ export async function getTurnCredentialsAction(): Promise<
         urls: turnUrls,
         username: turnUsername,
         credential: turnCredential,
-      });
-    } else if (publicUser && publicCred) {
-      iceServers.push({
-        urls: turnUrls,
-        username: publicUser,
-        credential: publicCred,
       });
     } else if (process.env.NODE_ENV === "production") {
       throw new AppError(

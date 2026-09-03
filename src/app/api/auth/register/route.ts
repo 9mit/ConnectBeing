@@ -129,11 +129,9 @@ export async function POST(request: NextRequest) {
     applyCookies(response, pendingCookies);
     return response;
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : "Internal server error.";
-    console.error("[register API] unexpected error:", err);
+    console.error("[register API] unexpected error:", err instanceof Error ? err.name : "unknown");
     return NextResponse.json(
-      { ok: false, error: { message } },
+      { ok: false, error: { message: "Internal server error. Please try again." } },
       { status: 500 },
     );
   }

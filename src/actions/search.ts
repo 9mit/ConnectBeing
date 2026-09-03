@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, lte, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
@@ -121,14 +121,18 @@ export async function searchCoupleDataAction(
       }
     }
 
-    // Search Time Capsules
+    // Search Time Capsules (only search message text if capsule is unlocked)
     if (parsed.category === "all" || parsed.category === "capsules") {
+      const now = new Date();
       const capRows = await db.query.timeCapsules.findMany({
         where: and(
           eq(timeCapsules.coupleId, couple.id),
           or(
             ilike(timeCapsules.title, q),
-            ilike(timeCapsules.message, q),
+            and(
+              or(eq(timeCapsules.isUnlocked, true), lte(timeCapsules.unlockAt, now)),
+              ilike(timeCapsules.message, q),
+            ),
           ),
         ),
         orderBy: [desc(timeCapsules.createdAt)],
@@ -136,11 +140,14 @@ export async function searchCoupleDataAction(
       });
 
       for (const tc of capRows) {
+        const canViewMessage = tc.isUnlocked || tc.unlockAt <= now;
         results.push({
           id: `cap-${tc.id}`,
           category: "capsules",
           title: tc.title,
-          snippet: tc.isUnlocked ? tc.message.slice(0, 80) + "…" : "Locked until " + tc.unlockAt.toLocaleDateString(),
+          snippet: canViewMessage
+            ? tc.message.slice(0, 80) + "…"
+            : "Locked until " + tc.unlockAt.toLocaleDateString(),
           date: tc.createdAt.toISOString(),
           link: "/timeline",
         });

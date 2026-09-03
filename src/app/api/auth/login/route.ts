@@ -249,15 +249,13 @@ export async function POST(request: NextRequest) {
   } catch (err: unknown) {
     if (err instanceof SessionSecretError) {
       return NextResponse.json(
-        { ok: false, error: { message: err.message } },
+        { ok: false, error: { message: "Authentication service misconfigured." } },
         { status: 500 },
       );
     }
-    const message =
-      err instanceof Error ? err.message : "Internal server error.";
-    console.error("[login API] unexpected error:", err);
+    console.error("[login API] unexpected error:", err instanceof Error ? err.name : "unknown");
     return NextResponse.json(
-      { ok: false, error: { message } },
+      { ok: false, error: { message: "Internal server error. Please try again." } },
       { status: 500 },
     );
   }

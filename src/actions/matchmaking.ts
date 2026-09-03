@@ -21,6 +21,7 @@ import {
   getNextCandidateForUser,
   PrivacySafeMatchCard,
   MatchmakingProfileInput,
+  resolveCandidateId,
 } from "@/features/matchmaking";
 
 const profileSchema = z.object({
@@ -263,7 +264,17 @@ export async function respondToCandidateAction(
     const user = await requireAppUser();
     const parsed = interactionSchema.parse(input);
 
-    if (parsed.candidateId === user.id) {
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:match:respond:${user.id}`,
+      limit: 30,
+      windowSeconds: 60,
+      message: "Please slow down — taking a moment between profiles is encouraged.",
+    });
+
+    const candidateUserId = resolveCandidateId(parsed.candidateId, user.id);
+
+    if (candidateUserId === user.id) {
       throw new AppError("VALIDATION_ERROR", "Cannot interact with yourself.", 400);
     }
 
@@ -273,7 +284,7 @@ export async function respondToCandidateAction(
       .values({
         id: createId(),
         userId: user.id,
-        candidateId: parsed.candidateId,
+        candidateId: candidateUserId,
         action: parsed.action,
       })
       .onConflictDoUpdate({
@@ -289,7 +300,7 @@ export async function respondToCandidateAction(
     // 3. Check for Mutual Interest: Has candidate also marked "interested" for user?
     const candidateInteraction = await db.query.matchmakingInteractions.findFirst({
       where: and(
-        eq(matchmakingInteractions.userId, parsed.candidateId),
+        eq(matchmakingInteractions.userId, candidateUserId),
         eq(matchmakingInteractions.candidateId, user.id),
         eq(matchmakingInteractions.action, "interested"),
       ),
@@ -304,10 +315,10 @@ export async function respondToCandidateAction(
       where: or(
         and(
           eq(matchmakingConnections.userAId, user.id),
-          eq(matchmakingConnections.userBId, parsed.candidateId),
+          eq(matchmakingConnections.userBId, candidateUserId),
         ),
         and(
-          eq(matchmakingConnections.userAId, parsed.candidateId),
+          eq(matchmakingConnections.userAId, candidateUserId),
           eq(matchmakingConnections.userBId, user.id),
         ),
       ),
@@ -318,7 +329,7 @@ export async function respondToCandidateAction(
         where: eq(matchmakingProfiles.userId, user.id),
       });
       const candidateProfile = await db.query.matchmakingProfiles.findFirst({
-        where: eq(matchmakingProfiles.userId, parsed.candidateId),
+        where: eq(matchmakingProfiles.userId, candidateUserId),
       });
 
       const comp =
@@ -330,7 +341,7 @@ export async function respondToCandidateAction(
       await db.insert(matchmakingConnections).values({
         id: connectionId,
         userAId: user.id,
-        userBId: parsed.candidateId,
+        userBId: candidateUserId,
         status: "connected",
         compatibilityScore: comp.overallScore,
         compatibilityReasons: comp.reasons,
@@ -472,6 +483,14 @@ export async function sendConnectionMessageAction(
     const user = await requireAppUser();
     const parsed = messageSchema.parse(input);
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:match:msg:${user.id}`,
+      limit: 30,
+      windowSeconds: 60,
+      message: "Too many messages sent. Please slow down.",
+    });
+
     const conn = await db.query.matchmakingConnections.findFirst({
       where: and(
         eq(matchmakingConnections.id, parsed.connectionId),
@@ -511,11 +530,13 @@ export async function reportAndBlockCandidateAction(
     const user = await requireAppUser();
     const parsed = reportSchema.parse(input);
 
+    const candidateUserId = resolveCandidateId(parsed.candidateId, user.id);
+
     // 1. Log report
     await db.insert(matchmakingReports).values({
       id: createId(),
       reporterId: user.id,
-      reportedUserId: parsed.candidateId,
+      reportedUserId: candidateUserId,
       category: parsed.category,
       details: parsed.details,
     });
@@ -526,7 +547,7 @@ export async function reportAndBlockCandidateAction(
       .values({
         id: createId(),
         userId: user.id,
-        candidateId: parsed.candidateId,
+        candidateId: candidateUserId,
         action: "blocked",
         reason: parsed.category,
       })
@@ -543,10 +564,10 @@ export async function reportAndBlockCandidateAction(
         or(
           and(
             eq(matchmakingConnections.userAId, user.id),
-            eq(matchmakingConnections.userBId, parsed.candidateId),
+            eq(matchmakingConnections.userBId, candidateUserId),
           ),
           and(
-            eq(matchmakingConnections.userAId, parsed.candidateId),
+            eq(matchmakingConnections.userAId, candidateUserId),
             eq(matchmakingConnections.userBId, user.id),
           ),
         ),

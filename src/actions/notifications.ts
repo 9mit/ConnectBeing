@@ -106,6 +106,14 @@ export async function sendNotificationToPartnerAction(
     const parsed = createNotificationSchema.parse(input);
     const { user, couple } = await requireActiveCouple();
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:notify:${user.id}`,
+      limit: 20,
+      windowSeconds: 60,
+      message: "Slow down — too many notifications sent.",
+    });
+
     const partnerId =
       couple.userAId === user.id ? couple.userBId : couple.userAId;
 

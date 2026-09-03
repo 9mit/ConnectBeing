@@ -1,6 +1,6 @@
 "use server";
 
-import { count, eq } from "drizzle-orm";
+import { count, eq, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -140,7 +140,7 @@ export async function requestCoupleDataDeletionAction(): Promise<
   try {
     const { couple } = await requireActiveCouple();
 
-    // Mark couple status as dissolved and clean up references
+    // 1. Mark couple status as dissolved
     await db
       .update(couples)
       .set({
@@ -148,6 +148,26 @@ export async function requestCoupleDataDeletionAction(): Promise<
         dissolvedAt: new Date(),
       })
       .where(eq(couples.id, couple.id));
+
+    // 2. Unlink both users so they are not permanently locked to dissolved couple
+    await db
+      .update(users)
+      .set({ coupleId: null, updatedAt: new Date() })
+      .where(or(eq(users.id, couple.userAId), eq(users.id, couple.userBId)));
+
+    // 3. Purge couple-level Redis keys
+    try {
+      const { redis } = await import("@/lib/redis");
+      await Promise.all([
+        redis.del(`verify:code:${couple.id}`),
+        redis.del(`partner-joined:${couple.userAId}`),
+        redis.del(`partner-joined:${couple.userBId}`),
+        redis.del(`presence:couple:${couple.id}:${couple.userAId}`),
+        redis.del(`presence:couple:${couple.id}:${couple.userBId}`),
+      ]);
+    } catch {
+      // Best-effort Redis purge
+    }
 
     return ok({ scheduled: true });
   } catch (e) {
