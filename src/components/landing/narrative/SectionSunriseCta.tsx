@@ -2,17 +2,17 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { ArrowRight, ShieldCheck, Lock, Sparkles, Heart } from "lucide-react";
+import { ArrowRight, ShieldCheck, Lock, Heart } from "lucide-react";
 
 import { LANDING_CHAPTERS, SITE } from "@/content/site";
 
 export function SectionSunriseCta() {
-  const { aria, line1, line2Prefix, line2Em } = LANDING_CHAPTERS.cta;
+  const { aria } = LANDING_CHAPTERS.cta;
 
   return (
     <section
       id="security"
-      className="landing-section relative py-28 px-4 text-center border-t border-white/10"
+      className="landing-section relative py-24 md:py-32 px-4 text-center"
       aria-label={aria}
     >
       <div className="relative z-10 mx-auto max-w-4xl flex flex-col items-center space-y-8">
@@ -21,10 +21,9 @@ export function SectionSunriseCta() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.5 }}
         >
-          <div className="sanctuary-pill">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>Your Sanctuary Awaits</span>
-          </div>
+          <p className="font-mono text-[10px] md:text-[11px] uppercase tracking-[0.28em] text-zinc-400/80">
+            Chapter V · Your Sanctuary Awaits
+          </p>
         </motion.div>
 
         {/* Editorial Heading */}
@@ -36,11 +35,13 @@ export function SectionSunriseCta() {
           transition={{ duration: 0.8 }}
         >
           You found your person. <br />
-          <span className="italic font-light text-sky-400">Now build your universe.</span>
+          <span className="font-serif italic font-normal text-[#f4efe4]">
+            Now build your universe.
+          </span>
         </motion.h2>
 
         <motion.p
-          className="max-w-xl text-base text-zinc-300 font-sans font-light leading-relaxed"
+          className="max-w-xl text-sm md:text-base text-zinc-300/80 font-sans font-light leading-relaxed"
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
           viewport={{ once: true, amount: 0.5 }}
@@ -51,7 +52,7 @@ export function SectionSunriseCta() {
 
         {/* Action Buttons */}
         <motion.div
-          className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto"
+          className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto"
           initial={{ opacity: 0, y: 12 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.5 }}
@@ -62,7 +63,7 @@ export function SectionSunriseCta() {
             className="btn-cta-primary w-full sm:w-auto"
           >
             <span>Begin Our Story</span>
-            <ArrowRight className="w-4 h-4" />
+            <ArrowRight className="w-3.5 h-3.5" />
           </Link>
 
           <Link
@@ -73,32 +74,36 @@ export function SectionSunriseCta() {
           </Link>
         </motion.div>
 
-        {/* Trust Seals Strip */}
+        {/* Unboxed Trust Seals */}
         <motion.div
-          className="pt-8 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-2xl text-left text-xs"
+          className="pt-8 pb-4 flex flex-wrap items-center justify-center gap-6 text-xs font-mono text-zinc-400 border-t border-white/[0.06] w-full max-w-2xl"
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
           viewport={{ once: true, amount: 0.5 }}
           transition={{ duration: 0.8, delay: 0.35 }}
         >
-          <div className="p-3 bg-black/40 border border-white/10 rounded-xl flex items-center gap-2.5">
-            <Lock className="w-4 h-4 text-sky-400 shrink-0" />
-            <span className="text-zinc-300">ECDH P-256 E2EE Chat</span>
-          </div>
+          <span className="flex items-center gap-2">
+            <Lock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <span className="text-zinc-300">ECDH P-256 E2EE</span>
+          </span>
 
-          <div className="p-3 bg-black/40 border border-white/10 rounded-xl flex items-center gap-2.5">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-zinc-300">0 Third-Party Trackers</span>
-          </div>
+          <span className="hidden sm:inline text-zinc-600">·</span>
 
-          <div className="p-3 bg-black/40 border border-white/10 rounded-xl flex items-center gap-2.5">
-            <Heart className="w-4 h-4 text-rose-400 shrink-0" />
-            <span className="text-zinc-300">Strictly 2 Devices</span>
-          </div>
+          <span className="flex items-center gap-2">
+            <ShieldCheck className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <span className="text-zinc-300">Zero Third-Party Trackers</span>
+          </span>
+
+          <span className="hidden sm:inline text-zinc-600">·</span>
+
+          <span className="flex items-center gap-2">
+            <Heart className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <span className="text-zinc-300">Strictly Two Devices</span>
+          </span>
         </motion.div>
 
         {/* Minimal Editorial Footer */}
-        <div className="pt-16 border-t border-white/10 w-full flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-500">
+        <div className="pt-12 border-t border-white/[0.06] w-full flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-500">
           <div className="flex items-center gap-2">
             <span className="text-zinc-300 font-bold font-serif">{SITE.brandMark}</span>
             <span>· A sanctuary for two</span>

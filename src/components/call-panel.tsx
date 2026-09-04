@@ -94,7 +94,11 @@ export function CallPanel({
 
   const attachLocalMedia = useCallback(
     async (pc: RTCPeerConnection) => {
-      let stream: MediaStream;
+      let stream: MediaStream | null = null;
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        console.warn("getUserMedia is not supported in this browser environment");
+        return null;
+      }
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -109,21 +113,28 @@ export function CallPanel({
         });
       } catch {
         // Fall back gracefully to audio-only if camera is unavailable or denied
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-          video: false,
-        });
-        setCameraOn(false);
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+            video: false,
+          });
+          setCameraOn(false);
+        } catch {
+          console.warn("Microphone access denied or unavailable");
+          setCameraOn(false);
+          stream = null;
+        }
       }
+      if (!stream) return null;
       localStreamRef.current = stream;
       stream.getAudioTracks().forEach((t) => {
         t.enabled = false;
       });
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+      stream.getTracks().forEach((t) => pc.addTrack(t, stream!));
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       setMicEnabled(false);
       return stream;

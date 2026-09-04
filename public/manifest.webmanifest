@@ -1,11 +1,12 @@
 {
-  "name": "MadLove",
+  "name": "MadLove — A Sanctuary for Two",
   "short_name": "MadLove",
-  "description": "Privacy-first couple space",
+  "description": "A cinematic, privacy-first digital sanctuary for two.",
   "start_url": "/dashboard",
   "display": "standalone",
-  "background_color": "#fff1f2",
-  "theme_color": "#881337",
+  "background_color": "#020106",
+  "theme_color": "#020106",
+  "orientation": "portrait-primary",
   "icons": [
     {
       "src": "/icons/icon.svg",

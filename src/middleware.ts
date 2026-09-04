@@ -7,6 +7,10 @@ const PUBLIC_PATHS = new Set([
   "/register",
   "/invite",
   "/forgot-password",
+  "/privacy",
+  "/security",
+  "/robots.txt",
+  "/sitemap.xml",
   "/sw.js",
   "/manifest.webmanifest",
 ]);
@@ -20,6 +24,7 @@ function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/api/cron/")) return true;
   if (pathname.startsWith("/api/health")) return true;
   if (pathname.startsWith("/icons/")) return true;
+  if (/\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|mp4|webm|ogg|mp3|wav)$/i.test(pathname)) return true;
   return false;
 }
 
@@ -47,6 +52,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|robots\\.txt|sitemap\\.xml|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|mp4|webm|ogg|mp3|wav)$).*)",
   ],
 };

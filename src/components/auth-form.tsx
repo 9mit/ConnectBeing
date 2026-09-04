@@ -21,7 +21,7 @@ function zodFieldErrors(error: {
 }
 
 const inputBase =
-  "w-full rounded-2xl bg-purple-950/40 px-5 py-3.5 text-base text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-purple-900/60 transition-all";
+  "w-full rounded-xl bg-white/[0.03] border border-white/10 px-4 py-3 text-sm text-[#fbf9f4] placeholder-zinc-500 focus:outline-none focus:border-sky-400/60 focus:bg-white/[0.06] transition-all";
 
 export function AuthForm({
   mode,
@@ -80,40 +80,29 @@ export function AuthForm({
         const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
           body: JSON.stringify(payload),
         });
 
-        const data = await res.json().catch(() => null);
-
-        if (!res.ok || !data?.ok) {
-          setError(
-            data?.error?.message ||
-              "An error occurred during authentication. Please try again.",
-          );
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Authentication failed. Please check credentials.");
           return;
         }
 
-        if (data.redirectTo) {
-          window.location.href = data.redirectTo;
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Network error during authentication. Try again.";
-        setError(msg);
+        // Seamless redirection
+        window.location.href = data.redirect || "/dashboard";
+      } catch {
+        setError("Network connection error. Please try again.");
       }
     });
   }
 
   return (
-    <form
-      noValidate
-      onSubmit={onSubmit}
-      className="mx-auto w-full max-w-md space-y-5 p-6 md:p-8 rounded-3xl bg-purple-950/50 border border-amber-500/30 backdrop-blur-2xl shadow-[0_0_35px_rgba(212,175,55,0.15)]"
-    >
-      <div className="space-y-2">
+    <form onSubmit={onSubmit} className="w-full space-y-5" noValidate>
+      <div className="space-y-1.5">
         <label
           htmlFor="auth-email"
-          className="text-xs font-semibold uppercase tracking-wider text-amber-300/90"
+          className="text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-400 font-medium"
         >
           Email Address
         </label>
@@ -122,89 +111,89 @@ export function AuthForm({
           name="email"
           type="email"
           autoComplete="email"
-          placeholder="your@email.com"
+          placeholder="two-souls@madlove.app"
           aria-invalid={!!fieldErrors.email}
           aria-describedby={fieldErrors.email ? "auth-email-error" : undefined}
-          className={`${inputBase} border ${
+          className={`${inputBase} ${
             fieldErrors.email
-              ? "border-red-500/70 focus:border-red-500"
-              : "border-amber-500/20 focus:border-amber-400"
+              ? "border-rose-500/70 focus:border-rose-400"
+              : "border-white/10"
           }`}
         />
         {fieldErrors.email ? (
-          <p id="auth-email-error" className="text-xs font-medium text-amber-300" role="alert">
+          <p id="auth-email-error" className="text-xs font-mono text-rose-300" role="alert">
             {fieldErrors.email}
           </p>
         ) : null}
       </div>
 
-      <div className="space-y-2">
-        <label
-          htmlFor="auth-password"
-          className="text-xs font-semibold uppercase tracking-wider text-amber-300/90"
-        >
-          Password
-        </label>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label
+            htmlFor="auth-password"
+            className="text-[11px] font-mono uppercase tracking-[0.18em] text-zinc-400 font-medium"
+          >
+            Password
+          </label>
+          {mode === "login" && (
+            <Link
+              href="/forgot-password"
+              className="text-[11px] font-sans text-zinc-400 hover:text-white transition-colors"
+            >
+              Forgot Password?
+            </Link>
+          )}
+        </div>
         <input
           id="auth-password"
           name="password"
           type="password"
           autoComplete={mode === "login" ? "current-password" : "new-password"}
-          placeholder="At least 8 characters"
+          placeholder="••••••••"
           aria-invalid={!!fieldErrors.password}
           aria-describedby={
             fieldErrors.password ? "auth-password-error" : undefined
           }
-          className={`${inputBase} border ${
+          className={`${inputBase} ${
             fieldErrors.password
-              ? "border-red-500/70 focus:border-red-500"
-              : "border-amber-500/20 focus:border-amber-400"
+              ? "border-rose-500/70 focus:border-rose-400"
+              : "border-white/10"
           }`}
         />
         {fieldErrors.password ? (
           <p
             id="auth-password-error"
-            className="text-xs font-medium text-amber-300"
+            className="text-xs font-mono text-rose-300"
             role="alert"
           >
             {fieldErrors.password}
           </p>
         ) : null}
-        {mode === "login" && (
-          <div className="flex justify-end pt-1">
-            <Link
-              href="/forgot-password"
-              className="text-xs font-medium text-amber-300 hover:text-amber-100 transition-colors"
-            >
-              Forgot Password?
-            </Link>
-          </div>
-        )}
       </div>
 
       {error ? (
-        <p
-          className="text-xs font-semibold text-amber-200 bg-purple-950/80 border border-amber-500/40 px-4 py-3 rounded-2xl text-center shadow-lg"
+        <div
+          className="text-xs font-sans text-rose-200 bg-rose-500/10 border border-rose-500/25 px-4 py-2.5 rounded-xl text-center"
           role="alert"
         >
           {error}
-        </p>
+        </div>
       ) : null}
 
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 py-3.5 text-sm font-extrabold text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-60 transition-all shadow-[0_0_20px_rgba(212,175,55,0.4)] hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+        className="w-full rounded-full bg-[#fbf9f4] text-[#0c0d0e] py-3.5 text-xs font-bold uppercase tracking-[0.14em] hover:bg-white hover:shadow-[0_4px_20px_rgba(251,249,244,0.2)] disabled:opacity-50 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
       >
         {pending ? (
           <span className="flex items-center justify-center gap-2">
-            <span className="h-4 w-4 border-2 border-purple-950/30 border-t-purple-950 rounded-full animate-spin" />
-            Processing…
+            <span className="h-3.5 w-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+            <span>Connecting to Sanctuary…</span>
           </span>
         ) : mode === "login" ? (
-          "Sign In"
+          "Enter Sanctuary"
         ) : (
-          "Create Account"
+          "Create Private Account"
         )}
       </button>
     </form>

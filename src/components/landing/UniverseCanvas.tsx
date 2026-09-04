@@ -140,92 +140,6 @@ function CinematicCamera({ progressRef }: { progressRef: MutableRefObject<number
   return null;
 }
 
-function CinematicPostEffect({ progressRef }: { progressRef: MutableRefObject<number> }) {
-  const mesh = useRef<THREE.Mesh>(null);
-
-  const material = useMemo(() => {
-    return new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      depthTest: false,
-      blending: THREE.NormalBlending,
-      uniforms: {
-        uTime: { value: 0 },
-        uWarmth: { value: 0 },
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform float uTime;
-        uniform float uWarmth;
-        varying vec2 vUv;
-
-        float hash(vec2 p) {
-          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-        }
-
-        void main() {
-          vec2 uv = vUv;
-          vec2 dist = uv - 0.5;
-          
-          // Subtle chromatic aberration at corners
-          float abAmount = 0.003 * length(dist) * (1.0 - uWarmth * 0.6); 
-          
-          // Cinematic Vignette: darker borders that lighten up near sunrise
-          float vign = length(dist);
-          float vigStrength = mix(0.55, 0.15, uWarmth);
-          vign = smoothstep(0.8, 0.35, vign * vigStrength);
-
-          // Fine film grain noise overlay
-          float noise = hash(uv + fract(uTime)) * 0.035;
-          noise *= (1.0 - uWarmth * 0.65);
-
-          // Soft volumetric mist glow (magenta and orange hues)
-          vec3 bloomColor = mix(vec3(0.08, 0.04, 0.16), vec3(0.98, 0.72, 0.52), uWarmth);
-          float glow = (1.0 - length(dist * 1.4)) * 0.12 * uWarmth;
-          glow = max(0.0, glow);
-
-          vec3 finalOverlay = bloomColor * glow;
-          float alpha = (1.0 - vign) * 0.65 + noise; 
-          
-          gl_FragColor = vec4(finalOverlay, alpha);
-        }
-      `,
-    });
-  }, []);
-
-  useFrame((state) => {
-    material.uniforms.uTime.value = state.clock.elapsedTime;
-    material.uniforms.uWarmth.value = progressRef.current;
-
-    if (mesh.current) {
-      // Position the overlay quad exactly in front of the camera (depth 0.1)
-      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(state.camera.quaternion);
-      mesh.current.position.copy(state.camera.position).addScaledVector(dir, 0.1);
-      mesh.current.quaternion.copy(state.camera.quaternion);
-      
-      // Calculate dynamic scale matching viewport frustum at depth 0.1
-      const distance = 0.1;
-      const fovRad = ((state.camera as THREE.PerspectiveCamera).fov * Math.PI) / 180;
-      const height = 2 * Math.tan(fovRad / 2) * distance;
-      const width = height * (state.size.width / state.size.height);
-      
-      mesh.current.scale.set(width, height, 1);
-    }
-  });
-
-  return (
-    <mesh ref={mesh} material={material}>
-      <planeGeometry args={[1, 1]} />
-    </mesh>
-  );
-}
-
 function Scene({
   progressRef,
   mouse,
@@ -259,7 +173,6 @@ function Scene({
       <fogExp2 attach="fog" args={["#03010a", 0.015]} />
       <Starfield progressRef={progressRef} count={starCount} />
       <MouseWarp mouse={mouse} progressRef={progressRef} />
-      <TwinStars progressRef={progressRef} onSequenceComplete={onHeroComplete} />
       <DistanceParticles progressRef={progressRef} />
       <MemoryFragments
         progressRef={progressRef}
@@ -270,7 +183,6 @@ function Scene({
       <AiConstellation progressRef={progressRef} />
       <SpiritPet progressRef={progressRef} />
       <CinematicCamera progressRef={progressRef} />
-      <CinematicPostEffect progressRef={progressRef} />
     </>
   );
 }

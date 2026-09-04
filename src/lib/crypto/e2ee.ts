@@ -122,7 +122,14 @@ export async function loadOrCreatePrivateKey(
 
   // One-time migrate from legacy localStorage exportable keys
   const storageKey = `${STORAGE_PREFIX}${userId}`;
-  const legacy = localStorage.getItem(storageKey);
+  let legacy: string | null = null;
+  try {
+    if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
+      legacy = localStorage.getItem(storageKey);
+    }
+  } catch {
+    // localStorage may be restricted or blocked in private browsing mode
+  }
   if (legacy) {
     try {
       const parsed = JSON.parse(legacy) as {
@@ -132,10 +139,18 @@ export async function loadOrCreatePrivateKey(
       const privateKey = await importPrivateKeyNonExtractable(parsed.privateKey);
       const publicKey = await importPublicKey(parsed.publicKey);
       await idbPut(userId, { privateKey, publicKey });
-      localStorage.removeItem(storageKey);
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {
+        /* ignore */
+      }
       return { privateKey, publicKey };
     } catch {
-      localStorage.removeItem(storageKey);
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
