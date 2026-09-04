@@ -8,9 +8,10 @@ import { couples, roomCustomizations } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { createId } from "@/lib/ids";
+import { ROOM_THEMES } from "@/lib/themes";
 
 const updateSettingsSchema = z.object({
-  theme: z.enum(["rose-dusk", "midnight-violet", "imperial-gold", "celestial-sky"]).optional(),
+  theme: z.enum(ROOM_THEMES).optional(),
   petName: z.string().trim().min(1).max(40).optional(),
   decor: z.record(z.string(), z.unknown()).optional(),
 });

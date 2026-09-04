@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, gt, inArray, isNull, lt, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import { messages } from "@/db/schema";
@@ -169,12 +169,12 @@ export async function syncMessagesSinceAction(
         eq(messages.coupleId, couple.id),
         gt(messages.createdAt, sinceDate),
       ),
-      orderBy: [desc(messages.createdAt), desc(messages.id)],
+      orderBy: [asc(messages.createdAt), asc(messages.id)],
       limit: limit + 1,
     });
 
     const hasMore = rows.length > limit;
-    const page = (hasMore ? rows.slice(0, limit) : rows).reverse();
+    const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
 
     return ok({

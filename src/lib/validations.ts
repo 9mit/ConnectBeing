@@ -17,8 +17,10 @@ export const registerSchema = z.object({
   password: passwordSchema,
   inviteToken: z
     .string()
+    .trim()
     .regex(/^[a-f0-9]{64}$/i, "Invalid invite token")
-    .optional(),
+    .optional()
+    .or(z.literal("")),
 });
 
 export const loginSchema = z.object({

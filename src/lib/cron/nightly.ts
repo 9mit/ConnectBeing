@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -8,6 +8,7 @@ import {
   couples,
   moods,
   quizResponses,
+  type Couple,
 } from "@/db/schema";
 import { petStateFromScore } from "@/lib/date-ist";
 import { getEngagementMeta, getEngagementScore } from "@/lib/engagement";
@@ -132,15 +133,22 @@ export async function runNightlyCalibrationJob() {
 
   const PAGE = 50;
   let processed = 0;
-  let offset = 0;
+  let lastCalibrationId: string | undefined = undefined;
+
   for (;;) {
-    const active = await db.query.couples.findMany({
-      where: and(eq(couples.status, "active"), eq(couples.isCalibrated, false)),
+    const active: Couple[] = await db.query.couples.findMany({
+      where: lastCalibrationId
+        ? and(
+            eq(couples.status, "active"),
+            eq(couples.isCalibrated, false),
+            gt(couples.id, lastCalibrationId),
+          )
+        : and(eq(couples.status, "active"), eq(couples.isCalibrated, false)),
+      orderBy: [asc(couples.id)],
       limit: PAGE,
-      offset,
     });
     if (!active.length) break;
-    offset += active.length;
+    lastCalibrationId = active[active.length - 1].id;
 
     for (const couple of active) {
       try {
@@ -173,20 +181,31 @@ export async function runNightlyCalibrationJob() {
     if (active.length < PAGE) break;
   }
 
-  const allActive = await db.query.couples.findMany({
-    where: eq(couples.status, "active"),
-    limit: 200,
-  });
-  for (const couple of allActive) {
-    try {
-      const score = await getEngagementScore(couple.id);
-      await db
-        .update(couples)
-        .set({ petState: petStateFromScore(score) })
-        .where(eq(couples.id, couple.id));
-    } catch {
-      console.error("[cron] pet flush failed", couple.id);
+  // Cursor-based batch update for all active couples' pet state
+  let lastActiveId: string | undefined = undefined;
+  for (;;) {
+    const batch: Couple[] = await db.query.couples.findMany({
+      where: lastActiveId
+        ? and(eq(couples.status, "active"), gt(couples.id, lastActiveId))
+        : eq(couples.status, "active"),
+      orderBy: [asc(couples.id)],
+      limit: 100,
+    });
+    if (!batch.length) break;
+    lastActiveId = batch[batch.length - 1].id;
+
+    for (const couple of batch) {
+      try {
+        const score = await getEngagementScore(couple.id);
+        await db
+          .update(couples)
+          .set({ petState: petStateFromScore(score) })
+          .where(eq(couples.id, couple.id));
+      } catch {
+        console.error("[cron] pet flush failed", couple.id);
+      }
     }
+    if (batch.length < 100) break;
   }
 
   let verification = { ensured: 0, dueSoonNotified: 0 };

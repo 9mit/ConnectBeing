@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { AppError, type AppErrorCode } from "@/lib/errors";
 
 export type ActionResult<T = unknown> =
@@ -17,6 +19,16 @@ export function fail(error: unknown): ActionResult<never> {
     return {
       ok: false,
       error: { code: error.code, message: error.message },
+    };
+  }
+
+  if (error instanceof z.ZodError) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: error.issues[0]?.message || "Invalid request parameters.",
+      },
     };
   }
 

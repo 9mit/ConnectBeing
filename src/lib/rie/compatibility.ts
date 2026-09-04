@@ -15,19 +15,27 @@ export interface CompatibilityScores {
   overall: number;
 }
 
+function clamp(val: number, min = 0, max = 100): number {
+  if (Number.isNaN(val)) return min;
+  return Math.max(min, Math.min(max, val));
+}
+
 export function calculateCompatibility(
   metrics: BehavioralMetrics,
   graph: RelationshipGraph,
 ): CompatibilityScores {
-  const balanceFactor = 1 - Math.abs(metrics.conversationBalance - 0.5) * 2;
-  const volumeFactor = Math.min(metrics.avgMessagesPerDay / 20, 1);
-  const communication = Math.round(
-    (balanceFactor * 0.6 + volumeFactor * 0.4) * 100,
+  const balance = clamp(metrics.conversationBalance, 0, 1);
+  const balanceFactor = clamp(1 - Math.abs(balance - 0.5) * 2, 0, 1);
+  const volumeFactor = clamp(metrics.avgMessagesPerDay / 20, 0, 1);
+  const communication = clamp(
+    Math.round((balanceFactor * 0.6 + volumeFactor * 0.4) * 100),
   );
 
-  const voiceFactor = Math.min(metrics.avgVoiceCallMinutes / 30, 1);
-  const movieFactor = Math.min(metrics.movieFrequencyPerWeek / 2, 1);
-  const qualityTime = Math.round((voiceFactor * 0.5 + movieFactor * 0.5) * 100);
+  const voiceFactor = clamp(metrics.avgVoiceCallMinutes / 30, 0, 1);
+  const movieFactor = clamp(metrics.movieFrequencyPerWeek / 2, 0, 1);
+  const qualityTime = clamp(
+    Math.round((voiceFactor * 0.5 + movieFactor * 0.5) * 100),
+  );
 
   const plannedNodes = graph.edges.filter((e) => e.type === "planned").length;
   const completedNodes = graph.edges.filter(
@@ -37,46 +45,51 @@ export function calculateCompatibility(
     completedNodes + plannedNodes > 0
       ? completedNodes / (completedNodes + plannedNodes)
       : 0.5;
-  const planning = Math.round(planningRatio * 100);
+  const planning = clamp(Math.round(planningRatio * 100));
 
-  const consistency = Math.round(metrics.interactionConsistency * 100);
+  const consistency = clamp(Math.round(clamp(metrics.interactionConsistency, 0, 1) * 100));
 
   const movieNodes = graph.nodes.filter((n) => n.type === "movie");
   const movieGenres = new Set(
     movieNodes.map((n) => String(n.properties?.provider || "other")),
   );
-  const sharedInterests =
-    Math.min(Math.round((movieGenres.size / 4) * 100), 100) || 50;
+  const sharedInterests = clamp(
+    Math.min(Math.round((movieGenres.size / 4) * 100), 100) || 50,
+  );
 
-  const responseFactor = Math.min(
-    120 / Math.max(metrics.avgResponseTimeSeconds, 1),
+  const responseFactor = clamp(
+    120 / Math.max(metrics.avgResponseTimeSeconds || 1, 1),
+    0,
     1,
   );
-  const humor = Math.round(
-    (metrics.weekendActivityRatio * 0.5 + responseFactor * 0.5) * 100,
+  const weekendRatio = clamp(metrics.weekendActivityRatio, 0, 1);
+  const humor = clamp(
+    Math.round((weekendRatio * 0.5 + responseFactor * 0.5) * 100),
   );
-  const adventure = Math.round(
-    (movieFactor * 0.6 + metrics.weekendActivityRatio * 0.4) * 100,
+  const adventure = clamp(
+    Math.round((movieFactor * 0.6 + weekendRatio * 0.4) * 100),
   );
-  const support = Math.round(consistency * 0.5 + communication * 0.5);
-  const conflictRecovery = Math.round(
-    (balanceFactor * 0.7 + metrics.interactionConsistency * 0.3) * 100,
+  const support = clamp(Math.round(consistency * 0.5 + communication * 0.5));
+  const conflictRecovery = clamp(
+    Math.round((balanceFactor * 0.7 + clamp(metrics.interactionConsistency, 0, 1) * 0.3) * 100),
   );
-  const trustSignals = Math.round(
-    consistency * 0.4 + qualityTime * 0.3 + communication * 0.3,
+  const trustSignals = clamp(
+    Math.round(consistency * 0.4 + qualityTime * 0.3 + communication * 0.3),
   );
 
-  const overall = Math.round(
-    communication * 0.18 +
-      qualityTime * 0.16 +
-      planning * 0.1 +
-      consistency * 0.14 +
-      sharedInterests * 0.08 +
-      humor * 0.08 +
-      adventure * 0.08 +
-      support * 0.08 +
-      conflictRecovery * 0.05 +
-      trustSignals * 0.05,
+  const overall = clamp(
+    Math.round(
+      communication * 0.18 +
+        qualityTime * 0.16 +
+        planning * 0.1 +
+        consistency * 0.14 +
+        sharedInterests * 0.08 +
+        humor * 0.08 +
+        adventure * 0.08 +
+        support * 0.08 +
+        conflictRecovery * 0.05 +
+        trustSignals * 0.05,
+    ),
   );
 
   return {

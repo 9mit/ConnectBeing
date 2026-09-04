@@ -85,12 +85,16 @@ export function AuthForm({
 
         const data = await res.json();
         if (!res.ok) {
-          setError(data.error || "Authentication failed. Please check credentials.");
+          const message =
+            typeof data?.error === "string"
+              ? data.error
+              : data?.error?.message || "Authentication failed. Please check credentials.";
+          setError(message);
           return;
         }
 
         // Seamless redirection
-        window.location.href = data.redirect || "/dashboard";
+        window.location.href = data?.redirectTo || data?.redirect || "/dashboard";
       } catch {
         setError("Network connection error. Please try again.");
       }

@@ -7,10 +7,11 @@ import { roomCustomizations } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { createId } from "@/lib/ids";
+import { ROOM_THEMES } from "@/lib/themes";
 import { z } from "zod";
 
 const updateSchema = z.object({
-  theme: z.enum(["rose-dusk", "violet-night", "amber-glow", "sky-dawn"]).optional(),
+  theme: z.enum(ROOM_THEMES).optional(),
   decor: z
     .object({
       plants: z.boolean().optional(),

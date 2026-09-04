@@ -31,13 +31,6 @@ export async function completeOnboardingAction(
       throw new AppError("FORBIDDEN", "Onboarding profile already exists.", 400);
     }
 
-    const nameExists = await db.query.onboardingProfiles.findFirst({
-      where: eq(onboardingProfiles.name, parsed.name),
-    });
-
-    if (nameExists) {
-      throw new AppError("CONFLICT", "This name is already taken. Please choose another.", 409);
-    }
 
     await db.insert(onboardingProfiles).values({
       id: createId(),

@@ -96,7 +96,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  const body = JSON.parse(rawBody) as RazorpayWebhook;
+  let body: RazorpayWebhook;
+  try {
+    body = JSON.parse(rawBody) as RazorpayWebhook;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
   const sub = body.payload.subscription?.entity;
   const userId =
     sub?.notes?.userId ?? body.payload.payment?.entity.notes?.userId;

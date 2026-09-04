@@ -7,6 +7,7 @@ const PUBLIC_PATHS = new Set([
   "/register",
   "/invite",
   "/forgot-password",
+  "/update-password",
   "/privacy",
   "/security",
   "/robots.txt",

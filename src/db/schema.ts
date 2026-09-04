@@ -185,7 +185,7 @@ export const onboardingProfiles = pgTable("onboarding_profiles", {
     .notNull()
     .unique()
     .references(() => users.id, { onDelete: "cascade" }),
-  name: text("name").notNull().unique(),
+  name: text("name").notNull(),
   avatarUrl: text("avatar_url"),
   age: integer("age").notNull(),
   gender: text("gender").notNull(),
