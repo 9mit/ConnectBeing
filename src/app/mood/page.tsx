@@ -1,3 +1,4 @@
+import { getCurrentMoodsAction } from "@/actions/mood";
 import { AppShell } from "@/components/app-shell";
 import { MoodSelector } from "@/components/mood-selector";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
@@ -11,10 +12,14 @@ export const metadata = {
 
 export default async function MoodPage() {
   const ctx = await requireVerifiedCoupleOrRedirect();
+  const res = await getCurrentMoodsAction();
+  const initialMoods = res.ok
+    ? { mine: res.data.mine?.mood ?? null, partner: res.data.partner?.mood ?? null }
+    : undefined;
 
   return (
     <AppShell coupleId={ctx.couple.id} userId={ctx.user.id}>
-      <MoodSelector coupleId={ctx.couple.id} />
+      <MoodSelector coupleId={ctx.couple.id} initialMoods={initialMoods} />
     </AppShell>
   );
 }

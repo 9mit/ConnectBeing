@@ -1,3 +1,4 @@
+import { getPetStateAction } from "@/actions/pet";
 import { AppShell } from "@/components/app-shell";
 import { DigitalPet } from "@/components/digital-pet";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
@@ -11,10 +12,12 @@ export const metadata = {
 
 export default async function PetPage() {
   const ctx = await requireVerifiedCoupleOrRedirect();
+  const res = await getPetStateAction();
+  const initialPet = res.ok ? res.data : undefined;
 
   return (
     <AppShell coupleId={ctx.couple.id} userId={ctx.user.id}>
-      <DigitalPet />
+      <DigitalPet initialPet={initialPet} />
     </AppShell>
   );
 }

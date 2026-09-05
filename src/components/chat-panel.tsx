@@ -45,6 +45,8 @@ import {
 import { isEmojiHeavyMessage } from "@/lib/chat/emoji-data";
 import { createClient } from "@/lib/supabase/client";
 import { EmojiPicker } from "@/components/emoji-picker";
+import Link from "next/link";
+import { Lock, Smile, Camera, Send, Phone, Check, CheckCheck } from "lucide-react";
 
 type Msg = ChatMessageDTO & { optimistic?: boolean; failed?: boolean };
 
@@ -552,146 +554,171 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex h-[calc(100dvh-12rem)] md:h-[75vh] flex-col rounded-3xl glass-panel border border-amber-500/20 bg-purple-950/40 overflow-hidden shadow-[0_0_40px_rgba(212,175,55,0.12)]">
-      <div className="flex items-center justify-between gap-2 border-b border-amber-500/20 bg-purple-950/60 px-6 py-3.5 text-xs font-semibold tracking-wider uppercase text-amber-300/80">
-        <div className="flex items-center gap-2">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              e2eeReady ? "bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]" : "bg-amber-600"
-            }`}
-          />
-          <span className="text-amber-200">
-            {e2eeReady
-              ? "End-to-end encryption active"
-              : "Encryption pending partner key exchange"}
-          </span>
+    <div className="flex h-[calc(100dvh-12rem)] md:h-[75vh] flex-col rounded-2xl border border-white/[0.08] bg-[#0c0d12] overflow-hidden shadow-2xl">
+      {/* Header Bar */}
+      <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] bg-[#0f1017]/80 backdrop-blur-md px-5 py-3 text-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 text-zinc-300">
+            <Lock className="w-3.5 h-3.5 text-amber-300/80" />
+            <span className="text-[11px] font-medium tracking-wide">
+              {e2eeReady ? "End-to-End Encrypted" : "Exchanging Encryption Keys…"}
+            </span>
+          </div>
+          <span className="text-zinc-600">·</span>
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                partnerOnline ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]" : "bg-zinc-600"
+              }`}
+            />
+            <span className={partnerOnline ? "text-[#f7f6f2] font-medium" : "text-zinc-500"}>
+              {partnerOnline ? "Partner active" : "Partner away"}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-3 text-[10px] normal-case tracking-normal">
-          <span
-            className={
-              partnerOnline ? "text-amber-400 font-semibold" : "text-slate-500"
-            }
+
+        <div className="flex items-center gap-2">
+          {health !== "connected" && (
+            <span
+              className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
+                health === "reconnecting"
+                  ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                  : "bg-red-500/10 text-red-300 border border-red-500/20"
+              }`}
+            >
+              {health}
+            </span>
+          )}
+
+          <Link
+            href="/call"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-white/[0.08] bg-white/[0.02] text-zinc-300 hover:text-white hover:border-white/20 transition-colors"
           >
-            {partnerOnline ? "Partner online" : "Partner offline"}
-          </span>
-          <span
-            className={
-              health === "connected"
-                ? "text-amber-300"
-                : health === "reconnecting"
-                  ? "text-amber-500"
-                  : "text-red-400"
-            }
-          >
-            {health}
-          </span>
+            <Phone className="w-3 h-3 text-amber-300/80" />
+            <span className="hidden sm:inline">Voice Call</span>
+          </Link>
         </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-6 scrollbar-thin">
+      {/* Message Stream */}
+      <div className="flex-1 space-y-3.5 overflow-y-auto p-4 sm:p-6 scrollbar-none">
         <div ref={topSentinelRef} />
         {cursor ? (
-          <div className="text-center text-[10px] text-amber-400/60">
+          <div className="text-center text-[10px] text-zinc-500 font-medium">
             Scroll up for older messages
           </div>
         ) : null}
 
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-2 py-20">
-            <p className="text-sm font-semibold text-amber-300">Your shared chat has begun.</p>
-            <p className="text-xs text-slate-400">
-              Messages are E2EE and never readable by anyone else.
+          <div className="h-full flex flex-col items-center justify-center text-center text-zinc-400 space-y-2 py-16">
+            <div className="w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mb-1">
+              <Lock className="w-4 h-4 text-zinc-400" />
+            </div>
+            <p className="text-sm font-medium text-[#f7f6f2]">Your private conversation</p>
+            <p className="text-xs text-zinc-500 max-w-xs leading-relaxed">
+              Every message and photo is encrypted directly between your two devices.
             </p>
           </div>
         ) : null}
 
-        {messages.map((m) => (
-          <div
-            key={m.clientMsgId ?? m.id}
-            className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm flex flex-col space-y-1.5 ${
-              m.senderId === userId
-                ? "ml-auto bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-purple-950 font-medium rounded-tr-none shadow-[0_0_15px_rgba(212,175,55,0.3)]"
-                : "bg-purple-900/60 border border-amber-500/20 text-slate-100 rounded-tl-none shadow-md"
-            } ${m.failed ? "opacity-70 ring-1 ring-red-400/40" : ""} ${
-              m.optimistic ? "opacity-80" : ""
-            }`}
-          >
-            <div>
-              {m.type === "ephemeral_image" && m.ephemeralMediaId ? (
-                <button
-                  type="button"
-                  className="flex items-center gap-2 font-semibold text-amber-300 hover:text-amber-100 transition-colors py-0.5 underline"
-                  onClick={() => void viewEphemeral(m.ephemeralMediaId!)}
-                >
-                  Tap to view once
-                </button>
-              ) : (
-                <span
-                  className={
-                    isEmojiHeavyMessage(
-                      display[m.id] ??
-                        display[m.clientMsgId ?? ""] ??
-                        "",
-                    )
-                      ? "text-3xl leading-snug tracking-wide"
-                      : "whitespace-pre-wrap break-words"
-                  }
-                >
-                  {display[m.id] ?? display[m.clientMsgId ?? ""] ?? m.content}
-                </span>
+        {messages.map((m) => {
+          const isMe = m.senderId === userId;
+          return (
+            <div
+              key={m.clientMsgId ?? m.id}
+              className={`max-w-[78%] sm:max-w-[70%] rounded-2xl px-4 py-2.5 text-sm flex flex-col space-y-1 ${
+                isMe
+                  ? "ml-auto bg-[#222533] border border-white/[0.08] text-[#f7f6f2] rounded-tr-xs"
+                  : "bg-[#12131a] border border-white/[0.06] text-zinc-200 rounded-tl-xs"
+              } ${m.failed ? "opacity-70 ring-1 ring-rose-500/40" : ""} ${
+                m.optimistic ? "opacity-75" : ""
+              }`}
+            >
+              <div>
+                {m.type === "ephemeral_image" && m.ephemeralMediaId ? (
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 font-medium text-amber-200 hover:text-white transition-colors py-1 text-xs"
+                    onClick={() => void viewEphemeral(m.ephemeralMediaId!)}
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>View Once Photo</span>
+                  </button>
+                ) : (
+                  <span
+                    className={
+                      isEmojiHeavyMessage(
+                        display[m.id] ??
+                          display[m.clientMsgId ?? ""] ??
+                          "",
+                      )
+                        ? "text-3xl leading-snug tracking-wide"
+                        : "whitespace-pre-wrap break-words leading-relaxed"
+                    }
+                  >
+                    {display[m.id] ?? display[m.clientMsgId ?? ""] ?? m.content}
+                  </span>
+                )}
+              </div>
+
+              {isMe && m.type === "text" && (
+                <div className="text-[10px] text-zinc-400 self-end font-mono flex items-center gap-1">
+                  {statusTicks(m, userId)}
+                </div>
               )}
             </div>
-            {m.senderId === userId && m.type === "text" ? (
-              <div className="text-[9px] font-bold tracking-wider uppercase opacity-70 self-end text-purple-950">
-                {statusTicks(m, userId)}
-              </div>
-            ) : null}
-          </div>
-        ))}
+          );
+        })}
+
         {typing ? (
-          <p className="text-xs text-amber-300/70 italic pl-1.5">
-            Partner is typing…
+          <p className="text-xs text-zinc-400 italic pl-1 flex items-center gap-1.5 animate-pulse">
+            <span>Partner is typing…</span>
           </p>
         ) : null}
         <div ref={bottomRef} />
       </div>
 
       {error ? (
-        <p className="px-6 py-2 text-xs font-semibold text-red-300 bg-red-950/70 border-t border-red-500/30">
+        <p className="px-5 py-2 text-xs font-medium text-rose-300 bg-rose-950/40 border-t border-rose-500/20">
           {error}
         </p>
       ) : null}
 
-      <div className="relative flex items-center gap-2 border-t border-amber-500/20 bg-purple-950/60 p-4">
+      {/* Modern Input Dock */}
+      <div className="relative flex items-center gap-2 border-t border-white/[0.06] bg-[#0c0d12] p-3 sm:p-4">
         <EmojiPicker
           open={emojiOpen}
           onClose={() => setEmojiOpen(false)}
           onPick={insertEmoji}
         />
+
         <button
           type="button"
           onClick={() => {
             rememberCaret();
             setEmojiOpen((v) => !v);
           }}
-          className={`p-3 rounded-xl border border-amber-500/30 bg-purple-900/40 transition-all ${
+          className={`p-2.5 rounded-xl border transition-all ${
             emojiOpen
-              ? "text-amber-300 bg-amber-500/20 border-amber-400"
-              : "text-slate-300 hover:text-amber-300 hover:bg-purple-900/60"
+              ? "text-amber-200 bg-white/[0.08] border-white/20"
+              : "text-zinc-400 hover:text-zinc-200 border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"
           }`}
           aria-label="Open emoji picker"
           aria-expanded={emojiOpen}
         >
-          😊
+          <Smile className="w-4 h-4" />
         </button>
+
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="p-3 rounded-xl border border-amber-500/30 bg-purple-900/40 text-slate-300 hover:text-amber-300 hover:bg-purple-900/60 transition-all"
+          className="p-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05] transition-all"
           aria-label="Send view-once photo"
+          title="Send view-once photo"
         >
-          📷
+          <Camera className="w-4 h-4" />
         </button>
+
         <input
           type="file"
           ref={fileInputRef}
@@ -702,6 +729,7 @@ export function ChatPanel({
             if (file) void sendEphemeral(file);
           }}
         />
+
         <input
           ref={textInputRef}
           value={text}
@@ -722,21 +750,22 @@ export function ChatPanel({
               send();
             }
           }}
-          placeholder="Type a secure message..."
-          aria-label="Secure message"
-          className="flex-1 rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-3 text-base text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
+          placeholder="Message your partner privately…"
+          aria-label="Private message"
+          className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-sm text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 focus:bg-white/[0.05] transition-all"
         />
+
         <button
           type="button"
-          disabled={pending || !e2eeReady}
+          disabled={pending || !e2eeReady || !text.trim()}
           onClick={() => {
             setEmojiOpen(false);
             send();
           }}
-          aria-label="Send encrypted message"
-          className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-5 py-3 text-sm font-extrabold text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-60 transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)]"
+          aria-label="Send message"
+          className="rounded-xl bg-[#f7f6f2] text-[#07080b] p-2.5 text-sm font-semibold hover:bg-white disabled:opacity-35 transition-all"
         >
-          Send
+          <Send className="w-4 h-4" />
         </button>
       </div>
     </div>

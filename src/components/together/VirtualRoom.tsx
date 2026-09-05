@@ -332,58 +332,58 @@ export function VirtualRoom({
 
   return (
     <div
-      className={`relative flex h-full flex-col overflow-hidden rounded-3xl bg-gradient-to-br ${themeClass} border border-white/10 shadow-2xl`}
+      className="relative flex h-full min-h-[70vh] flex-col overflow-hidden rounded-2xl bg-[#06070a] border border-white/[0.08] shadow-2xl"
     >
       {/* Synchronized 3-2-1 Countdown Overlay */}
       <AnimatePresence>
         {countdown !== null && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.2 }}
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-xl"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md"
           >
-            <span className="text-xs font-bold uppercase tracking-[0.3em] text-sky-400 mb-2">
+            <span className="text-[11px] font-medium uppercase tracking-[0.25em] text-zinc-400 mb-2">
               Synchronizing Playback
             </span>
             <motion.div
               key={countdown}
-              initial={{ scale: 0.5, opacity: 0 }}
+              initial={{ scale: 0.6, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 1.5, opacity: 0 }}
-              className="font-serif text-8xl md:text-9xl font-extrabold text-[#fbf9f4] text-glow-gold"
+              exit={{ scale: 1.4, opacity: 0 }}
+              className="font-serif text-7xl sm:text-9xl font-light text-[#f7f6f2]"
             >
-              {countdown > 0 ? countdown : "PLAY!"}
+              {countdown > 0 ? countdown : "PLAY"}
             </motion.div>
-            <p className="mt-4 text-xs text-zinc-400 font-sans">
-              Both screens lock to play at the exact same instant
+            <p className="mt-4 text-xs text-zinc-400 font-light">
+              Screens are locking to play at the exact same instant
             </p>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Top Header & Telemetry Bar */}
-      <div className="flex flex-wrap items-center justify-between border-b border-white/10 px-4 py-3 gap-2 bg-black/40 backdrop-blur-md">
+      <div className="flex flex-wrap items-center justify-between border-b border-white/[0.06] px-5 py-3 gap-2 bg-[#090a0f]/80 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <div
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: provider?.brandColor || "#38bdf8" }}
+            className="w-2.5 h-2.5 rounded-full shrink-0"
+            style={{ backgroundColor: provider?.brandColor || "#7dd3fc" }}
           />
           <div>
             <div className="flex items-center gap-2">
-              <p className="text-sm font-bold text-white tracking-wide">{title}</p>
-              <span className="text-[10px] font-semibold text-zinc-400 bg-white/10 px-2 py-0.5 rounded-full border border-white/10">
+              <p className="text-xs sm:text-sm font-medium text-[#f7f6f2]">{title}</p>
+              <span className="text-[10px] font-mono text-zinc-400 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
                 {providerName}
               </span>
             </div>
-            <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+            <div className="flex items-center gap-2 text-[10px] text-zinc-400 font-mono mt-0.5">
               <span>{formattedTime}</span>
               <span>·</span>
               <span className={state === "playing" ? "text-emerald-400" : "text-amber-300"}>
                 {state.toUpperCase()}
               </span>
               <span>·</span>
-              <span className="text-sky-400">DRIFT: ±{drift.driftSeconds}s</span>
+              <span>DRIFT: ±{drift.driftSeconds}s</span>
             </div>
           </div>
         </div>
@@ -393,21 +393,21 @@ export function VirtualRoom({
           <button
             type="button"
             onClick={handleToggleReady}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-all ${
               partnerReady
-                ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300"
-                : "bg-white/5 border-white/10 text-slate-300 hover:text-white"
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                : "bg-white/[0.02] border-white/[0.08] text-zinc-300 hover:text-white"
             }`}
           >
-            <CheckCircle2 size={13} />
+            <CheckCircle2 size={12} />
             <span>{partnerReady ? "Partner Ready" : "Set Ready"}</span>
           </button>
 
           <Link
             href="/call"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.02] px-3 py-1 text-xs text-zinc-300 hover:text-white transition-colors"
           >
-            <Phone size={13} /> <span>Voice on Call</span>
+            <Phone size={12} /> <span>Voice Call</span>
           </Link>
 
           <button
@@ -417,9 +417,9 @@ export function VirtualRoom({
                 router.push(`/together/memory/${sessionId}`),
               )
             }
-            className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-500/20 transition-colors"
+            className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-xs font-medium text-rose-200 hover:bg-rose-500/20 transition-colors"
           >
-            End
+            Leave
           </button>
         </div>
       </div>
@@ -432,9 +432,9 @@ export function VirtualRoom({
             <motion.span
               key={r.id}
               initial={{ opacity: 0, y: 30, scale: 0.6 }}
-              animate={{ opacity: 1, y: -60, scale: 1.2 }}
+              animate={{ opacity: 1, y: -70, scale: 1.1 }}
               exit={{ opacity: 0, scale: 0.8 }}
-              className="pointer-events-none absolute text-4xl select-none"
+              className="pointer-events-none absolute text-3xl select-none"
               style={{ left: `${r.x}%`, top: `${r.y}%` }}
             >
               {r.emoji}
@@ -442,72 +442,66 @@ export function VirtualRoom({
           ))}
         </AnimatePresence>
 
-        {/* Universal OTT Hub Card */}
-        <div className="z-10 max-w-md w-full rounded-2xl bg-black/50 border border-white/15 p-6 backdrop-blur-xl shadow-2xl space-y-4 text-center">
+        {/* Private Cinema Center Hub */}
+        <div className="z-10 max-w-md w-full rounded-2xl bg-[#0d0f15]/90 border border-white/[0.08] p-6 backdrop-blur-xl shadow-2xl space-y-4 text-center">
           <div
-            className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto text-white shadow-lg"
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-white shadow-lg"
             style={{
-              backgroundColor: provider?.brandColor ? `${provider.brandColor}33` : "#38bdf833",
-              border: `1px solid ${provider?.brandColor || "#38bdf8"}66`,
+              backgroundColor: provider?.brandColor ? `${provider.brandColor}22` : "#ffffff11",
+              border: `1px solid ${provider?.brandColor || "#ffffff"}33`,
             }}
           >
-            <Tv size={28} style={{ color: provider?.brandColor || "#38bdf8" }} />
+            <Tv size={24} style={{ color: provider?.brandColor || "#ffffff" }} />
           </div>
 
           <div>
-            <h3 className="text-xl font-bold text-white font-serif">{title}</h3>
+            <h3 className="text-xl font-serif font-light text-[#f7f6f2]">{title}</h3>
             <div className="mt-1 flex items-center justify-center gap-2">
-              <span className="text-xs font-bold text-sky-400 uppercase tracking-wider">
+              <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider">
                 {providerName}
               </span>
-              <span className="text-[10px] text-zinc-400">·</span>
-              <span className="text-[11px] text-amber-300 flex items-center gap-1 font-sans">
+              <span className="text-[10px] text-zinc-600">·</span>
+              <span className="text-[11px] text-amber-200/90 flex items-center gap-1 font-sans">
                 <ShieldCheck size={12} />
-                {capabilityLevel === 1
-                  ? "Level 1: Full In-Room Sync"
-                  : "Level 3: Countdown & Sync Remote"}
+                <span>Synchronized Theater Room</span>
               </span>
             </div>
           </div>
 
-          <p className="text-xs text-zinc-300 font-sans leading-relaxed font-light">
-            Open the movie in your official app or side-by-side tab. This room synchronizes your
-            playback timeline, reactions, voice chat, and post-movie memories.
+          <p className="text-xs text-zinc-400 font-light leading-relaxed">
+            Open the movie in your streaming app or tab. This sanctuary synchronizes your
+            timeline, instant whispers, reactions, and post-movie memory archive.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
             <a
               href={providerSearchUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-xl px-5 py-2.5 text-xs font-bold text-black shadow-lg hover:opacity-95 transition-opacity"
-              style={{
-                backgroundColor: provider?.brandColor || "#38bdf8",
-                color: provider?.id === "apple" ? "#000" : "#fff",
-              }}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full px-5 py-2 text-xs font-semibold text-[#07080b] bg-[#f7f6f2] hover:bg-white transition-all shadow-sm"
             >
-              <ExternalLink size={14} /> Open {providerName} ↗
+              <ExternalLink size={13} /> Open {providerName} ↗
             </a>
 
             <button
               type="button"
               onClick={() => dispatchEvent("COUNTDOWN_START", "playing", position)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-xl border border-sky-400/40 bg-sky-500/10 px-4 py-2.5 text-xs font-bold text-sky-200 hover:bg-sky-500/20 transition-colors"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full border border-white/[0.12] bg-white/[0.04] px-4 py-2 text-xs font-medium text-zinc-200 hover:bg-white/[0.08] transition-colors"
             >
-              <Sparkles size={14} className="text-sky-400" /> Start 3-2-1 Countdown
+              <Sparkles size={13} className="text-amber-300" /> Start 3-2-1 Countdown
             </button>
           </div>
         </div>
       </div>
 
       {/* Master Playback Remote Controls & Reaction Bar */}
-      <div className="border-t border-white/10 bg-black/60 backdrop-blur-md px-4 py-3 space-y-3">
+      <div className="border-t border-white/[0.06] bg-[#090a0f]/90 backdrop-blur-md px-5 py-3 space-y-3">
         {/* Timeline Slider */}
         <div className="flex items-center gap-3 text-xs text-zinc-400 font-mono">
           <span>{formattedTime}</span>
           <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden relative cursor-pointer">
             <div
-              className="h-full bg-gradient-to-r from-sky-400 via-rose-400 to-amber-400"
+              className="h-full bg-gradient-to-r from-amber-200 to-rose-200"
               style={{ width: `${Math.min(100, (position / 7200) * 100)}%` }}
             />
           </div>
@@ -517,14 +511,14 @@ export function VirtualRoom({
         {/* Buttons Row */}
         <div className="flex items-center justify-between gap-2">
           {/* Play/Pause/Scrub */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => dispatchEvent("SEEK", state, Math.max(0, position - 10))}
-              className="p-2 rounded-lg text-zinc-300 hover:text-white hover:bg-white/10 transition-colors"
+              className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/[0.05] transition-colors"
               title="Rewind 10 seconds"
             >
-              <Rewind size={18} />
+              <Rewind size={16} />
             </button>
 
             <button
@@ -536,29 +530,29 @@ export function VirtualRoom({
                   position,
                 )
               }
-              className="p-2.5 rounded-full bg-white text-black hover:scale-105 transition-transform"
+              className="p-2.5 rounded-full bg-[#f7f6f2] text-[#07080b] hover:bg-white transition-all shadow-sm"
               title={state === "playing" ? "Pause" : "Play"}
             >
-              {state === "playing" ? <Pause size={18} /> : <Play size={18} />}
+              {state === "playing" ? <Pause size={16} /> : <Play size={16} />}
             </button>
 
             <button
               type="button"
               onClick={() => dispatchEvent("SEEK", state, position + 10)}
-              className="p-2 rounded-lg text-zinc-300 hover:text-white hover:bg-white/10 transition-colors"
+              className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/[0.05] transition-colors"
               title="Fast forward 10 seconds"
             >
-              <FastForward size={18} />
+              <FastForward size={16} />
             </button>
           </div>
 
           {/* Emoji Reactions Strip */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             {["❤️", "😂", "🔥", "👏", "🍿", "🥺", "😱"].map((e) => (
               <button
                 key={e}
                 type="button"
-                className="text-lg hover:scale-125 transition-transform p-1"
+                className="text-base hover:scale-125 transition-transform p-1 opacity-85 hover:opacity-100"
                 onClick={() =>
                   void channelRef.current?.send({
                     type: "broadcast",
@@ -574,21 +568,21 @@ export function VirtualRoom({
         </div>
       </div>
 
-      {/* Timestamped Chat Message Log */}
-      <div className="max-h-28 space-y-1.5 overflow-y-auto border-t border-white/10 px-4 py-2.5 text-xs text-slate-300 bg-black/40">
+      {/* Timestamped Whisper Message Log */}
+      <div className="max-h-24 space-y-1 overflow-y-auto border-t border-white/[0.06] px-5 py-2 text-xs text-zinc-300 bg-[#07080b]/90 scrollbar-none">
         {messages.length === 0 ? (
-          <p className="text-zinc-500 italic text-center py-2">
-            Messages sent here are timestamped to the exact movie minute.
+          <p className="text-zinc-500 italic text-center py-1">
+            Whispers sent here are synced to the exact movie second.
           </p>
         ) : (
           messages.map((m) => (
             <p key={m.id} className="flex items-baseline gap-2">
-              <span className="text-[10px] font-mono text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-mono text-zinc-400 bg-white/[0.04] px-1.5 py-0.5 rounded">
                 {m.playbackPosition
                   ? `${Math.floor(m.playbackPosition / 60)}:${String(m.playbackPosition % 60).padStart(2, "0")}`
                   : formattedTime}
               </span>
-              <span className="text-zinc-400 font-semibold">
+              <span className="text-zinc-400 font-medium">
                 {m.userId === userId ? "You" : "Partner"}:
               </span>
               <span className="text-zinc-200">{m.content}</span>
@@ -608,17 +602,17 @@ export function VirtualRoom({
             playbackPosition: position,
           }).then(() => setNewMessage(""));
         }}
-        className="flex gap-2 border-t border-white/10 p-3 bg-black/70"
+        className="flex gap-2 border-t border-white/[0.06] p-3 bg-[#090a0f]"
       >
         <input
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
-          placeholder="Whisper or react at this moment…"
-          className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs text-white placeholder-zinc-500 outline-none focus:border-sky-400 transition-colors"
+          placeholder="Whisper to your partner at this moment…"
+          className="flex-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 outline-none focus:border-white/20 transition-colors"
         />
         <button
           type="submit"
-          className="rounded-xl btn-cta-primary px-4 py-2 text-xs font-bold text-black"
+          className="rounded-full bg-[#f7f6f2] text-[#07080b] px-4 py-2 text-xs font-semibold hover:bg-white transition-all"
         >
           Send
         </button>

@@ -1,3 +1,4 @@
+import { listCalendarEventsAction } from "@/actions/calendar";
 import { AppShell } from "@/components/app-shell";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
@@ -11,10 +12,12 @@ export const metadata = {
 
 export default async function CalendarPage() {
   const ctx = await requireVerifiedCoupleOrRedirect();
+  const res = await listCalendarEventsAction();
+  const initialEvents = res.ok ? res.data.events : [];
 
   return (
     <AppShell coupleId={ctx.couple.id} userId={ctx.user.id}>
-      <CalendarPanel />
+      <CalendarPanel initialEvents={initialEvents} />
     </AppShell>
   );
 }

@@ -1,6 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Camera,
+  Plus,
+  X,
+  Calendar,
+  Tag,
+  UploadCloud,
+  Film,
+  Sparkles,
+  Heart,
+} from "lucide-react";
 
 import {
   confirmMemoryUploadAction,
@@ -20,31 +32,33 @@ type TimelineItem = {
 function kindLabel(kind: string): string {
   switch (kind) {
     case "movie":
-      return "🍿 Movie Night";
+      return "Movie Night";
     case "photo":
-      return "📷 Photo Memory";
+      return "Photo Memory";
     case "mood":
-      return "🎭 Vibe";
+      return "Vibe";
     case "quiz":
-      return "❓ Quiz";
+      return "Quiz";
     case "call":
-      return "📞 Call";
+      return "Voice Call";
     case "watch":
-      return "🎬 Together";
+      return "Together";
     case "challenge":
-      return "🎯 Quest";
+      return "Shared Quest";
     case "achievement":
-      return "✨ Trophy";
+      return "Trophy";
     case "memory":
-      return "💝 Memory";
+      return "Memory";
     default:
-      return "✦ Moment";
+      return "Moment";
   }
 }
 
 export function MemoriesGallery() {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<TimelineItem | null>(null);
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -58,163 +72,322 @@ export function MemoriesGallery() {
     void refresh();
   }, []);
 
+  const photoItems = items.filter((i) => i.url);
+  const featuredItem = photoItems[0] || items[0] || null;
+  const secondaryItems = photoItems.length > 0 ? photoItems.slice(1) : items.slice(1);
+
   return (
-    <div className="space-y-10">
-      {/* Upload Memory Card */}
-      <form
-        ref={formRef}
-        className="space-y-4 rounded-3xl glass-panel border border-amber-500/30 bg-purple-950/50 p-6 md:p-8 shadow-[0_0_35px_rgba(212,175,55,0.12)]"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const form = e.currentTarget;
-          const fd = new FormData(form);
-          const file = fd.get("file") as File | null;
-          if (!file) return;
-          startTransition(async () => {
-            const mimeType = file.type as "image/jpeg" | "image/png" | "image/webp";
-            const presign = await createPresignedUploadAction({
-              kind: "memory",
-              mimeType,
-            });
-            if (!presign.ok) {
-              setError(presign.error.message);
-              return;
-            }
-            const upload = await fetch(presign.data.uploadUrl, {
-              method: "PUT",
-              headers: { "Content-Type": mimeType },
-              body: file,
-            });
-            if (!upload.ok) {
-              setError("Upload failed");
-              return;
-            }
-            const confirm = await confirmMemoryUploadAction({
-              storageKey: presign.data.storageKey,
-              mimeType,
-              caption: String(fd.get("caption") || "") || undefined,
-              takenAt: new Date(String(fd.get("takenAt") || Date.now())).toISOString(),
-              eventLabel: String(fd.get("eventLabel") || "") || undefined,
-            });
-            if (!confirm.ok) {
-              setError(confirm.error.message);
-              return;
-            }
-            await refresh();
-            formRef.current?.reset();
-          });
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-xl">📸</span>
-          <h2 className="text-lg font-bold text-white font-display text-glow-gold">Save a Relationship Memory</h2>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <label htmlFor="memory-file" className="text-xs font-semibold uppercase tracking-wider text-amber-300">Photo File</label>
-            <input 
-              id="memory-file"
-              name="file" 
-              type="file" 
-              accept="image/jpeg,image/png,image/webp" 
-              required 
-              className="w-full text-xs text-slate-200 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/20 file:text-amber-200 hover:file:bg-amber-500/30 transition-all cursor-pointer"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label htmlFor="memory-taken-at" className="text-xs font-semibold uppercase tracking-wider text-amber-300">Date & Time Taken</label>
-            <input
-              id="memory-taken-at"
-              name="takenAt"
-              type="datetime-local"
-              required
-              className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all font-semibold"
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <input
-            id="memory-caption"
-            name="caption"
-            aria-label="Memory caption"
-            placeholder="Memory Caption (e.g. Weekend trip to the lake)"
-            className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-2.5 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
-          />
-          <input
-            id="memory-event-label"
-            name="eventLabel"
-            aria-label="Milestone tag"
-            placeholder="Milestone Tag (e.g. First Date, Anniversary)"
-            className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-2.5 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
-          />
+    <div className="space-y-10 max-w-5xl mx-auto">
+      {/* Editorial Header */}
+      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 border-b border-white/[0.06] pb-6">
+        <div>
+          <span className="text-[11px] font-medium tracking-[0.2em] uppercase text-zinc-400">
+            Visual Anthology
+          </span>
+          <h1 className="text-3xl sm:text-4xl font-serif font-light text-[#f7f6f2] tracking-tight mt-1">
+            Our Memories
+          </h1>
+          <p className="text-xs text-zinc-400 mt-1">
+            Photographs, milestones, and captured moments living in your shared vault.
+          </p>
         </div>
 
         <button
-          type="submit"
-          disabled={pending}
-          className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3 text-xs font-extrabold uppercase tracking-wider text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-60 transition-all shadow-[0_0_20px_rgba(212,175,55,0.3)]"
+          type="button"
+          onClick={() => setIsUploading(!isUploading)}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white transition-all self-start sm:self-auto shadow-sm active:scale-98"
         >
-          {pending ? "Uploading Memory..." : "Save Permanent Memory"}
+          <Plus className="w-3.5 h-3.5" />
+          <span>{isUploading ? "Close" : "Add Memory"}</span>
         </button>
-      </form>
+      </div>
 
-      {error ? (
-        <p className="text-sm font-semibold text-red-300 bg-red-950/70 border border-red-500/30 px-4 py-2.5 rounded-xl text-center">
+      {error && (
+        <p className="p-3 rounded-xl text-xs font-medium text-rose-300 bg-rose-950/40 border border-rose-500/20 text-center">
           {error}
         </p>
-      ) : null}
+      )}
 
-      {/* Shared Timeline Display */}
-      <section className="space-y-6">
-        <h3 className="text-xl font-bold text-white font-display tracking-tight flex items-center gap-2 text-glow-gold">
-          <span>✨</span> Shared Memory Timeline
-        </h3>
+      {/* Collapsible Refined Upload Sheet */}
+      <AnimatePresence>
+        {isUploading && (
+          <motion.form
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            ref={formRef}
+            className="rounded-2xl border border-white/[0.08] bg-[#0e1017] p-6 space-y-4 shadow-xl overflow-hidden"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const fd = new FormData(form);
+              const file = fd.get("file") as File | null;
+              if (!file) return;
+              startTransition(async () => {
+                const mimeType = file.type as "image/jpeg" | "image/png" | "image/webp";
+                const presign = await createPresignedUploadAction({
+                  kind: "memory",
+                  mimeType,
+                });
+                if (!presign.ok) {
+                  setError(presign.error.message);
+                  return;
+                }
+                const upload = await fetch(presign.data.uploadUrl, {
+                  method: "PUT",
+                  headers: { "Content-Type": mimeType },
+                  body: file,
+                });
+                if (!upload.ok) {
+                  setError("Upload failed");
+                  return;
+                }
+                const confirm = await confirmMemoryUploadAction({
+                  storageKey: presign.data.storageKey,
+                  mimeType,
+                  caption: String(fd.get("caption") || "") || undefined,
+                  takenAt: new Date(String(fd.get("takenAt") || Date.now())).toISOString(),
+                  eventLabel: String(fd.get("eventLabel") || "") || undefined,
+                });
+                if (!confirm.ok) {
+                  setError(confirm.error.message);
+                  return;
+                }
+                await refresh();
+                formRef.current?.reset();
+                setIsUploading(false);
+              });
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
+              <h2 className="text-sm font-medium text-[#f7f6f2] flex items-center gap-2">
+                <Camera className="w-4 h-4 text-zinc-400" />
+                <span>Save New Memory</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsUploading(false)}
+                className="text-zinc-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-        {items.length === 0 ? (
-          <div className="rounded-2xl glass-panel border border-amber-500/20 bg-purple-950/40 p-8 text-center text-slate-300 text-sm font-medium">
-            Your timeline is empty. Start adding photo memories or movie night dates above!
-          </div>
-        ) : null}
-
-        <ol className="relative space-y-6 border-l border-amber-500/30 ml-4 pl-6">
-          {items.map((item) => (
-            <li key={`${item.kind}-${item.id}`} className="relative">
-              <span className="absolute -left-[1.85rem] top-1.5 h-3.5 w-3.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-600 shadow-[0_0_10px_#fbbf24]" />
-              
-              <div className="rounded-2xl glass-panel border border-amber-500/20 bg-purple-950/40 p-5 hover:border-amber-500/40 hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-all duration-300">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-amber-300">
-                    {kindLabel(item.kind)}
-                  </span>
-                  <span className="text-xs font-semibold text-amber-400/80">
-                    {new Date(item.at).toLocaleString()}
-                  </span>
-                </div>
-
-                <p className="mt-2 text-lg font-bold text-white font-display tracking-tight">{item.title}</p>
-                
-                {item.subtitle ? (
-                  <p className="text-xs text-slate-300 mt-1 font-medium italic">&ldquo;{item.subtitle}&rdquo;</p>
-                ) : null}
-
-                {item.url ? (
-                  <div className="mt-4 overflow-hidden rounded-xl border border-amber-500/30 bg-purple-950/60 shadow-md">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={item.url}
-                      alt={item.title}
-                      className="h-64 w-full object-cover hover:scale-105 transition-transform duration-500"
-                    />
-                  </div>
-                ) : null}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="memory-file" className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
+                  Select Photograph
+                </label>
+                <input 
+                  id="memory-file"
+                  name="file" 
+                  type="file" 
+                  accept="image/jpeg,image/png,image/webp" 
+                  required 
+                  className="w-full text-xs text-zinc-300 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-white/[0.06] file:text-zinc-200 hover:file:bg-white/[0.12] transition-colors cursor-pointer"
+                />
               </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+
+              <div className="space-y-1.5">
+                <label htmlFor="memory-taken-at" className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
+                  Date Taken
+                </label>
+                <input
+                  id="memory-taken-at"
+                  name="takenAt"
+                  type="datetime-local"
+                  required
+                  defaultValue={new Date().toISOString().slice(0, 16)}
+                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] focus:outline-none focus:border-white/20 transition-colors"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <input
+                id="memory-caption"
+                name="caption"
+                placeholder="Caption (e.g. Afternoon walk in the quiet gardens)"
+                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
+              />
+              <input
+                id="memory-event-label"
+                name="eventLabel"
+                placeholder="Milestone tag (e.g. Anniversary, Road trip)"
+                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
+              />
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={pending}
+                className="px-5 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all flex items-center gap-2"
+              >
+                <UploadCloud className="w-3.5 h-3.5" />
+                <span>{pending ? "Saving Memory…" : "Save to Vault"}</span>
+              </button>
+            </div>
+          </motion.form>
+        )}
+      </AnimatePresence>
+
+      {/* Empty State: Matching explicit requirement */}
+      {items.length === 0 ? (
+        <div className="py-20 px-6 rounded-2xl bg-[#0e1015] border border-white/[0.06] text-center space-y-4">
+          <div className="w-12 h-12 rounded-full bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mx-auto text-zinc-400">
+            <Camera className="w-5 h-5" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-serif font-light text-[#f7f6f2]">
+              Your first memory is waiting.
+            </h3>
+            <p className="text-xs text-zinc-500 max-w-sm mx-auto leading-relaxed">
+              Preserve a quiet moment, date night, or landmark snapshot together in your private vault.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsUploading(true)}
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white transition-all shadow-sm"
+          >
+            <span>Save something together</span>
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-12">
+          {/* Featured Hero Memory (dominant visual scale) */}
+          {featuredItem && featuredItem.url && (
+            <section
+              onClick={() => setSelectedPhoto(featuredItem)}
+              className="group relative cursor-pointer overflow-hidden rounded-3xl border border-white/[0.08] bg-[#0c0d12] transition-all hover:border-white/20"
+            >
+              <div className="relative aspect-[16/9] md:aspect-[21/9] w-full overflow-hidden">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={featuredItem.url}
+                  alt={featuredItem.title}
+                  className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.02]"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
+              </div>
+
+              <div className="absolute bottom-0 left-0 right-0 p-6 sm:p-8 space-y-2">
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-amber-200/90 font-medium">
+                  <span>{kindLabel(featuredItem.kind)}</span>
+                  <span>·</span>
+                  <time>{new Date(featuredItem.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</time>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-serif text-[#f7f6f2] font-light">
+                  {featuredItem.title}
+                </h2>
+                {featuredItem.subtitle && (
+                  <p className="text-xs sm:text-sm text-zinc-300 font-light italic max-w-xl">
+                    &ldquo;{featuredItem.subtitle}&rdquo;
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* Staggered Gallery Exhibition */}
+          {secondaryItems.length > 0 && (
+            <section className="space-y-4">
+              <h3 className="text-xs font-medium tracking-[0.2em] uppercase text-zinc-400">
+                Timeline Anthology
+              </h3>
+
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {secondaryItems.map((item) => (
+                  <div
+                    key={`${item.kind}-${item.id}`}
+                    onClick={() => item.url && setSelectedPhoto(item)}
+                    className={`group relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0e1017] transition-all hover:border-white/20 ${
+                      item.url ? "cursor-pointer" : ""
+                    }`}
+                  >
+                    {item.url ? (
+                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-black/40">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.url}
+                          alt={item.title}
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
+                      </div>
+                    ) : null}
+
+                    <div className="p-4 sm:p-5 space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] text-zinc-400 uppercase tracking-wider">
+                        <span>{kindLabel(item.kind)}</span>
+                        <time>{new Date(item.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>
+                      </div>
+                      <h4 className="text-sm font-serif font-light text-[#f7f6f2] group-hover:text-amber-100 transition-colors">
+                        {item.title}
+                      </h4>
+                      {item.subtitle && (
+                        <p className="text-xs text-zinc-400 font-light line-clamp-2">
+                          {item.subtitle}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+
+      {/* Lightbox Modal */}
+      <AnimatePresence>
+        {selectedPhoto && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setSelectedPhoto(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-4xl w-full rounded-2xl overflow-hidden border border-white/10 bg-[#0c0d12]"
+            >
+              <button
+                type="button"
+                onClick={() => setSelectedPhoto(null)}
+                className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/60 text-white/80 hover:text-white backdrop-blur-sm"
+                aria-label="Close photo preview"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={selectedPhoto.url!}
+                alt={selectedPhoto.title}
+                className="max-h-[75vh] w-full object-contain bg-black/60"
+              />
+
+              <div className="p-6 bg-[#0c0d12] border-t border-white/[0.06] space-y-1">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="uppercase tracking-wider font-medium">{kindLabel(selectedPhoto.kind)}</span>
+                  <time>{new Date(selectedPhoto.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</time>
+                </div>
+                <h3 className="text-lg font-serif font-light text-[#f7f6f2]">
+                  {selectedPhoto.title}
+                </h3>
+                {selectedPhoto.subtitle && (
+                  <p className="text-xs text-zinc-300 font-light italic">
+                    &ldquo;{selectedPhoto.subtitle}&rdquo;
+                  </p>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

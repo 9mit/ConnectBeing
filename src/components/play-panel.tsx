@@ -10,16 +10,24 @@ import {
   listRemindersAction,
 } from "@/actions/reminders";
 
-export function PlayPanel() {
+export function PlayPanel({
+  initialData,
+}: {
+  initialData?: {
+    achievements?: Awaited<ReturnType<typeof listAchievementsAction>> | null;
+    challenges?: Awaited<ReturnType<typeof listChallengesAction>> | null;
+    reminders?: Awaited<ReturnType<typeof listRemindersAction>> | null;
+  };
+} = {}) {
   const [achievements, setAchievements] = useState<Awaited<
     ReturnType<typeof listAchievementsAction>
-  > | null>(null);
+  > | null>(initialData?.achievements ?? null);
   const [challenges, setChallenges] = useState<Awaited<
     ReturnType<typeof listChallengesAction>
-  > | null>(null);
+  > | null>(initialData?.challenges ?? null);
   const [reminders, setReminders] = useState<Awaited<
     ReturnType<typeof listRemindersAction>
-  > | null>(null);
+  > | null>(initialData?.reminders ?? null);
   const [title, setTitle] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,8 +40,10 @@ export function PlayPanel() {
   }
 
   useEffect(() => {
-    refresh();
-  }, []);
+    if (!initialData) {
+      refresh();
+    }
+  }, [initialData]);
 
   return (
     <div className="space-y-12 max-w-4xl mx-auto">

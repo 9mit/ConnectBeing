@@ -2,15 +2,16 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useState, useTransition } from "react";
+import { Heart, Sparkles, Edit2, Check } from "lucide-react";
 
 import { getPetStateAction, renamePetAction } from "@/actions/pet";
 
 const animations: Record<string, { y: number[]; scale: number[] }> = {
-  thriving: { y: [0, -10, 0], scale: [1, 1.08, 1] },
-  happy: { y: [0, -6, 0], scale: [1, 1.04, 1] },
+  thriving: { y: [0, -8, 0], scale: [1, 1.05, 1] },
+  happy: { y: [0, -5, 0], scale: [1, 1.03, 1] },
   neutral: { y: [0, -2, 0], scale: [1, 1.01, 1] },
-  sad: { y: [0, 4, 0], scale: [1, 0.96, 1] },
-  neglected: { y: [0, 8, 0], scale: [1, 0.9, 1] },
+  sad: { y: [0, 3, 0], scale: [1, 0.98, 1] },
+  neglected: { y: [0, 5, 0], scale: [1, 0.95, 1] },
 };
 
 const petFaces: Record<string, string> = {
@@ -21,12 +22,25 @@ const petFaces: Record<string, string> = {
   neglected: "(｡•́︿•̀｡)",
 };
 
-export function DigitalPet() {
-  const [petName, setPetName] = useState("Buddy");
-  const [petState, setPetState] = useState("neutral");
-  const [score, setScore] = useState(0);
+function getVitalityLabel(score: number): string {
+  if (score >= 80) return "Flourishing Harmony";
+  if (score >= 50) return "Warm Connection";
+  if (score >= 25) return "Quiet Rhythm";
+  return "Needs Shared Time";
+}
+
+export function DigitalPet({
+  initialPet,
+}: {
+  initialPet?: { petName: string; petState: string; score: number; moodNote: string };
+}) {
+  const [petName, setPetName] = useState(initialPet?.petName ?? "Buddy");
+  const [petState, setPetState] = useState(initialPet?.petState ?? "neutral");
+  const [score, setScore] = useState(initialPet?.score ?? 0);
   const [nameInput, setNameInput] = useState("");
-  const [moodNote, setMoodNote] = useState("");
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [moodNote, setMoodNote] = useState(initialPet?.moodNote ?? "");
+  const [petInteracted, setPetInteracted] = useState(false);
   const [pending, startTransition] = useTransition();
 
   async function refresh() {
@@ -40,111 +54,168 @@ export function DigitalPet() {
   }
 
   useEffect(() => {
-    void refresh();
+    if (!initialPet) {
+      void refresh();
+    }
     const id = setInterval(() => void refresh(), 5 * 60 * 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [initialPet]);
 
   const anim = animations[petState] ?? animations.neutral;
   const face = petFaces[petState] ?? petFaces.neutral;
 
-  // Dynamic glow and gradient borders depending on petState
-  const getAvatarGradient = () => {
-    if (petState === "thriving") return "from-amber-400/40 via-amber-500/30 to-purple-600/40 border-amber-400 shadow-[0_0_25px_rgba(212,175,55,0.4)]";
-    if (petState === "happy") return "from-amber-500/30 to-purple-800/40 border-amber-500/40 shadow-[0_0_15px_rgba(212,175,55,0.2)]";
-    if (petState === "sad") return "from-purple-900/30 to-slate-900/30 border-purple-800/30 shadow-purple-950/10";
-    if (petState === "neglected") return "from-zinc-900 to-purple-950 border-zinc-800 shadow-zinc-950";
-    return "from-purple-950/40 to-slate-900/40 border-purple-800/30 shadow-purple-900/10";
-  };
+  function handlePetInteraction() {
+    setPetInteracted(true);
+    setTimeout(() => setPetInteracted(false), 2400);
+  }
 
   return (
-    <div className="space-y-8 max-w-md mx-auto">
-      <div className="flex flex-col items-center rounded-3xl glass-panel border border-amber-500/30 bg-purple-950/50 p-8 text-center relative overflow-hidden shadow-[0_0_35px_rgba(212,175,55,0.12)]">
-        {/* Glow overlay */}
-        <div className={`absolute -top-12 left-1/2 -translate-x-1/2 w-48 h-48 rounded-full blur-3xl opacity-30 bg-gradient-to-br ${
-          petState === "thriving" || petState === "happy" ? "from-amber-400 to-purple-600" : "from-purple-900 to-blue-900"
-        }`} />
-
-        <motion.div
-          animate={{ y: anim.y, scale: anim.scale }}
-          transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
-          className={`flex h-40 w-40 items-center justify-center rounded-full bg-gradient-to-br border shadow-xl ${getAvatarGradient()} z-10`}
-        >
-          <span className="text-xl font-bold tracking-tight text-amber-200 font-display select-none filter drop-shadow-md text-glow-gold">
-            {face}
-          </span>
-        </motion.div>
-
-        <motion.h2
-          key={petState}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ type: "spring", stiffness: 260, damping: 20 }}
-          className="mt-6 text-3xl font-extrabold text-white font-display tracking-tight z-10 text-glow-gold"
-        >
-          {petName}
-        </motion.h2>
-
-        <span className="mt-1 text-xs font-bold uppercase tracking-widest text-amber-400/80 z-10">
-          State: <span className="text-amber-300 capitalize font-bold">{petState}</span>
+    <div className="space-y-10 max-w-lg mx-auto">
+      {/* Header */}
+      <div className="text-center space-y-1">
+        <span className="text-[11px] font-medium tracking-[0.2em] uppercase text-zinc-400">
+          Shared Companion
         </span>
+        <h1 className="text-3xl font-serif font-light text-[#f7f6f2] tracking-tight">
+          Our Little World
+        </h1>
+        <p className="text-xs text-zinc-400">
+          A living expression of your couple vitality and shared rituals.
+        </p>
+      </div>
 
-        {moodNote ? (
-          <p className="mt-3.5 text-sm text-slate-300 max-w-xs z-10 italic">
-            &ldquo;{moodNote}&rdquo;
-          </p>
-        ) : null}
+      {/* Main Living Companion Habitat */}
+      <div className="rounded-3xl border border-white/[0.08] bg-[#0c0d12] p-8 sm:p-10 text-center relative overflow-hidden shadow-2xl space-y-6">
+        {/* Soft Ambient Light (restrained, no neon glow) */}
+        <div
+          className="absolute -top-16 left-1/2 -translate-x-1/2 w-64 h-64 rounded-full blur-3xl opacity-20 bg-amber-200/10 pointer-events-none"
+          aria-hidden
+        />
 
-        {/* Health/Score Progress Bar */}
-        <div className="w-full mt-8 space-y-2 z-10">
-          <div className="flex justify-between text-xs font-semibold tracking-wider uppercase text-amber-400/80">
-            <span>Engagement Score</span>
-            <span className="text-amber-300 font-bold">{score}/100</span>
+        {/* Pet Creature Sphere */}
+        <div className="relative inline-block">
+          <motion.div
+            animate={{
+              y: petInteracted ? [0, -16, 0] : anim.y,
+              scale: petInteracted ? [1, 1.15, 1] : anim.scale,
+            }}
+            transition={{
+              repeat: petInteracted ? 1 : Infinity,
+              duration: petInteracted ? 0.6 : 3,
+              ease: "easeInOut",
+            }}
+            onClick={handlePetInteraction}
+            className="cursor-pointer flex h-40 w-40 sm:h-44 sm:w-44 items-center justify-center rounded-full bg-[#141620] border border-white/10 shadow-lg relative mx-auto group hover:border-white/25 transition-all"
+            title="Tap to comfort Buddy"
+          >
+            <span className="text-2xl font-serif font-medium text-amber-100 select-none drop-shadow-sm transition-transform group-hover:scale-105">
+              {face}
+            </span>
+
+            {petInteracted && (
+              <motion.span
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: -24 }}
+                exit={{ opacity: 0 }}
+                className="absolute text-xl pointer-events-none"
+              >
+                ❤️
+              </motion.span>
+            )}
+          </motion.div>
+        </div>
+
+        {/* Pet Name & Rename */}
+        <div className="space-y-1 relative z-10">
+          {isEditingName ? (
+            <form
+              className="flex items-center justify-center gap-2 max-w-xs mx-auto"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!nameInput.trim()) return;
+                startTransition(async () => {
+                  const result = await renamePetAction({ petName: nameInput });
+                  if (result.ok) {
+                    setPetName(result.data.petName);
+                    setIsEditingName(false);
+                    setNameInput("");
+                  }
+                });
+              }}
+            >
+              <input
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="New name…"
+                className="rounded-full border border-white/[0.12] bg-white/[0.04] px-4 py-1.5 text-xs text-[#f7f6f2] outline-none focus:border-white/30 text-center"
+              />
+              <button
+                type="submit"
+                disabled={pending}
+                className="p-1.5 rounded-full bg-[#f7f6f2] text-[#07080b] hover:bg-white"
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          ) : (
+            <div className="flex items-center justify-center gap-2">
+              <h2 className="text-2xl font-serif font-light text-[#f7f6f2]">
+                {petName}
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setNameInput(petName);
+                  setIsEditingName(true);
+                }}
+                className="text-zinc-500 hover:text-zinc-300 p-1"
+                aria-label="Rename companion"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-2 text-xs text-zinc-400">
+            <span className="capitalize font-medium text-zinc-300">{petState}</span>
+            <span>·</span>
+            <span className="text-zinc-400">{getVitalityLabel(score)}</span>
           </div>
-          <div className="h-2.5 w-full bg-purple-950/60 rounded-full overflow-hidden border border-amber-500/20">
+        </div>
+
+        {/* Contextual thought or mood reflection */}
+        <div className="max-w-xs mx-auto text-xs text-zinc-400 font-light leading-relaxed italic bg-white/[0.02] border border-white/[0.06] rounded-2xl p-4">
+          {moodNote ? `“${moodNote}”` : `“${petName} feels peaceful and grounded in your private sanctuary.”`}
+        </div>
+
+        {/* Soft Organic Connection Vitality (Not a cold numerical SaaS metric) */}
+        <div className="space-y-2 pt-2 max-w-xs mx-auto text-left">
+          <div className="flex justify-between items-center text-[11px] text-zinc-400">
+            <span>Connection Vitality</span>
+            <span className="font-mono text-zinc-300">{score}%</span>
+          </div>
+          <div className="h-1.5 w-full bg-white/[0.04] rounded-full overflow-hidden border border-white/[0.06]">
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${score}%` }}
-              transition={{ duration: 1, ease: "easeOut" }}
-              className={`h-full rounded-full bg-gradient-to-r ${
-                score > 75 
-                  ? "from-amber-400 via-amber-500 to-amber-600 shadow-[0_0_10px_#fbbf24]" 
-                  : score > 40 
-                  ? "from-purple-500 to-amber-500" 
-                  : "from-purple-800 to-purple-900"
-              }`}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="h-full rounded-full bg-gradient-to-r from-amber-200/90 to-rose-200/90"
             />
           </div>
         </div>
-      </div>
 
-      <form
-        className="flex gap-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          startTransition(async () => {
-            const result = await renamePetAction({ petName: nameInput });
-            if (result.ok) {
-              setPetName(result.data.petName);
-              setNameInput("");
-            }
-          });
-        }}
-      >
-        <input
-          value={nameInput}
-          onChange={(e) => setNameInput(e.target.value)}
-          placeholder="Enter new name..."
-          className="flex-1 rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-3 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:border-amber-400 focus:bg-purple-900/60 transition-all"
-        />
-        <button
-          type="submit"
-          disabled={pending || !nameInput.trim()}
-          className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-5 py-3 text-sm font-extrabold text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-60 transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)]"
-        >
-          Rename
-        </button>
-      </form>
+        {/* Quick Comfort Touch Button */}
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={handlePetInteraction}
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-full border border-white/[0.08] bg-white/[0.03] text-xs font-medium text-zinc-200 hover:text-white hover:bg-white/[0.06] transition-all active:scale-95"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>Comfort {petName}</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

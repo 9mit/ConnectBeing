@@ -2,11 +2,23 @@
 
 import { motion, type Variants } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
+import {
+  Sparkles,
+  Film,
+  MessageSquare,
+  Radio,
+  Heart,
+  Calendar,
+  ArrowRight,
+  Smile,
+  Clock,
+} from "lucide-react";
 
 import { SITE } from "@/content/site";
 import { capitalizeMood } from "@/lib/format";
 import { usePresence } from "@/components/presence-provider";
+import { setMoodAction } from "@/actions/mood";
 
 type ActionBag<T> =
   | { ok: true; data: T }
@@ -61,42 +73,33 @@ type DashboardProps = {
   };
 };
 
-const containerVariants: Variants = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.08 },
-  },
-};
+const MOOD_OPTIONS = [
+  { value: "happy", label: "Happy", emoji: "😊" },
+  { value: "cuddles", label: "Cuddly", emoji: "🤍" },
+  { value: "excited", label: "Excited", emoji: "✨" },
+  { value: "space", label: "Space", emoji: "🌙" },
+  { value: "low", label: "Low", emoji: "🌧️" },
+] as const;
 
-const itemVariants: Variants = {
-  hidden: { opacity: 0, y: 16 },
-  show: {
-    opacity: 1,
-    y: 0,
-    transition: { type: "spring", stiffness: 300, damping: 24 },
-  },
-};
+function getTimeSalutation(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
-function kindEmoji(kind: string): string {
-  switch (kind) {
-    case "photo":
-      return "📷";
-    case "movie":
-    case "watch":
-      return "🍿";
-    case "mood":
-      return "🎭";
-    case "quiz":
-      return "❓";
-    case "call":
-      return "📞";
-    case "challenge":
-      return "🎯";
-    case "achievement":
-      return "✨";
+function getPetReactionText(petState: string, petName: string): string {
+  switch (petState) {
+    case "thriving":
+      return `${petName} is thriving in the warmth of your connection.`;
+    case "happy":
+      return `${petName} is playing happily in your sanctuary.`;
+    case "sad":
+      return `${petName} is curled up, waiting for your next shared moment.`;
+    case "neglected":
+      return `${petName} could use a gentle touch or shared check-in today.`;
     default:
-      return "✦";
+      return `${petName} is peacefully resting in your shared space.`;
   }
 }
 
@@ -110,21 +113,17 @@ export function DashboardClient({ data }: DashboardProps) {
     daysTogetherLabel,
     daysTogether,
   } = data;
-  const { partnerOnline, myStatus, toggleMyStatus, nudgePartner, nudgePending } = usePresence();
+  const { partnerOnline, nudgePartner, nudgePending } = usePresence();
   const [mounted, setMounted] = useState(false);
   const [nudgeToast, setNudgeToast] = useState<string | null>(null);
-
-  const matchScore =
-    insightResult.ok && insightResult.data.compatibility
-      ? insightResult.data.compatibility.overall
-      : 0;
-
-  const petName =
-    pet.ok && pet.data.petName ? pet.data.petName : SITE.defaultPetName;
-  const mineMood = capitalizeMood(moods.ok ? moods.data.mine?.mood : null);
-  const partnerMood = capitalizeMood(
-    moods.ok ? moods.data.partner?.mood : null,
+  const [currentMineMood, setCurrentMineMood] = useState<string | null>(
+    moods.ok ? moods.data.mine?.mood ?? null : null,
   );
+  const [isSettingMood, startMoodTransition] = useTransition();
+
+  const partnerMood = capitalizeMood(moods.ok ? moods.data.partner?.mood : null);
+  const petName = pet.ok && pet.data.petName ? pet.data.petName : SITE.defaultPetName;
+  const petState = pet.ok ? pet.data.petState : "neutral";
 
   useEffect(() => {
     setMounted(true);
@@ -132,333 +131,350 @@ export function DashboardClient({ data }: DashboardProps) {
 
   async function handleNudge() {
     const res = await nudgePartner();
-    setNudgeToast(res.message || (res.ok ? "🔔 Ping sent!" : "Failed"));
-    setTimeout(() => setNudgeToast(null), 3000);
+    setNudgeToast(res.message || (res.ok ? "Ping sent" : "Failed"));
+    setTimeout(() => setNudgeToast(null), 2800);
   }
 
-  const tonightLines: string[] = [];
-  if (insightResult.ok) {
-    for (const s of insightResult.data.habits?.suggestions ?? []) {
-      tonightLines.push(s);
-    }
-    for (const r of (insightResult.data.recommendations ?? []).slice(0, 3)) {
-      tonightLines.push(`${r.title}: ${r.description}`);
-    }
-    for (const p of insightResult.data.discussionPrompts ?? []) {
-      tonightLines.push(p);
-    }
+  function handleQuickMood(m: string) {
+    setCurrentMineMood(m);
+    startMoodTransition(async () => {
+      await setMoodAction({ mood: m });
+    });
   }
+
+  // Generate a human-readable insight
+  const archetype = insightResult.ok && insightResult.data.insight
+    ? insightResult.data.insight.archetype
+    : "Nurturing";
+
+  const featuredPrompt =
+    insightResult.ok && insightResult.data.discussionPrompts?.length > 0
+      ? insightResult.data.discussionPrompts[0]
+      : "What was the sweetest surprise from this past week?";
+
+  const recs = insightResult.ok ? insightResult.data.recommendations : undefined;
+  const featuredActivity =
+    recs && recs.length > 0
+      ? recs[0]
+      : {
+          title: "Private Cinema Night",
+          description: "Sync a favorite film or show in your Together room.",
+        };
 
   return (
-    <motion.div
-      variants={containerVariants}
-      initial="hidden"
-      animate="show"
-      className="space-y-10"
-    >
-      {/* Partner Joined Welcome Banner */}
-      {daysTogether <= 1 && partnerName && (
-        <div className="p-4 sm:p-5 rounded-3xl border border-amber-500/40 bg-gradient-to-r from-purple-950/70 via-[#0d0218] to-purple-950/70 backdrop-blur-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-[0_0_30px_rgba(212,175,55,0.15)] animate-in fade-in slide-in-from-top-4 duration-500">
-          <div className="flex items-center gap-3">
-            <span className="text-3xl animate-bounce">🎉</span>
+    <div className="space-y-12 max-w-4xl mx-auto">
+      {/* 1. Header: Greeting & Intimate Relationship Presence */}
+      <section className="space-y-4 pt-2">
+        <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2 border-b border-white/[0.06] pb-6">
+          <div>
+            <span className="text-[11px] font-medium tracking-[0.2em] uppercase text-zinc-400">
+              {daysTogetherLabel}
+              {partnerName ? ` with ${partnerName}` : ""}
+            </span>
+            <h1 className="text-3xl sm:text-4xl font-serif font-light text-[#f7f6f2] tracking-tight mt-1">
+              {mounted ? getTimeSalutation() : "Welcome back"}
+            </h1>
+          </div>
+
+          {/* Intimate Partner Presence Indicator */}
+          <div className="flex items-center gap-3 self-start sm:self-auto pt-1 sm:pt-0">
+            <div className="flex items-center gap-2 text-xs text-zinc-300">
+              <span
+                className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                  partnerOnline
+                    ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]"
+                    : "bg-zinc-600"
+                }`}
+                aria-hidden
+              />
+              <span>
+                {partnerName ? partnerName : "Partner"} is{" "}
+                <span className={partnerOnline ? "text-[#f7f6f2] font-medium" : "text-zinc-400"}>
+                  {partnerOnline ? "here with you" : "away"}
+                </span>
+              </span>
+            </div>
+
+            {/* Quick Ping */}
+            <button
+              type="button"
+              disabled={nudgePending}
+              onClick={handleNudge}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:text-white hover:border-white/[0.18] transition-all"
+              title="Ping your partner"
+            >
+              <Radio className="w-3 h-3 text-amber-300/80" />
+              <span>{nudgePending ? "Pinging…" : "Ping"}</span>
+            </button>
+
+            {nudgeToast && (
+              <span className="text-xs text-amber-200 animate-fade-in font-medium">
+                {nudgeToast}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* First Day Welcome Moment (quiet & elegant, no loud purple box) */}
+        {daysTogether <= 1 && partnerName && (
+          <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.08] flex items-center justify-between gap-4">
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              <span className="text-amber-200 font-medium">Your sanctuary is live.</span>{" "}
+              {partnerName} has joined your shared 2-person digital home.
+            </p>
+            <Link
+              href="/chat"
+              className="text-xs font-medium text-amber-200 hover:text-white shrink-0 inline-flex items-center gap-1 transition-colors"
+            >
+              <span>Say hello</span>
+              <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+        )}
+      </section>
+
+      {/* 2. TODAY: One Coherent Journey (No 3-column equal boxes) */}
+      <section className="space-y-6">
+        <div className="flex items-baseline justify-between border-b border-white/[0.06] pb-2">
+          <h2 className="text-xs font-medium tracking-[0.2em] uppercase text-zinc-400">
+            Today
+          </h2>
+          <span className="text-xs text-zinc-400">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+          </span>
+        </div>
+
+        {/* Daily Emotional Check-In & Ritual */}
+        <div className="grid gap-6 md:grid-cols-2 items-stretch">
+          {/* How are you two feeling? */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1015] border border-white/[0.06] flex flex-col justify-between space-y-4">
             <div>
-              <h3 className="text-sm font-bold text-amber-200">
-                Your partner is here! {partnerName} has joined your sanctuary.
+              <span className="text-[11px] font-medium tracking-wider uppercase text-zinc-400">
+                Connection Ritual
+              </span>
+              <h3 className="text-lg font-serif font-light text-[#f7f6f2] mt-0.5">
+                How are you feeling right now?
               </h3>
-              <p className="text-xs text-slate-300">
-                Your private 2-person digital home is now live. Everything is completely synced.
+              <p className="text-xs text-zinc-400 mt-1">
+                {currentMineMood
+                  ? `You are feeling ${capitalizeMood(currentMineMood)}. Tap to adjust.`
+                  : "Share your vibe with your partner in one touch."}
               </p>
             </div>
+
+            {/* Quick Mood Selection */}
+            <div className="flex items-center gap-2 flex-wrap pt-1">
+              {MOOD_OPTIONS.map((opt) => {
+                const isSelected = currentMineMood === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    disabled={isSettingMood}
+                    onClick={() => handleQuickMood(opt.value)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                      isSelected
+                        ? "bg-white/15 text-white border border-white/25 shadow-sm"
+                        : "bg-white/[0.03] text-zinc-300 border border-white/[0.06] hover:bg-white/[0.08] hover:text-white"
+                    }`}
+                  >
+                    <span>{opt.emoji}</span>
+                    <span>{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Partner's current state */}
+            <div className="pt-2 border-t border-white/[0.05] flex items-center justify-between text-xs text-zinc-400">
+              <span>{partnerName || "Partner"}’s mood:</span>
+              <span className="text-zinc-200 font-medium">
+                {partnerMood || "Not checked in yet"}
+              </span>
+            </div>
           </div>
-          <Link
-            href="/chat"
-            className="py-2 px-4 rounded-xl border border-amber-500/40 bg-amber-500/20 text-xs font-bold uppercase tracking-wider text-amber-200 hover:bg-amber-500 hover:text-purple-950 transition-all flex-shrink-0"
-          >
-            Say Hello in Chat ❤️
-          </Link>
+
+          {/* Daily Quiz & Question */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-[#0e1015] border border-white/[0.06] flex flex-col justify-between space-y-4">
+            <div>
+              <span className="text-[11px] font-medium tracking-wider uppercase text-zinc-400">
+                Daily Discovery
+              </span>
+              <h3 className="text-lg font-serif font-light text-[#f7f6f2] mt-0.5">
+                Today’s Connection Prompt
+              </h3>
+              <p className="text-xs text-zinc-300 italic mt-2 leading-relaxed">
+                &ldquo;{featuredPrompt}&rdquo;
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-white/[0.05] flex items-center justify-between">
+              <Link
+                href="/quiz"
+                className="text-xs font-medium text-zinc-300 hover:text-white inline-flex items-center gap-1.5 transition-colors"
+              >
+                <span>Answer Daily Quiz</span>
+                <ArrowRight className="w-3 h-3" />
+              </Link>
+              <Link
+                href="/chat"
+                className="text-xs text-zinc-400 hover:text-zinc-200 inline-flex items-center gap-1 transition-colors"
+              >
+                <MessageSquare className="w-3 h-3" />
+                <span>Discuss in Chat</span>
+              </Link>
+            </div>
+          </div>
         </div>
-      )}
+      </section>
 
-      <motion.header variants={itemVariants} className="relative z-10">
-        <p className="text-[11px] uppercase tracking-[0.22em] text-amber-400 font-bold mb-2">
-          {daysTogetherLabel}
-          {partnerName ? ` · with ${partnerName}` : ""}
-        </p>
-        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-100 via-amber-300 to-amber-500 font-display text-glow-gold">
-          Home
-        </h1>
-        <p className="mt-2 text-sm text-slate-300 font-medium max-w-xl">
-          Your shared digital life — rituals, status, and the story you build
-          together.
-        </p>
-
-        <div className="flex flex-wrap items-center gap-3 mt-4">
-          {/* Partner Status */}
-          <span className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-950/40 border border-amber-500/20 text-xs font-bold uppercase tracking-wider shadow-inner">
-            <span
-              className={`h-2.5 w-2.5 rounded-full transition-all ${
-                partnerOnline
-                  ? "bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]"
-                  : "bg-slate-500"
-              }`}
-            />
-            <span className={partnerOnline ? "text-amber-300" : "text-slate-400"}>
-              {partnerName ? partnerName : "Partner"} is{" "}
-              {partnerOnline ? "Online" : "Away"}
-            </span>
+      {/* 3. TONIGHT: One Focused Shared Moment */}
+      <section className="p-6 sm:p-8 rounded-2xl bg-gradient-to-br from-[#12141c] to-[#0c0d12] border border-white/[0.08] relative overflow-hidden">
+        <div className="max-w-xl space-y-3 relative z-10">
+          <span className="text-[11px] font-medium tracking-wider uppercase text-amber-200/90 flex items-center gap-1.5">
+            <Film className="w-3.5 h-3.5" />
+            <span>Shared Evening</span>
           </span>
-
-          {/* User On/Off Presence Switch */}
-          <button
-            type="button"
-            onClick={toggleMyStatus}
-            title={
-              myStatus === "online"
-                ? "Your status is ONLINE. Click to toggle OFF (appear offline)"
-                : "Your status is OFFLINE. Click to toggle ON (appear online)"
-            }
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-bold uppercase tracking-wider transition-all active:scale-95 ${
-              myStatus === "online"
-                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.25)]"
-                : "border-slate-700 bg-slate-900/80 text-slate-400"
-            }`}
-          >
-            <span className="text-[10px] opacity-75">You:</span>
-            <span
-              className={`h-2 w-2 rounded-full transition-all ${
-                myStatus === "online" ? "bg-emerald-400 animate-pulse" : "bg-slate-500"
-              }`}
-            />
-            <span>{myStatus === "online" ? "Online (ON)" : "Offline (OFF)"}</span>
-          </button>
-
-          {/* Ping Partner Button */}
-          <button
-            type="button"
-            disabled={nudgePending}
-            onClick={handleNudge}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-xs font-bold uppercase tracking-wider text-amber-300 hover:bg-amber-500 hover:text-purple-950 transition-all active:scale-95 disabled:opacity-50 shadow-[0_0_12px_rgba(212,175,55,0.2)]"
-          >
-            <span>🔔</span>
-            <span>{nudgePending ? "Pinging…" : "Ping Partner"}</span>
-          </button>
-          {nudgeToast ? (
-            <span className="text-xs font-bold text-amber-300 bg-purple-950/80 border border-amber-500/40 px-3 py-1.5 rounded-full animate-bounce">
-              {nudgeToast}
-            </span>
-          ) : null}
+          <h2 className="text-xl sm:text-2xl font-serif font-light text-[#f7f6f2] tracking-tight">
+            {featuredActivity.title}
+          </h2>
+          <p className="text-xs sm:text-sm text-zinc-300 font-light leading-relaxed">
+            {featuredActivity.description}
+          </p>
+          <div className="pt-2 flex items-center gap-3">
+            <Link
+              href="/together"
+              className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-medium hover:bg-white hover:shadow-md transition-all active:scale-98"
+            >
+              <span>Start in Together Room</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+            <Link
+              href="/calendar"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-white/[0.08] text-xs text-zinc-300 hover:text-white hover:bg-white/[0.04] transition-colors"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Schedule Night</span>
+            </Link>
+          </div>
         </div>
-      </motion.header>
+      </section>
 
-      {/* Today ritual strip */}
-      <motion.section variants={itemVariants} className="space-y-3">
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80">
-          Today&apos;s ritual
-        </h2>
-        <div className="grid gap-3 sm:grid-cols-3">
+      {/* 4. YOUR LIVING SANCTUARY: Companion & Relationship Resonance */}
+      <section className="space-y-4">
+        <div className="flex items-baseline justify-between border-b border-white/[0.06] pb-2">
+          <h2 className="text-xs font-medium tracking-[0.2em] uppercase text-zinc-400">
+            Our Living World
+          </h2>
           <Link
-            href="/mood"
-            className="rounded-2xl border border-amber-500/20 bg-purple-950/40 p-5 hover:border-amber-500/40 hover:bg-purple-900/40 hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-all"
+            href="/insights"
+            className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
           >
-            <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
-              1 · Vibe
-            </p>
-            <p className="mt-2 text-lg font-display font-bold text-white">
-              Check in
-            </p>
-            <p className="mt-1 text-xs text-slate-300">
-              You: {mineMood} · Partner: {partnerMood}
-            </p>
-          </Link>
-          <Link
-            href="/quiz"
-            className="rounded-2xl border border-amber-500/20 bg-purple-950/40 p-5 hover:border-amber-500/40 hover:bg-purple-900/40 hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-all"
-          >
-            <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
-              2 · Quiz
-            </p>
-            <p className="mt-2 text-lg font-display font-bold text-white">
-              Play daily quiz
-            </p>
-            <p className="mt-1 text-xs text-slate-300">
-              Learn each other — not a chat game
-            </p>
-          </Link>
-          <Link
-            href="/together"
-            className="rounded-2xl border border-amber-500/20 bg-purple-950/40 p-5 hover:border-amber-500/40 hover:bg-purple-900/40 hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-all"
-          >
-            <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
-              3 · Together
-            </p>
-            <p className="mt-2 text-lg font-display font-bold text-white">
-              Shared night
-            </p>
-            <p className="mt-1 text-xs text-slate-300">
-              Sync a room — becomes a memory
-            </p>
+            Resonance details →
           </Link>
         </div>
-      </motion.section>
 
-      {/* Status */}
-      <motion.section
-        variants={itemVariants}
-        className="grid gap-4 sm:grid-cols-3"
-      >
-        <Link
-          href="/pet"
-          className="rounded-2xl border border-amber-500/20 bg-purple-950/40 p-5 hover:border-amber-500/40 hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-all"
-        >
-          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80">
-            Companion
-          </p>
-          <p className="mt-2 text-xl font-display font-bold text-white">
-            {petName}
-          </p>
-          <p className="mt-1 text-xs text-slate-300">
-            {pet.ok
-              ? `${pet.data.petState} · ${pet.data.score}/100`
-              : "—"}
-          </p>
-        </Link>
-        <div className="rounded-2xl border border-amber-500/20 bg-purple-950/40 p-5">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80">
-            Match
-          </p>
-          <p className="mt-2 text-3xl font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-400 text-glow-gold">
-            {mounted ? matchScore : 0}
-            <span className="text-lg text-amber-400/70">%</span>
-          </p>
-          {insightResult.ok && insightResult.data.compatibility ? (
-            <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
-              Comm {insightResult.data.compatibility.communication} · Time{" "}
-              {insightResult.data.compatibility.qualityTime} · Rhythm{" "}
-              {insightResult.data.compatibility.consistency}
-            </p>
-          ) : null}
-        </div>
-        <div className="rounded-2xl border border-amber-500/20 bg-purple-950/40 p-5">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80">
-            Archetype
-          </p>
-          <p className="mt-2 text-xl font-display font-bold capitalize text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-amber-500">
-            {insightResult.ok && insightResult.data.insight
-              ? insightResult.data.insight.archetype
-              : "Growing…"}
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            Local Relationship Intelligence
-          </p>
-        </div>
-      </motion.section>
+        <div className="grid gap-6 sm:grid-cols-2 items-stretch">
+          {/* Companion Buddy (living expression, not a statistics card) */}
+          <Link
+            href="/pet"
+            className="p-5 rounded-2xl bg-[#0e1015] border border-white/[0.06] hover:border-white/[0.14] transition-all flex items-center gap-4 group"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center shrink-0 text-xl group-hover:scale-105 transition-transform">
+              <Heart className="w-6 h-6 text-rose-300/80" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-medium text-[#f7f6f2] truncate">
+                  {petName}
+                </h3>
+                <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-mono">
+                  · {petState}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                {getPetReactionText(petState, petName)}
+              </p>
+            </div>
+          </Link>
 
-      {/* Recent Us */}
-      <motion.section variants={itemVariants} className="space-y-3">
-        <div className="flex items-end justify-between gap-4">
-          <h2 className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80">
-            Recent us
+          {/* Relationship Resonance (Human insight instead of artificial Match 31%) */}
+          <Link
+            href="/insights"
+            className="p-5 rounded-2xl bg-[#0e1015] border border-white/[0.06] hover:border-white/[0.14] transition-all flex items-center gap-4 group"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center shrink-0 text-xl group-hover:scale-105 transition-transform">
+              <Sparkles className="w-6 h-6 text-amber-200/80" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-medium text-[#f7f6f2] capitalize">
+                  {archetype} Dynamic
+                </h3>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                Your connection rhythm is grounded in warm empathy and quiet shared rituals.
+              </p>
+            </div>
+          </Link>
+        </div>
+      </section>
+
+      {/* 5. FROM YOUR STORY: Chronological Moments (Not a generic card list) */}
+      <section className="space-y-4">
+        <div className="flex items-baseline justify-between border-b border-white/[0.06] pb-2">
+          <h2 className="text-xs font-medium tracking-[0.2em] uppercase text-zinc-400">
+            From Your Story
           </h2>
           <Link
             href="/timeline"
-            className="text-[10px] font-bold uppercase tracking-widest text-amber-300 hover:text-amber-100"
+            className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
           >
             Full timeline →
           </Link>
         </div>
+
         {!recentUs.ok ? (
-          <p className="text-sm text-red-400">{recentUs.error.message}</p>
+          <p className="text-xs text-zinc-400">{recentUs.error.message}</p>
         ) : recentUs.data.events.length === 0 ? (
-          <p className="text-sm text-slate-400 rounded-2xl border border-amber-500/15 bg-purple-950/30 p-6">
-            Complete today&apos;s ritual — moments appear here automatically.
-          </p>
+          <div className="p-8 rounded-2xl bg-[#0e1015] border border-white/[0.06] text-center space-y-2">
+            <Clock className="w-5 h-5 text-zinc-500 mx-auto" />
+            <p className="text-xs text-zinc-300 font-medium">Your story is just starting.</p>
+            <p className="text-xs text-zinc-500">
+              Check in today or share a movie night — moments will weave into your timeline automatically.
+            </p>
+          </div>
         ) : (
-          <ul className="space-y-2">
-            {recentUs.data.events.map((e) => (
-              <li
+          <div className="grid gap-3 sm:grid-cols-2">
+            {recentUs.data.events.slice(0, 4).map((e) => (
+              <div
                 key={`${e.kind}-${e.id}`}
-                className="flex items-start gap-3 rounded-xl border border-amber-500/15 bg-purple-950/30 px-4 py-3"
+                className="p-4 rounded-xl bg-[#0e1015] border border-white/[0.06] flex items-start gap-3"
               >
-                <span className="text-lg" aria-hidden>
-                  {kindEmoji(e.kind)}
-                </span>
+                <div className="w-8 h-8 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center shrink-0 text-xs text-zinc-400">
+                  <Clock className="w-3.5 h-3.5" />
+                </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-slate-100 truncate">
+                  <p className="text-xs font-medium text-[#f7f6f2] truncate">
                     {e.title}
                   </p>
-                  {e.subtitle ? (
-                    <p className="text-xs text-slate-400 truncate">{e.subtitle}</p>
-                  ) : null}
+                  {e.subtitle && (
+                    <p className="text-[11px] text-zinc-400 truncate mt-0.5">
+                      {e.subtitle}
+                    </p>
+                  )}
+                  <time className="text-[10px] text-zinc-500 block mt-1">
+                    {new Date(e.at).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </time>
                 </div>
-                <time className="text-[10px] font-semibold text-amber-400/70 whitespace-nowrap">
-                  {new Date(e.at).toLocaleDateString()}
-                </time>
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
-      </motion.section>
-
-      {/* Tonight */}
-      {tonightLines.length > 0 ? (
-        <motion.section
-          variants={itemVariants}
-          className="rounded-3xl border border-amber-500/30 bg-gradient-to-br from-purple-950/80 via-purple-900/60 to-purple-950/90 p-6 space-y-4 shadow-[0_0_25px_rgba(212,175,55,0.1)]"
-        >
-          <h2 className="text-[10px] font-bold uppercase tracking-widest text-amber-300">
-            Tonight
-          </h2>
-          <ul className="space-y-3">
-            {tonightLines.slice(0, 5).map((line) => (
-              <li
-                key={line}
-                className="text-sm text-slate-200 font-medium leading-relaxed flex gap-2"
-              >
-                <span className="text-amber-400">✦</span>
-                <span>{line}</span>
-              </li>
-            ))}
-          </ul>
-        </motion.section>
-      ) : null}
-
-      {insightResult.ok && insightResult.data.insight ? (
-        <motion.section
-          variants={itemVariants}
-          className="grid gap-6 sm:grid-cols-2"
-        >
-          <div>
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80 mb-3">
-              Strengths
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {insightResult.data.insight.strengths.map((s) => (
-                <span
-                  key={s}
-                  className="text-xs font-semibold text-amber-200 bg-purple-950/60 border border-amber-500/30 px-3 py-1.5 rounded-full shadow-[0_0_10px_rgba(212,175,55,0.15)]"
-                >
-                  {s}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div>
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-amber-400/80 mb-3">
-              Growth
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {insightResult.data.insight.growthAreas.map((g) => (
-                <span
-                  key={g}
-                  className="text-xs font-semibold text-slate-300 bg-purple-950/40 border border-purple-800/40 px-3 py-1.5 rounded-full"
-                >
-                  {g}
-                </span>
-              ))}
-            </div>
-          </div>
-        </motion.section>
-      ) : null}
-    </motion.div>
+      </section>
+    </div>
   );
 }

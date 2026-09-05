@@ -37,11 +37,15 @@ function getNotificationIcon(kind: string) {
   }
 }
 
-export function NotificationsPanel() {
-  const [notifications, setNotifications] = useState<InAppNotificationDTO[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+export function NotificationsPanel({
+  initialNotifications,
+}: {
+  initialNotifications?: { notifications: InAppNotificationDTO[]; unreadCount: number };
+} = {}) {
+  const [notifications, setNotifications] = useState<InAppNotificationDTO[]>(initialNotifications?.notifications ?? []);
+  const [unreadCount, setUnreadCount] = useState(initialNotifications?.unreadCount ?? 0);
   const [filter, setFilter] = useState("all");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialNotifications);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -61,8 +65,10 @@ export function NotificationsPanel() {
   }
 
   useEffect(() => {
-    void loadData();
-  }, []);
+    if (!initialNotifications) {
+      void loadData();
+    }
+  }, [initialNotifications]);
 
   function handleMarkRead(id?: string) {
     startTransition(async () => {

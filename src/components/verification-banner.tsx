@@ -14,10 +14,10 @@ export function VerificationBanner({ couple }: { couple: Couple }) {
 
   return (
     <div
-      className={`mb-6 rounded-2xl border px-5 py-4 text-sm backdrop-blur-md shadow-lg ${
+      className={`mb-6 rounded-2xl border px-5 py-3.5 text-xs font-medium backdrop-blur-md ${
         expired
-          ? "border-red-500/40 bg-red-950/60 text-red-200 shadow-red-950/50"
-          : "border-amber-500/40 bg-purple-950/70 text-amber-100 shadow-[0_0_15px_rgba(212,175,55,0.15)]"
+          ? "border-rose-500/30 bg-rose-500/[0.06] text-rose-200"
+          : "border-amber-500/25 bg-amber-500/[0.05] text-amber-200/90"
       }`}
     >
       {expired ? (

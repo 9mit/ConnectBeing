@@ -2,7 +2,16 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Calendar, Plus, Trash2, CheckCircle2, Circle, Clock, Sparkles } from "lucide-react";
+import {
+  Calendar,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  Circle,
+  Clock,
+  Sparkles,
+  X,
+} from "lucide-react";
 
 import {
   createCalendarEventAction,
@@ -13,15 +22,15 @@ import {
 } from "@/actions/calendar";
 
 const CATEGORIES = [
-  { value: "date_night", label: "🍿 Date Night", color: "from-rose-500/20 to-purple-600/20 border-rose-500/30" },
-  { value: "anniversary", label: "💍 Anniversary", color: "from-amber-500/20 to-yellow-600/20 border-amber-500/40" },
-  { value: "ritual", label: "🕯️ Ritual", color: "from-indigo-500/20 to-purple-800/20 border-indigo-500/30" },
-  { value: "custom", label: "✨ Special", color: "from-purple-500/20 to-pink-600/20 border-purple-500/30" },
+  { value: "date_night", label: "Date Night" },
+  { value: "anniversary", label: "Anniversary" },
+  { value: "ritual", label: "Ritual" },
+  { value: "custom", label: "Special" },
 ] as const;
 
-export function CalendarPanel() {
-  const [events, setEvents] = useState<CalendarEventDTO[]>([]);
-  const [loading, setLoading] = useState(true);
+export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEventDTO[] }) {
+  const [events, setEvents] = useState<CalendarEventDTO[]>(initialEvents ?? []);
+  const [loading, setLoading] = useState(!initialEvents);
   const [error, setError] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [title, setTitle] = useState("");
@@ -42,8 +51,10 @@ export function CalendarPanel() {
   }
 
   useEffect(() => {
-    void loadEvents();
-  }, []);
+    if (!initialEvents) {
+      void loadEvents();
+    }
+  }, [initialEvents]);
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -94,37 +105,38 @@ export function CalendarPanel() {
   const completedEvents = events.filter((e) => e.completed);
 
   return (
-    <div className="space-y-8 max-w-4xl mx-auto">
-      {/* Header Banner */}
-      <div className="rounded-3xl glass-panel border border-amber-500/30 bg-purple-950/50 p-6 md:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-[0_0_35px_rgba(212,175,55,0.12)]">
+    <div className="space-y-10 max-w-3xl mx-auto">
+      {/* Editorial Header */}
+      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 border-b border-white/[0.06] pb-6">
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-amber-400">
-            Shared Connection Schedule
+          <span className="text-[11px] font-medium tracking-[0.2em] uppercase text-zinc-400">
+            Shared Schedule
           </span>
-          <h1 className="text-3xl font-extrabold text-white font-display mt-1 text-glow-gold">
-            Couple Calendar & Rituals
+          <h1 className="text-3xl sm:text-4xl font-serif font-light text-[#f7f6f2] tracking-tight mt-1">
+            Couple Calendar
           </h1>
-          <p className="text-xs sm:text-sm text-slate-300 font-medium mt-1">
-            Plan romantic date nights, remember milestones, and cultivate shared rituals.
+          <p className="text-xs text-zinc-400 mt-1">
+            Plan date nights, anniversaries, and intimate shared rituals.
           </p>
         </div>
+
         <button
           type="button"
           onClick={() => setIsAdding(!isAdding)}
-          className="btn-madlove-gold px-5 py-2.5 text-xs flex items-center gap-2"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white transition-all self-start sm:self-auto shadow-sm active:scale-98"
         >
-          <Plus className="w-4 h-4" />
-          <span>{isAdding ? "Cancel" : "Add Date"}</span>
+          <Plus className="w-3.5 h-3.5" />
+          <span>{isAdding ? "Close" : "Schedule Date"}</span>
         </button>
       </div>
 
       {error && (
-        <p className="text-sm font-semibold text-red-300 bg-red-950/70 border border-red-500/30 px-4 py-2.5 rounded-xl text-center">
+        <p className="p-3 rounded-xl text-xs font-medium text-rose-300 bg-rose-950/40 border border-rose-500/20 text-center">
           {error}
         </p>
       )}
 
-      {/* Add Event Drawer / Form */}
+      {/* Add Event Form */}
       <AnimatePresence>
         {isAdding && (
           <motion.form
@@ -132,16 +144,25 @@ export function CalendarPanel() {
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             onSubmit={handleCreate}
-            className="rounded-3xl glass-panel border border-amber-500/30 bg-purple-950/60 p-6 md:p-8 space-y-4 shadow-xl overflow-hidden"
+            className="rounded-2xl border border-white/[0.08] bg-[#0e1017] p-6 space-y-4 shadow-xl overflow-hidden"
           >
-            <h2 className="text-lg font-bold text-white font-display text-glow-gold flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              Schedule a Special Moment
-            </h2>
+            <div className="flex items-center justify-between border-b border-white/[0.06] pb-3">
+              <h2 className="text-sm font-medium text-[#f7f6f2] flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-zinc-400" />
+                <span>Schedule a Shared Moment</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsAdding(false)}
+                className="text-zinc-400 hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-amber-300">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
                   Event Title
                 </label>
                 <input
@@ -150,12 +171,12 @@ export function CalendarPanel() {
                   placeholder="e.g. Rooftop Stargazing & Wine"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-amber-400"
+                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-amber-300">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
                   Date & Time
                 </label>
                 <input
@@ -163,13 +184,13 @@ export function CalendarPanel() {
                   required
                   value={eventDate}
                   onChange={(e) => setEventDate(e.target.value)}
-                  className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] focus:outline-none focus:border-white/20 transition-colors"
                 />
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-bold uppercase tracking-wider text-amber-300">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
                 Category
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -178,10 +199,10 @@ export function CalendarPanel() {
                     key={cat.value}
                     type="button"
                     onClick={() => setCategory(cat.value)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
                       category === cat.value
-                        ? "border-amber-400 bg-amber-500/20 text-amber-200 shadow-[0_0_12px_rgba(212,175,55,0.25)]"
-                        : "border-purple-900/40 bg-purple-950/40 text-slate-400 hover:text-slate-200"
+                        ? "border-white/25 bg-white/15 text-white shadow-sm"
+                        : "border-white/[0.06] bg-white/[0.02] text-zinc-400 hover:text-white"
                     }`}
                   >
                     {cat.label}
@@ -190,31 +211,24 @@ export function CalendarPanel() {
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                Notes / Ideas (Optional)
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
+                Notes & Ideas (Optional)
               </label>
               <textarea
                 rows={2}
-                placeholder="Bring warm blankets and chocolate..."
+                placeholder="What to prepare, locations, or reminders…"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-xl border border-amber-500/30 bg-purple-950/40 px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-amber-400"
+                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors resize-none"
               />
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
               <button
-                type="button"
-                onClick={() => setIsAdding(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white"
-              >
-                Cancel
-              </button>
-              <button
                 type="submit"
                 disabled={pending}
-                className="btn-madlove-gold px-6 py-2 text-xs font-bold disabled:opacity-50"
+                className="px-5 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all"
               >
                 {pending ? "Saving…" : "Save Date"}
               </button>
@@ -223,70 +237,73 @@ export function CalendarPanel() {
         )}
       </AnimatePresence>
 
-      {/* Upcoming Section */}
+      {/* Upcoming Events */}
       <section className="space-y-4">
-        <h2 className="text-lg font-bold text-white font-display tracking-wide uppercase flex items-center gap-2 border-b border-amber-500/20 pb-2">
-          <Calendar className="w-4 h-4 text-amber-400" />
-          <span>Upcoming Dates & Rituals ({upcomingEvents.length})</span>
-        </h2>
+        <div className="flex items-center justify-between border-b border-white/[0.06] pb-2">
+          <h2 className="text-xs font-medium tracking-[0.2em] uppercase text-zinc-400 flex items-center gap-2">
+            <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+            <span>Upcoming Dates ({upcomingEvents.length})</span>
+          </h2>
+        </div>
 
         {loading ? (
-          <p className="text-sm text-amber-300/70 italic py-6 text-center">Loading calendar moments…</p>
+          <p className="text-xs text-zinc-400 italic py-6 text-center">Loading calendar…</p>
         ) : upcomingEvents.length === 0 ? (
-          <div className="rounded-2xl glass-panel p-8 text-center border border-amber-500/15">
-            <p className="text-2xl mb-2">🥂</p>
-            <p className="text-sm font-semibold text-slate-300">No upcoming dates scheduled yet.</p>
-            <p className="text-xs text-slate-400 mt-1">Tap &ldquo;Add Date&rdquo; to surprise your partner with a plan.</p>
+          <div className="rounded-2xl border border-white/[0.06] bg-[#0e1017] p-8 text-center space-y-2">
+            <Sparkles className="w-5 h-5 text-zinc-500 mx-auto" />
+            <p className="text-xs font-medium text-[#f7f6f2]">No upcoming dates scheduled.</p>
+            <p className="text-xs text-zinc-500">Tap &ldquo;Schedule Date&rdquo; to plan your next date night or shared ritual.</p>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {upcomingEvents.map((event) => {
               const d = new Date(event.eventDate);
               const isToday = d.toDateString() === new Date().toDateString();
-              const categoryMeta = CATEGORIES.find((c) => c.value === event.category) ?? CATEGORIES[0]!;
 
               return (
                 <motion.div
                   key={event.id}
                   layout
-                  initial={{ opacity: 0, scale: 0.96 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className={`rounded-2xl glass-panel p-5 border bg-gradient-to-br ${categoryMeta.color} flex flex-col justify-between hover:-translate-y-0.5 transition-all shadow-md group`}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-2xl border border-white/[0.06] bg-[#0e1017] p-4 sm:p-5 flex flex-col justify-between space-y-3 hover:border-white/[0.14] transition-all group"
                 >
                   <div className="space-y-2">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
                         <button
                           type="button"
                           onClick={() => handleToggle(event.id)}
                           title="Mark as completed"
-                          className="text-slate-400 hover:text-amber-300 transition-colors"
+                          className="text-zinc-500 hover:text-white transition-colors"
                         >
-                          <Circle className="w-5 h-5" />
+                          <Circle className="w-4 h-4" />
                         </button>
-                        <h3 className="font-bold text-white text-base leading-snug">{event.title}</h3>
+                        <h3 className="font-serif font-light text-[#f7f6f2] text-base leading-snug">
+                          {event.title}
+                        </h3>
                       </div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
-                        {isToday ? "✨ Today" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/[0.04] text-zinc-300 border border-white/[0.06] whitespace-nowrap">
+                        {isToday ? "Today" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                       </span>
                     </div>
 
                     {event.description && (
-                      <p className="text-xs text-slate-300 pl-7 leading-relaxed font-medium">
+                      <p className="text-xs text-zinc-400 pl-6.5 font-light leading-relaxed">
                         {event.description}
                       </p>
                     )}
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between pl-7 text-[11px] text-amber-300/80">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" />
+                  <div className="pt-2 border-t border-white/[0.05] flex items-center justify-between pl-6.5 text-[11px] text-zinc-400">
+                    <span className="flex items-center gap-1 font-mono">
+                      <Clock className="w-3 h-3 text-zinc-500" />
                       {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </span>
                     <button
                       type="button"
                       onClick={() => handleDelete(event.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-red-400 p-1"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-rose-400 p-1"
                       title="Delete event"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -301,24 +318,24 @@ export function CalendarPanel() {
 
       {/* Completed Section */}
       {completedEvents.length > 0 && (
-        <section className="space-y-3 pt-4">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+        <section className="space-y-3 pt-2">
+          <h3 className="text-[11px] font-medium tracking-wider text-zinc-400 uppercase">
             Completed Dates ({completedEvents.length})
           </h3>
-          <div className="grid gap-2 sm:grid-cols-2 opacity-60 hover:opacity-100 transition-opacity">
+          <div className="grid gap-2 sm:grid-cols-2 opacity-65 hover:opacity-100 transition-opacity">
             {completedEvents.map((event) => (
               <div
                 key={event.id}
-                className="rounded-xl glass-panel p-3.5 flex items-center justify-between border border-white/10 text-xs"
+                className="rounded-xl border border-white/[0.05] bg-[#0e1017] p-3 flex items-center justify-between text-xs"
               >
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="line-through text-slate-300">{event.title}</span>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="line-through text-zinc-400">{event.title}</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleDelete(event.id)}
-                  className="text-slate-500 hover:text-red-400"
+                  className="text-zinc-500 hover:text-rose-400"
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>

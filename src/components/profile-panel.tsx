@@ -11,24 +11,30 @@ import {
   type CoupleProfileDataDTO,
 } from "@/actions/profile";
 
-export function ProfilePanel() {
-  const [data, setData] = useState<CoupleProfileDataDTO | null>(null);
-  const [loading, setLoading] = useState(true);
+export function ProfilePanel({
+  initialData,
+}: {
+  initialData?: CoupleProfileDataDTO | null;
+} = {}) {
+  const [data, setData] = useState<CoupleProfileDataDTO | null>(initialData ?? null);
+  const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   // Edit Mode state
   const [editingProfile, setEditingProfile] = useState(false);
-  const [name, setName] = useState("");
-  const [selfDesc, setSelfDesc] = useState("");
-  const [partnerExpect, setPartnerExpect] = useState("");
-  const [hobbiesStr, setHobbiesStr] = useState("");
-  const [loveLangStr, setLoveLangStr] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
+  const [name, setName] = useState(initialData?.me?.name ?? "");
+  const [selfDesc, setSelfDesc] = useState(initialData?.me?.selfDescription ?? "");
+  const [partnerExpect, setPartnerExpect] = useState(initialData?.me?.partnerExpectation ?? "");
+  const [hobbiesStr, setHobbiesStr] = useState(initialData?.me?.hobbies ? initialData.me.hobbies.join(", ") : "");
+  const [loveLangStr, setLoveLangStr] = useState(initialData?.me?.loveLanguages ? initialData.me.loveLanguages.join(", ") : "");
+  const [avatarUrl, setAvatarUrl] = useState(initialData?.me?.avatarUrl ?? "");
 
   // Edit Anniversary
   const [editingAnniversary, setEditingAnniversary] = useState(false);
-  const [anniversaryInput, setAnniversaryInput] = useState("");
+  const [anniversaryInput, setAnniversaryInput] = useState(
+    initialData?.anniversaryDate ? new Date(initialData.anniversaryDate).toISOString().slice(0, 10) : ""
+  );
 
   const [pending, startTransition] = useTransition();
 
@@ -53,8 +59,10 @@ export function ProfilePanel() {
   }
 
   useEffect(() => {
-    void loadData();
-  }, []);
+    if (!initialData) {
+      void loadData();
+    }
+  }, [initialData]);
 
   function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();

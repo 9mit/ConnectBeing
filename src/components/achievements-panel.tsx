@@ -42,12 +42,16 @@ function getTierStyle(tier: string, unlocked: boolean) {
   }
 }
 
-export function AchievementsPanel() {
-  const [items, setItems] = useState<AchievementItem[]>([]);
-  const [unlockedCount, setUnlockedCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
+export function AchievementsPanel({
+  initialData,
+}: {
+  initialData?: { items: AchievementItem[]; unlockedCount: number; totalCount: number };
+} = {}) {
+  const [items, setItems] = useState<AchievementItem[]>(initialData?.items ?? []);
+  const [unlockedCount, setUnlockedCount] = useState(initialData?.unlockedCount ?? 0);
+  const [totalCount, setTotalCount] = useState(initialData?.totalCount ?? 0);
   const [filter, setFilter] = useState("all");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialData);
 
   async function loadData() {
     const res = await listAchievementsAction();
@@ -60,8 +64,10 @@ export function AchievementsPanel() {
   }
 
   useEffect(() => {
-    void loadData();
-  }, []);
+    if (!initialData) {
+      void loadData();
+    }
+  }, [initialData]);
 
   const filtered =
     filter === "all" ? items : items.filter((i) => i.tier === filter);

@@ -16,12 +16,16 @@ const THEMES = [
   { id: "celestial-sky", name: "Celestial Sky", accent: "from-sky-400 to-blue-900", desc: "Galactic cyan & serene starlight" },
 ] as const;
 
-export function SettingsPanel() {
-  const [theme, setTheme] = useState<string>("rose-dusk");
-  const [petName, setPetName] = useState("Buddy");
+export function SettingsPanel({
+  initialSettings,
+}: {
+  initialSettings?: { theme: string; petName: string };
+} = {}) {
+  const [theme, setTheme] = useState<string>(initialSettings?.theme ?? "rose-dusk");
+  const [petName, setPetName] = useState(initialSettings?.petName ?? "Buddy");
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [ambientGlow, setAmbientGlow] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialSettings);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -38,8 +42,10 @@ export function SettingsPanel() {
   }
 
   useEffect(() => {
-    void loadSettings();
-  }, []);
+    if (!initialSettings) {
+      void loadSettings();
+    }
+  }, [initialSettings]);
 
   function handleSave(e: React.FormEvent) {
     e.preventDefault();

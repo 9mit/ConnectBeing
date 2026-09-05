@@ -1,3 +1,4 @@
+import { getDailyQuizAction } from "@/actions/quiz";
 import { AppShell } from "@/components/app-shell";
 import { QuizPanel } from "@/components/quiz-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
@@ -11,10 +12,11 @@ export const metadata = {
 
 export default async function QuizPage() {
   const ctx = await requireVerifiedCoupleOrRedirect();
+  const initialQuiz = await getDailyQuizAction();
 
   return (
     <AppShell coupleId={ctx.couple.id} userId={ctx.user.id}>
-      <QuizPanel />
+      <QuizPanel initialQuiz={initialQuiz} />
     </AppShell>
   );
 }

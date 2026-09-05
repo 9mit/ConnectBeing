@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 
@@ -11,7 +12,7 @@ export type SessionUser = User & {
   couple: Couple | null;
 };
 
-export async function getAuthUser() {
+export const getAuthUser = cache(async function getAuthUser() {
   try {
     const cookieStore = cookies();
     const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
@@ -28,17 +29,17 @@ export async function getAuthUser() {
   } catch {
     return null;
   }
-}
+});
 
-export async function requireAuthUser() {
+export const requireAuthUser = cache(async function requireAuthUser() {
   const authUser = await getAuthUser();
   if (!authUser) {
     throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
   }
   return authUser;
-}
+});
 
-export async function getAppUser(): Promise<SessionUser | null> {
+export const getAppUser = cache(async function getAppUser(): Promise<SessionUser | null> {
   const authUser = await getAuthUser();
   if (!authUser) return null;
 
@@ -88,9 +89,9 @@ export async function getAppUser(): Promise<SessionUser | null> {
     console.error("[getAppUser] DB error:", err);
     return null;
   }
-}
+});
 
-export async function requireAppUser(): Promise<SessionUser> {
+export const requireAppUser = cache(async function requireAppUser(): Promise<SessionUser> {
   const authUser = await requireAuthUser();
   const targetUserId = authUser.userId;
 
@@ -137,9 +138,9 @@ export async function requireAppUser(): Promise<SessionUser> {
   }
 
   return { ...row, couple: row.couple ?? null };
-}
+});
 
-export async function requireOnboardedUser(): Promise<SessionUser> {
+export const requireOnboardedUser = cache(async function requireOnboardedUser(): Promise<SessionUser> {
   const user = await requireAppUser();
   if (!user.isOnboarded) {
     throw new AppError(
@@ -149,9 +150,9 @@ export async function requireOnboardedUser(): Promise<SessionUser> {
     );
   }
   return user;
-}
+});
 
-export async function requireActiveCouple(): Promise<{
+export const requireActiveCouple = cache(async function requireActiveCouple(): Promise<{
   user: SessionUser;
   couple: Couple;
 }> {
@@ -184,7 +185,7 @@ export async function requireActiveCouple(): Promise<{
   }
 
   return { user, couple };
-}
+});
 
 export function isCoupleMember(couple: Couple, userId: string): boolean {
   return couple.userAId === userId || couple.userBId === userId;
@@ -224,7 +225,7 @@ export async function requireActiveCoupleOrRedirect(): Promise<{
   }
 }
 
-export async function requireVerifiedCouple(): Promise<{
+export const requireVerifiedCouple = cache(async function requireVerifiedCouple(): Promise<{
   user: SessionUser;
   couple: Couple;
 }> {
@@ -232,7 +233,7 @@ export async function requireVerifiedCouple(): Promise<{
   const { requireCoupleVerified } = await import("@/lib/couple-verification");
   await requireCoupleVerified(ctx.couple);
   return ctx;
-}
+});
 
 export async function requireVerifiedCoupleOrRedirect(): Promise<{
   user: SessionUser;

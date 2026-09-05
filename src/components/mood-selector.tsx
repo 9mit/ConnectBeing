@@ -15,20 +15,28 @@ const MOODS = [
   { value: "low", label: "Low", emoji: "😔" },
 ] as const;
 
-export function MoodSelector({ coupleId }: { coupleId: string }) {
-  const [mine, setMine] = useState<string | null>(null);
-  const [partner, setPartner] = useState<string | null>(null);
+export function MoodSelector({
+  coupleId,
+  initialMoods,
+}: {
+  coupleId: string;
+  initialMoods?: { mine: string | null; partner: string | null };
+}) {
+  const [mine, setMine] = useState<string | null>(initialMoods?.mine ?? null);
+  const [partner, setPartner] = useState<string | null>(initialMoods?.partner ?? null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
-    void getCurrentMoodsAction().then((r) => {
-      if (r.ok) {
-        setMine(r.data.mine?.mood ?? null);
-        setPartner(r.data.partner?.mood ?? null);
-      }
-    });
-  }, []);
+    if (!initialMoods) {
+      void getCurrentMoodsAction().then((r) => {
+        if (r.ok) {
+          setMine(r.data.mine?.mood ?? null);
+          setPartner(r.data.partner?.mood ?? null);
+        }
+      });
+    }
+  }, [initialMoods]);
 
   useEffect(() => {
     let disposed = false;
@@ -91,21 +99,30 @@ export function MoodSelector({ coupleId }: { coupleId: string }) {
                 setError(null);
               });
             }}
-            className={`flex flex-col items-center gap-2 rounded-2xl border p-3.5 text-sm font-semibold transition-all ${
+            className={`flex flex-col items-center gap-2 rounded-2xl border p-4 text-xs font-medium transition-all ${
               mine === m.value
-                ? "border-amber-400 bg-amber-500/25 text-amber-200 shadow-[0_0_15px_rgba(212,175,55,0.3)]"
-                : "border-purple-800/40 bg-purple-950/40 text-slate-300 hover:border-amber-500/30 hover:bg-purple-900/40"
+                ? "border-white/25 bg-white/15 text-white shadow-sm"
+                : "border-white/[0.06] bg-white/[0.02] text-zinc-400 hover:border-white/15 hover:bg-white/[0.05] hover:text-zinc-200"
             }`}
           >
             <span className="text-2xl">{m.emoji}</span>
-            {m.label}
+            <span>{m.label}</span>
           </motion.button>
         ))}
       </div>
-      <p className="text-center text-sm font-semibold text-amber-300">
-        Partner Vibe: {partner ? `${MOODS.find((x) => x.value === partner)?.emoji} (${MOODS.find((x) => x.value === partner)?.label})` : "Not set yet"}
-      </p>
-      {error ? <p className="text-center text-sm font-semibold text-red-300 bg-red-950/70 border border-red-500/30 px-4 py-2 rounded-xl">{error}</p> : null}
+      <div className="text-center text-xs text-zinc-400 bg-[#0e1017] border border-white/[0.06] rounded-2xl p-4">
+        <span>Partner’s current vibe: </span>
+        <span className="text-zinc-200 font-medium">
+          {partner
+            ? `${MOODS.find((x) => x.value === partner)?.emoji} ${MOODS.find((x) => x.value === partner)?.label}`
+            : "Not shared yet today"}
+        </span>
+      </div>
+      {error ? (
+        <p className="text-center text-xs font-medium text-rose-300 bg-rose-950/40 border border-rose-500/20 px-4 py-2 rounded-xl">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

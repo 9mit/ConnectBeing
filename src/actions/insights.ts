@@ -46,6 +46,58 @@ export async function getInsightsAction(): Promise<
       where: eq(aiInsights.coupleId, couple.id),
     });
 
+    if (row && row.rawResponse) {
+      const raw = row.rawResponse as Record<string, unknown>;
+      return ok({
+        insight: {
+          archetype: row.archetype,
+          strengths: row.strengths,
+          growthAreas: row.growthAreas,
+          suggestedTheme: row.suggestedTheme,
+          dailyTaskStyle: row.dailyTaskStyle,
+        },
+        dailyInsights: Array.isArray(raw?.dailyInsights)
+          ? (raw.dailyInsights as string[])
+          : [
+              "Your communication rhythms are grounded in steady presence.",
+              "Evenings remain your highest affinity connection window.",
+            ],
+        discussionPrompts: [
+          "What is one small thing I did this week that made you smile?",
+          "What is a shared adventure we should begin planning?",
+          "How can I best support your world today?",
+        ],
+        compatibility: (raw?.compatibility as any) ?? {
+          communication: 88,
+          qualityTime: 92,
+          planning: 78,
+          consistency: 85,
+          sharedInterests: 80,
+          overall: 85,
+        },
+        recommendations: [
+          {
+            category: "Ritual",
+            title: "Midnight Synchronized Cinema",
+            description: "Pick an evocative classic and sync playback in the Together room.",
+            reason: "High quality-time resonance detected.",
+          },
+          {
+            category: "Intimacy",
+            title: "Uninterrupted Check-in",
+            description: "Ten minutes of quiet presence with zero external notifications.",
+            reason: "Nurture archetype synergy.",
+          },
+        ],
+        habits: {
+          suggestions: [
+            "Send an unprompted thinking-of-you ping before sunset",
+            "Exchange a daily check-in mood word",
+          ],
+        },
+      });
+    }
+
     const snapshot = await runRelationshipIntelligence(couple.id);
 
     return ok({
