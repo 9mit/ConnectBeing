@@ -23,11 +23,12 @@ export function fail(error: unknown): ActionResult<never> {
   }
 
   if (error instanceof z.ZodError) {
+    const firstIssue = error.issues?.[0]?.message;
     return {
       ok: false,
       error: {
         code: "VALIDATION_ERROR",
-        message: error.issues[0]?.message || "Invalid request parameters.",
+        message: firstIssue || error.message || "Invalid request parameters.",
       },
     };
   }

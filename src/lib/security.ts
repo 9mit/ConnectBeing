@@ -47,8 +47,10 @@ export function isValidCoupleStorageKey(
   coupleId: string,
 ): boolean {
   if (!/^[a-zA-Z0-9_-]+$/.test(coupleId)) return false;
+  // Escape coupleId for regex safety even though pre-validated above (defense-in-depth)
+  const escapedCoupleId = coupleId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(
-    `^${kind}/${coupleId}/[a-zA-Z0-9_-]+\\.(jpe?g|png|webp)$`,
+    `^${kind}/${escapedCoupleId}/[a-zA-Z0-9_-]+\\.(jpe?g|png|webp)$`,
     "i",
   );
   return pattern.test(storageKey);

@@ -163,14 +163,23 @@ export async function setMatchmakingPausedAction(
     const user = await requireAppUser();
     const now = new Date();
 
-    await db
+    const updated = await db
       .update(matchmakingProfiles)
       .set({
         matchmakingPaused: paused,
         pausedAt: paused ? now : null,
         updatedAt: now,
       })
-      .where(eq(matchmakingProfiles.userId, user.id));
+      .where(eq(matchmakingProfiles.userId, user.id))
+      .returning({ id: matchmakingProfiles.id });
+
+    if (updated.length === 0) {
+      throw new AppError(
+        "NOT_FOUND",
+        "Matchmaking profile not found. Set up your profile first.",
+        404,
+      );
+    }
 
     return ok({ paused });
   } catch (e) {

@@ -119,6 +119,13 @@ export async function updateProfileAction(
     const parsed = updateProfileSchema.parse(input);
     const { user } = await requireActiveCouple();
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:profile:${user.id}`,
+      limit: 20,
+      windowSeconds: 60 * 15,
+    });
+
     const updateFields: Record<string, unknown> = {
       updatedAt: new Date(),
     };

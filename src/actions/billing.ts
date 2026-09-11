@@ -51,6 +51,14 @@ export async function createPremiumSubscriptionAction(): Promise<
       throw new AppError("FORBIDDEN", "You already have Premium.", 400);
     }
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:billing:${user.id}`,
+      limit: 5,
+      windowSeconds: 60 * 15,
+      message: "Too many subscription attempts. Please try again later.",
+    });
+
     const razorpay = getRazorpay();
     const planId = getRazorpayPlanId();
     const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;

@@ -179,8 +179,19 @@ export async function submitQuizAction(
     await tryUnlockAchievement(couple.id, user.id, "first_quiz");
 
     const streakKey = `quiz-streak:${user.id}`;
+    const lastDateKey = `quiz-last-date:${user.id}`;
+    const today = getIstDateString();
+    const yesterday = getIstDateString(new Date(Date.now() - 86400000));
+    const lastDate = await redis.get<string>(lastDateKey);
+
+    // Reset streak if last quiz was NOT yesterday or today (i.e. user missed a day)
+    if (lastDate && lastDate !== yesterday && lastDate !== today) {
+      await redis.del(streakKey);
+    }
+
     const streak = await redis.incr(streakKey);
     await redis.expire(streakKey, 60 * 60 * 24 * 40);
+    await redis.set(lastDateKey, today, { ex: 60 * 60 * 24 * 40 });
 
     return ok({ score, maxScore: graded.length, streak });
   } catch (e) {

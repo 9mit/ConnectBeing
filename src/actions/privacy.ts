@@ -140,6 +140,14 @@ export async function requestCoupleDataDeletionAction(): Promise<
   try {
     const { couple } = await requireActiveCouple();
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:delete-couple:${couple.id}`,
+      limit: 1,
+      windowSeconds: 60 * 60,
+      message: "Data deletion already requested. Please wait.",
+    });
+
     // 1. Mark couple status as dissolved
     await db
       .update(couples)

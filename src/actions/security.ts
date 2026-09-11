@@ -48,6 +48,14 @@ export async function updatePasswordAction(
     const parsed = updatePasswordSchema.parse(input);
     const user = await requireAppUser();
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:security:pwd:${user.id}`,
+      limit: 5,
+      windowSeconds: 60 * 15,
+      message: "Too many password change attempts. Try again later.",
+    });
+
     const admin = createAdminClient();
     const { error } = await admin.auth.admin.updateUserById(
       user.supabaseAuthId,

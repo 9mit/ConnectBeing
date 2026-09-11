@@ -196,7 +196,7 @@ export async function runNightlyCalibrationJob() {
 
     for (const couple of batch) {
       try {
-        const score = await getEngagementScore(couple.id);
+        const score = await getEngagementScore(couple.id, flushDate);
         await db
           .update(couples)
           .set({ petState: petStateFromScore(score) })
