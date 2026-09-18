@@ -4,9 +4,12 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { moods } from "@/db/schema";
+import { tryUnlockAchievement } from "@/lib/achievements";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple, requireVerifiedCouple } from "@/lib/auth";
+import { bumpChallengeProgress } from "@/lib/challenges";
 import { incrementEngagement } from "@/lib/engagement";
+import { appendRelationshipEvent } from "@/lib/events";
 import { createId } from "@/lib/ids";
 import { moodSchema } from "@/lib/validations";
 
@@ -27,20 +30,17 @@ export async function setMoodAction(
     });
 
     await incrementEngagement(couple.id, "mood");
-    const { appendRelationshipEvent } = await import("@/lib/events");
     await appendRelationshipEvent({
       coupleId: couple.id,
       actorUserId: user.id,
       eventType: "mood_logged",
       payload: { mood: parsed.mood },
     });
-    const { bumpChallengeProgress } = await import("@/lib/challenges");
     await bumpChallengeProgress({
       coupleId: couple.id,
       actorUserId: user.id,
       code: "daily_checkin",
     });
-    const { tryUnlockAchievement } = await import("@/lib/achievements");
     await tryUnlockAchievement(couple.id, user.id, "mood_logger");
 
     return ok({ id });

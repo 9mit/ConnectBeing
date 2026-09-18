@@ -8,6 +8,7 @@ import { inAppNotifications } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { createId } from "@/lib/ids";
+import { rateLimitOrThrow } from "@/lib/security";
 
 const createNotificationSchema = z.object({
   title: z.string().trim().min(1).max(100),
@@ -106,7 +107,6 @@ export async function sendNotificationToPartnerAction(
     const parsed = createNotificationSchema.parse(input);
     const { user, couple } = await requireActiveCouple();
 
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:notify:${user.id}`,
       limit: 20,

@@ -10,6 +10,8 @@ import {
   quizResponses,
   type Couple,
 } from "@/db/schema";
+import { purgeExpiredEphemeralMedia } from "@/actions/media";
+import { rotateCoupleVerifications } from "@/lib/couple-verification";
 import { petStateFromScore } from "@/lib/date-ist";
 import { getEngagementMeta, getEngagementScore } from "@/lib/engagement";
 import { getLocalAIProvider } from "@/lib/rie";
@@ -174,8 +176,8 @@ export async function runNightlyCalibrationJob() {
           }
         }
         processed += 1;
-      } catch {
-        console.error("[cron] couple failed", couple.id);
+      } catch (err) {
+        console.error("[cron] couple failed", couple.id, err);
       }
     }
     if (active.length < PAGE) break;
@@ -201,8 +203,8 @@ export async function runNightlyCalibrationJob() {
           .update(couples)
           .set({ petState: petStateFromScore(score) })
           .where(eq(couples.id, couple.id));
-      } catch {
-        console.error("[cron] pet flush failed", couple.id);
+      } catch (err) {
+        console.error("[cron] pet flush failed", couple.id, err);
       }
     }
     if (batch.length < 100) break;
@@ -210,21 +212,17 @@ export async function runNightlyCalibrationJob() {
 
   let verification = { ensured: 0, dueSoonNotified: 0 };
   try {
-    const { rotateCoupleVerifications } = await import(
-      "@/lib/couple-verification"
-    );
     verification = await rotateCoupleVerifications();
-  } catch {
-    console.error("[cron] verification rotate failed");
+  } catch (err) {
+    console.error("[cron] verification rotate failed", err);
   }
 
   let ephemeralPurged = 0;
   try {
-    const { purgeExpiredEphemeralMedia } = await import("@/actions/media");
     const res = await purgeExpiredEphemeralMedia();
     ephemeralPurged = res.purged;
-  } catch {
-    console.error("[cron] ephemeral media purge failed");
+  } catch (err) {
+    console.error("[cron] ephemeral media purge failed", err);
   }
 
   return { processed, verification, ephemeralPurged };

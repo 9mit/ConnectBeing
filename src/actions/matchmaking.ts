@@ -16,6 +16,7 @@ import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireAppUser } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
+import { rateLimitOrThrow } from "@/lib/security";
 import {
   calculateCompatibility,
   getNextCandidateForUser,
@@ -272,8 +273,6 @@ export async function respondToCandidateAction(
   try {
     const user = await requireAppUser();
     const parsed = interactionSchema.parse(input);
-
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:match:respond:${user.id}`,
       limit: 30,
@@ -414,7 +413,7 @@ export async function getConnectionsAction(): Promise<
         partnerAge: partnerProfile?.age ?? 25,
         partnerCountry: partnerProfile?.countryCode.toUpperCase() ?? "IN",
         compatibilityScore: c.compatibilityScore,
-        reasons: c.compatibilityReasons || [],
+        reasons: c.compatibilityReasons ?? [],
         createdAt: c.createdAt.toISOString(),
       });
     }
@@ -491,8 +490,6 @@ export async function sendConnectionMessageAction(
   try {
     const user = await requireAppUser();
     const parsed = messageSchema.parse(input);
-
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:match:msg:${user.id}`,
       limit: 30,

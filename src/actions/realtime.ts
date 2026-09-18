@@ -2,7 +2,9 @@
 
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
+import { requireCoupleVerified } from "@/lib/couple-verification";
 import { incrementEngagement } from "@/lib/engagement";
+import { appendRelationshipEvent } from "@/lib/events";
 import { z } from "zod";
 
 const audioSchema = z.object({
@@ -19,7 +21,6 @@ export async function recordAudioMinutesAction(
   try {
     const parsed = audioSchema.parse(input);
     const { couple } = await requireActiveCouple();
-    const { requireCoupleVerified } = await import("@/lib/couple-verification");
     await requireCoupleVerified(couple);
     const score = await incrementEngagement(
       couple.id,
@@ -59,9 +60,7 @@ export async function recordCallEventAction(
   try {
     const parsed = callEventSchema.parse(input);
     const { user, couple } = await requireActiveCouple();
-    const { requireCoupleVerified } = await import("@/lib/couple-verification");
     await requireCoupleVerified(couple);
-    const { appendRelationshipEvent } = await import("@/lib/events");
     await appendRelationshipEvent({
       coupleId: couple.id,
       actorUserId: user.id,

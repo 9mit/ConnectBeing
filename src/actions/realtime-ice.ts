@@ -2,6 +2,7 @@
 
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
+import { requireCoupleVerified } from "@/lib/couple-verification";
 import { AppError } from "@/lib/errors";
 import { createHmac, randomBytes } from "crypto";
 
@@ -21,7 +22,6 @@ export async function getTurnCredentialsAction(): Promise<
 > {
   try {
     const { couple } = await requireActiveCouple();
-    const { requireCoupleVerified } = await import("@/lib/couple-verification");
     await requireCoupleVerified(couple);
 
     const iceServers: IceServer[] = [

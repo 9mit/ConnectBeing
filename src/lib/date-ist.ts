@@ -15,6 +15,17 @@ export function getIstDateString(date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+/** YYYY-MM-DD in IST for yesterday */
+export function getIstYesterdayString(): string {
+  // Subtract one day from the IST-adjusted time, not from raw UTC
+  const istNow = new Date(Date.now() + IST_OFFSET_MS);
+  const istYesterday = new Date(istNow.getTime() - 24 * 60 * 60 * 1000);
+  const y = istYesterday.getUTCFullYear();
+  const m = String(istYesterday.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(istYesterday.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function engagementScoreKey(coupleId: string, date = getIstDateString()): string {
   return `couple:${coupleId}:score:${date}`;
 }
@@ -35,3 +46,4 @@ export function petStateFromScore(score: number):
   if (score >= 20) return "sad";
   return "neglected";
 }
+

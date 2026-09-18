@@ -4,11 +4,14 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { quizQuestions, quizResponses } from "@/db/schema";
+import { tryUnlockAchievement } from "@/lib/achievements";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
-import { getIstDateString, quizCacheKey } from "@/lib/date-ist";
+import { bumpChallengeProgress } from "@/lib/challenges";
+import { getIstDateString, getIstYesterdayString, quizCacheKey } from "@/lib/date-ist";
 import { incrementEngagement } from "@/lib/engagement";
 import { AppError } from "@/lib/errors";
+import { appendRelationshipEvent } from "@/lib/events";
 import { createId } from "@/lib/ids";
 import { redis } from "@/lib/redis";
 import { getLocalAIProvider } from "@/lib/rie";
@@ -162,26 +165,23 @@ export async function submitQuizAction(
     });
 
     await incrementEngagement(couple.id, "quiz");
-    const { appendRelationshipEvent } = await import("@/lib/events");
     await appendRelationshipEvent({
       coupleId: couple.id,
       actorUserId: user.id,
       eventType: "quiz_completed",
       payload: { score, maxScore: graded.length },
     });
-    const { bumpChallengeProgress } = await import("@/lib/challenges");
     await bumpChallengeProgress({
       coupleId: couple.id,
       actorUserId: user.id,
       code: "shared_quiz",
     });
-    const { tryUnlockAchievement } = await import("@/lib/achievements");
     await tryUnlockAchievement(couple.id, user.id, "first_quiz");
 
     const streakKey = `quiz-streak:${user.id}`;
     const lastDateKey = `quiz-last-date:${user.id}`;
     const today = getIstDateString();
-    const yesterday = getIstDateString(new Date(Date.now() - 86400000));
+    const yesterday = getIstYesterdayString();
     const lastDate = await redis.get<string>(lastDateKey);
 
     // Reset streak if last quiz was NOT yesterday or today (i.e. user missed a day)

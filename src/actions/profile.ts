@@ -8,6 +8,7 @@ import { couples, onboardingProfiles, users } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { daysBetween, formatDaysTogether } from "@/lib/format";
+import { rateLimitOrThrow } from "@/lib/security";
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -119,7 +120,6 @@ export async function updateProfileAction(
     const parsed = updateProfileSchema.parse(input);
     const { user } = await requireActiveCouple();
 
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:profile:${user.id}`,
       limit: 20,

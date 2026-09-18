@@ -17,7 +17,9 @@ import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { requireCoupleVerified } from "@/lib/couple-verification";
 import { AppError } from "@/lib/errors";
+import { appendRelationshipEvent } from "@/lib/events";
 import { createId } from "@/lib/ids";
+import { rateLimitOrThrow } from "@/lib/security";
 
 const createTimeCapsuleSchema = z.object({
   title: z.string().trim().min(1).max(120),
@@ -225,7 +227,6 @@ export async function createTimeCapsuleAction(
     const { user, couple } = await requireActiveCouple();
     await requireCoupleVerified(couple);
 
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:capsule:${user.id}`,
       limit: 10,
@@ -245,7 +246,6 @@ export async function createTimeCapsuleAction(
       isUnlocked: false,
     });
 
-    const { appendRelationshipEvent } = await import("@/lib/events");
     await appendRelationshipEvent({
       coupleId: couple.id,
       actorUserId: user.id,

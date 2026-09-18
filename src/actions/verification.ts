@@ -12,15 +12,19 @@ import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import {
   codesMatch,
+  generateVerificationCode,
   hashVerificationCode,
   isCoupleVerified,
   issueVerificationPeriod,
+  notifyCoupleVerification,
   verificationDueSoon,
   verificationExpired,
   verificationPlaintextRedisKey,
 } from "@/lib/couple-verification";
 import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
+import { redis } from "@/lib/redis";
+import { rateLimitOrThrow } from "@/lib/security";
 import { submitVerificationCodeSchema } from "@/lib/validations";
 
 export async function getVerificationStatusAction(): Promise<
@@ -78,7 +82,6 @@ export async function revealVerificationCodeAction(): Promise<
       );
     }
 
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `verify:reveal:${user.id}`,
       limit: 10,
@@ -108,7 +111,6 @@ export async function revealVerificationCodeAction(): Promise<
       });
     }
 
-    const { redis } = await import("@/lib/redis");
     const cached = await redis.get(verificationPlaintextRedisKey(couple.id));
     if (typeof cached === "string" && cached.length === 8) {
       return ok({
@@ -118,9 +120,6 @@ export async function revealVerificationCodeAction(): Promise<
     }
 
     // Cache miss: rotate hash for this period and re-cache (Partner B must use new code)
-    const { generateVerificationCode } = await import(
-      "@/lib/couple-verification"
-    );
     const code = generateVerificationCode();
     const codeHash = hashVerificationCode(
       code,
@@ -164,7 +163,6 @@ export async function submitVerificationCodeAction(
       );
     }
 
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `verify:submit:${user.id}`,
       limit: 5,
@@ -224,7 +222,6 @@ export async function submitVerificationCodeAction(
     await logAttempt(true, "ok");
 
     try {
-      const { redis } = await import("@/lib/redis");
       await redis.del(verificationPlaintextRedisKey(couple.id));
     } catch {
       /* ignore */
@@ -239,9 +236,6 @@ export async function submitVerificationCodeAction(
     });
 
 
-    const { notifyCoupleVerification } = await import(
-      "@/lib/couple-verification"
-    );
     await notifyCoupleVerification({
       coupleId: couple.id,
       kind: "consumed",

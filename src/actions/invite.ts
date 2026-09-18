@@ -14,15 +14,16 @@ import {
 } from "@/lib/crypto/invite-token";
 import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
-import { redis } from "@/lib/redis";
+import { getAppUrl } from "@/lib/app-url";
 import { createCoupleFromInvite } from "@/lib/couples";
+import { redis } from "@/lib/redis";
+import { rateLimitOrThrow } from "@/lib/security";
 
 export async function generateInviteLinkAction(): Promise<
   ActionResult<{ url: string; expiresAt: string }>
 > {
   try {
     const user = await requireOnboardedUser();
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:invite:${user.id}`,
       limit: 10,
@@ -68,7 +69,6 @@ export async function generateInviteLinkAction(): Promise<
       ex: INVITE_TOKEN_TTL_SECONDS,
     });
 
-    const { getAppUrl } = await import("@/lib/app-url");
     const base = getAppUrl();
 
     return ok({
@@ -85,7 +85,6 @@ export async function redeemInviteToken(
 ): Promise<ActionResult<{ coupleId: string }>> {
   try {
     const user = await requireAppUser();
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:redeem:${user.id}`,
       limit: 10,
@@ -248,7 +247,6 @@ export async function getInvitePreviewAction(
   }>
 > {
   try {
-    const { rateLimitOrThrow } = await import("@/lib/security");
     const tokenKey = rawToken.slice(0, 16);
     await rateLimitOrThrow({
       key: `rl:invite-preview:${tokenKey}`,

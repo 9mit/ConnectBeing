@@ -9,7 +9,13 @@ import {
 } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
+import { redis } from "@/lib/redis";
 
+/**
+ * Grace period after verifiedUntil before features are gated.
+ * Intentionally zero — no forgiveness window. Change to e.g. 24*60*60*1000
+ * if a grace period is desired in the future.
+ */
 const GRACE_MS = 0;
 const PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -45,15 +51,7 @@ export function codesMatch(aHash: string, bHash: string): boolean {
 
 /** Soft-gate shared couple features when weekly verification lapsed. */
 export async function requireCoupleVerified(couple: Couple): Promise<void> {
-  if (!couple.verifiedUntil) {
-    throw new AppError(
-      "VERIFICATION_REQUIRED",
-      "Weekly couple verification required. Visit /verify to continue.",
-      403,
-    );
-  }
-
-  if (couple.verifiedUntil.getTime() + GRACE_MS < Date.now()) {
+  if (!isCoupleVerified(couple)) {
     throw new AppError(
       "VERIFICATION_REQUIRED",
       "Weekly couple verification required. Visit /verify to continue.",
@@ -64,7 +62,7 @@ export async function requireCoupleVerified(couple: Couple): Promise<void> {
 
 export function isCoupleVerified(couple: Couple): boolean {
   if (!couple.verifiedUntil) return false;
-  return couple.verifiedUntil.getTime() >= Date.now();
+  return couple.verifiedUntil.getTime() + GRACE_MS >= Date.now();
 }
 
 export function verificationDueSoon(
@@ -139,7 +137,6 @@ export async function issueVerificationPeriod(input: {
     Math.ceil((periodEnd.getTime() - Date.now()) / 1000),
   );
   try {
-    const { redis } = await import("@/lib/redis");
     await redis.set(verificationPlaintextRedisKey(input.coupleId), code, {
       ex: ttlSeconds,
     });

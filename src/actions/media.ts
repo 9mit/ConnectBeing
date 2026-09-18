@@ -23,7 +23,8 @@ import {
   memoryMetaSchema,
   viewEphemeralSchema,
 } from "@/lib/validations";
-import { isValidCoupleStorageKey } from "@/lib/security";
+import { appendRelationshipEvent } from "@/lib/events";
+import { isValidCoupleStorageKey, rateLimitOrThrow } from "@/lib/security";
 import { z } from "zod";
 
 const MEDIA_BUCKET = "couple-media";
@@ -64,6 +65,17 @@ async function downloadStorageObject(storageKey: string): Promise<Buffer> {
   }
 
   const ab = await data.arrayBuffer();
+
+  // Guard against unexpectedly large files before converting to Buffer
+  const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+  if (ab.byteLength > MAX_DOWNLOAD_BYTES) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      `File too large (${Math.round(ab.byteLength / 1024 / 1024)}MB). Maximum is 10MB.`,
+      400,
+    );
+  }
+
   return Buffer.from(ab);
 }
 
@@ -80,7 +92,6 @@ export async function createPresignedUploadAction(
   try {
     const parsed = presignSchema.parse(input);
     const { user, couple } = await requireActiveCouple();
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:upload:${user.id}`,
       limit: 30,
@@ -357,7 +368,6 @@ export async function confirmMemoryUploadAction(
     });
 
     cleanupKey = undefined;
-    const { appendRelationshipEvent } = await import("@/lib/events");
     await appendRelationshipEvent({
       coupleId: couple.id,
       actorUserId: user.id,

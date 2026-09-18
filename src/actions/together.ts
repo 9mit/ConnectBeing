@@ -20,16 +20,19 @@ import {
 } from "@/lib/validations";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import type { UnifiedContentItem } from "@/features/together/discovery/catalog";
+
+import { tryUnlockAchievement } from "@/lib/achievements";
+import { bumpChallengeProgress } from "@/lib/challenges";
+import { incrementEngagement } from "@/lib/engagement";
+import { appendRelationshipEvent } from "@/lib/events";
+import { assertWatchSessionOwned } from "@/lib/watch-ownership";
+import { searchUnifiedCatalog, type UnifiedContentItem } from "@/features/together/discovery/catalog";
 
 export async function searchEntertainmentAction(
   query: string,
 ): Promise<ActionResult<UnifiedContentItem[]>> {
   try {
     await requireVerifiedCouple();
-    const { searchUnifiedCatalog } = await import(
-      "@/features/together/discovery/catalog"
-    );
     const results = await searchUnifiedCatalog(query);
     return ok(results);
   } catch (e) {
@@ -126,7 +129,6 @@ export async function joinWatchSessionAction(
         .update(watchSessions)
         .set({ status: "active", startedAt: new Date() })
         .where(eq(watchSessions.id, sessionId));
-      const { appendRelationshipEvent } = await import("@/lib/events");
       await appendRelationshipEvent({
         coupleId: couple.id,
         actorUserId: user.id,
@@ -147,7 +149,6 @@ export async function leaveWatchSessionAction(
 ): Promise<ActionResult<void>> {
   try {
     const { user, couple } = await requireVerifiedCouple();
-    const { assertWatchSessionOwned } = await import("@/lib/watch-ownership");
     await assertWatchSessionOwned(sessionId, couple.id);
 
     await db
@@ -172,7 +173,6 @@ export async function sendWatchMessageAction(
   try {
     const parsed = watchSessionMessageSchema.parse(input);
     const { user, couple } = await requireVerifiedCouple();
-    const { assertWatchSessionOwned } = await import("@/lib/watch-ownership");
     await assertWatchSessionOwned(parsed.sessionId, couple.id);
 
     await db.insert(watchMessages).values({
@@ -195,7 +195,6 @@ export async function recordWatchEventAction(
   try {
     const parsed = watchEventSchema.parse(input);
     const { user, couple } = await requireVerifiedCouple();
-    const { assertWatchSessionOwned } = await import("@/lib/watch-ownership");
     await assertWatchSessionOwned(parsed.sessionId, couple.id);
 
     await db.insert(watchEvents).values({
@@ -263,22 +262,18 @@ export async function endWatchSessionAction(
       aiSummary,
     });
 
-    const { appendRelationshipEvent } = await import("@/lib/events");
     await appendRelationshipEvent({
       coupleId: couple.id,
       actorUserId: user.id,
       eventType: "watch_ended",
       payload: { sessionId, watchDuration },
     });
-    const { incrementEngagement } = await import("@/lib/engagement");
     await incrementEngagement(couple.id, "watch");
-    const { bumpChallengeProgress } = await import("@/lib/challenges");
     await bumpChallengeProgress({
       coupleId: couple.id,
       actorUserId: user.id,
       code: "movie_night",
     });
-    const { tryUnlockAchievement } = await import("@/lib/achievements");
     await tryUnlockAchievement(couple.id, user.id, "first_watch");
 
     revalidatePath("/together");

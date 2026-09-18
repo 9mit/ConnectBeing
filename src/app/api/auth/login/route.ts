@@ -6,7 +6,6 @@ import { z } from "zod";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import {
-  isNonProductionRuntime,
   redeemPendingInvites,
   resolvePostLoginDestination,
   syncAppUserFromSupabase,
@@ -118,13 +117,22 @@ export async function POST(request: NextRequest) {
       try {
         const { createAdminClient } = await import("@/lib/supabase/admin");
         const admin = createAdminClient();
-        const { data: listed } = await admin.auth.admin.listUsers({
-          page: 1,
-          perPage: 200,
-        });
-        const targetUser = listed?.users?.find(
-          (u) => u.email?.toLowerCase() === email,
-        );
+        let targetUser: { id: string; email_confirmed_at?: string | null } | null | undefined = null;
+
+        if (existing?.supabaseAuthId) {
+          const { data: authData } = await admin.auth.admin.getUserById(existing.supabaseAuthId);
+          targetUser = authData?.user;
+        }
+
+        if (!targetUser) {
+          const { data: listed } = await admin.auth.admin.listUsers({
+            page: 1,
+            perPage: 50,
+          });
+          targetUser = listed?.users?.find(
+            (u) => u.email?.toLowerCase() === email,
+          );
+        }
 
         if (targetUser && !targetUser.email_confirmed_at) {
           await admin.auth.admin.updateUserById(targetUser.id, {

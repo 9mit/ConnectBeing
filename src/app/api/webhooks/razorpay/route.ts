@@ -122,11 +122,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Subscription user mismatch" }, { status: 400 });
   }
 
+  const targetUserId = existingSub?.userId ?? userId;
+
   switch (body.event) {
     case "subscription.activated":
     case "subscription.charged":
     case "subscription.pending":
-      await upsertPremium(sub, userId);
+      await upsertPremium(sub, targetUserId);
       break;
     case "subscription.cancelled":
     case "payment.failed":
@@ -141,7 +143,7 @@ export async function POST(req: Request) {
       await db
         .update(users)
         .set({ subscriptionTier: "free", updatedAt: new Date() })
-        .where(eq(users.id, userId));
+        .where(eq(users.id, targetUserId));
       break;
     default:
       break;

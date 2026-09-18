@@ -15,6 +15,8 @@ import {
 } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
+import { redis } from "@/lib/redis";
+import { rateLimitOrThrow } from "@/lib/security";
 
 export type PrivacyStatusDTO = {
   e2eeEnabled: boolean;
@@ -140,7 +142,6 @@ export async function requestCoupleDataDeletionAction(): Promise<
   try {
     const { couple } = await requireActiveCouple();
 
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:delete-couple:${couple.id}`,
       limit: 1,
@@ -165,7 +166,6 @@ export async function requestCoupleDataDeletionAction(): Promise<
 
     // 3. Purge couple-level Redis keys
     try {
-      const { redis } = await import("@/lib/redis");
       await Promise.all([
         redis.del(`verify:code:${couple.id}`),
         redis.del(`partner-joined:${couple.userAId}`),

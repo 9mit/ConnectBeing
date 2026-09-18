@@ -27,7 +27,7 @@ export async function incrementEngagement(
   const scoreKey = engagementScoreKey(coupleId, date);
   const metaKey = `couple:${coupleId}:score-meta:${date}`;
 
-  const meta = ((await redis.hgetall(metaKey)) ?? {}) as Record<string, string>;
+  const meta = ((await redis.hgetall(metaKey)) ?? {}) as Record<string, unknown>;
   const messages = Number(meta.messages ?? 0);
   const quiz = Number(meta.quiz ?? 0);
   const mood = Number(meta.mood ?? 0);
@@ -113,7 +113,7 @@ export async function getEngagementMeta(
   date = getIstDateString(),
 ) {
   const meta = ((await redis.hgetall(`couple:${coupleId}:score-meta:${date}`)) ??
-    {}) as Record<string, string>;
+    {}) as Record<string, unknown>;
   return {
     messages: Number(meta.messages ?? 0),
     quiz: Number(meta.quiz ?? 0),

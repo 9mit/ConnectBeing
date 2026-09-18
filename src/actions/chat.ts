@@ -11,6 +11,7 @@ import { appendRelationshipEvent } from "@/lib/events";
 import { incrementEngagement } from "@/lib/engagement";
 import { createId } from "@/lib/ids";
 import { tryUnlockAchievement } from "@/lib/achievements";
+import { rateLimitOrThrow } from "@/lib/security";
 import { sendMessageSchema } from "@/lib/validations";
 import { z } from "zod";
 
@@ -59,7 +60,6 @@ export async function sendMessageAction(
     const parsed = sendMessageSchema.parse(input);
     const { user, couple } = await requireActiveCouple();
     await requireCoupleVerified(couple);
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:chat:${user.id}`,
       limit: 60,

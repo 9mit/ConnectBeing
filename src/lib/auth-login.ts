@@ -91,10 +91,3 @@ export function resolvePostLoginDestination(
   if (!appUser.coupleId) return "/invite";
   return safeNext || "/dashboard";
 }
-
-export function isNonProductionRuntime(): boolean {
-  return (
-    process.env.NODE_ENV !== "production" &&
-    process.env.VERCEL_ENV !== "production"
-  );
-}

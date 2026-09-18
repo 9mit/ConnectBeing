@@ -3,15 +3,14 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { isUsingMockRedis, redis } from "@/lib/redis";
+import { isProductionRuntime } from "@/lib/runtime";
 import { hasSessionSecretConfigured } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const isProd =
-    process.env.NODE_ENV === "production" ||
-    process.env.VERCEL_ENV === "production";
+  const isProd = isProductionRuntime();
 
   const checks: Record<string, "ok" | "error"> = {
     db: "error",

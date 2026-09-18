@@ -1,7 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isNonProductionRuntime } from "@/lib/auth-login";
 import { redis } from "@/lib/redis";
 import { applyCookies } from "@/lib/response-cookies";
 import { registerSchema } from "@/lib/validations";

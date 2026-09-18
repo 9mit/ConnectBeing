@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireAppUser } from "@/lib/auth";
+import { rateLimitOrThrow } from "@/lib/security";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const updatePasswordSchema = z.object({
@@ -48,7 +49,6 @@ export async function updatePasswordAction(
     const parsed = updatePasswordSchema.parse(input);
     const user = await requireAppUser();
 
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:security:pwd:${user.id}`,
       limit: 5,

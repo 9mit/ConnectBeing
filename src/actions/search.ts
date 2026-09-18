@@ -13,6 +13,7 @@ import {
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { requireCoupleVerified } from "@/lib/couple-verification";
+import { rateLimitOrThrow } from "@/lib/security";
 
 const searchSchema = z.object({
   query: z.string().trim().min(1, "Search query is required").max(100),
@@ -38,7 +39,6 @@ export async function searchCoupleDataAction(
     const { user, couple } = await requireActiveCouple();
     await requireCoupleVerified(couple);
 
-    const { rateLimitOrThrow } = await import("@/lib/security");
     await rateLimitOrThrow({
       key: `rl:search:${user.id}`,
       limit: 30,

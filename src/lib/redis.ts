@@ -1,5 +1,7 @@
 import { Redis } from "@upstash/redis";
 
+import { isProductionRuntime } from "@/lib/runtime";
+
 class MockRedis {
   private store = new Map<string, unknown>();
   private expiries = new Map<string, number>();
@@ -93,13 +95,6 @@ class MockRedis {
     Object.assign(h, obj);
     return 1;
   }
-}
-
-function isProductionRuntime(): boolean {
-  return (
-    process.env.NODE_ENV === "production" ||
-    process.env.VERCEL_ENV === "production"
-  );
 }
 
 export function isUsingMockRedis(): boolean {

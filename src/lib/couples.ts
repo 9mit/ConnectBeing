@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { couples, inviteTokens, users } from "@/db/schema";
+import { issueVerificationPeriod } from "@/lib/couple-verification";
 import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
 
@@ -63,9 +64,6 @@ export async function createCoupleFromInvite(input: {
 
   // Mint first hashed weekly code for Partner A (plaintext in Redis only)
   try {
-    const { issueVerificationPeriod } = await import(
-      "@/lib/couple-verification"
-    );
     await issueVerificationPeriod({
       coupleId,
       revealedToUserId: input.userAId,

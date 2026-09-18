@@ -4,6 +4,8 @@
 import { SignJWT } from "jose/jwt/sign";
 import { jwtVerify } from "jose/jwt/verify";
 
+import { isProductionRuntime } from "@/lib/runtime";
+
 export const AUTH_COOKIE_NAME = "madlove_auth_session";
 
 export class SessionSecretError extends Error {
@@ -11,13 +13,6 @@ export class SessionSecretError extends Error {
     super(message);
     this.name = "SessionSecretError";
   }
-}
-
-function isProductionRuntime(): boolean {
-  return (
-    process.env.NODE_ENV === "production" ||
-    process.env.VERCEL_ENV === "production"
-  );
 }
 
 /** Presence-only check for health — never returns the secret. */

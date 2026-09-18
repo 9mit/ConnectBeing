@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ["three", "@react-three/fiber"],
-  experimental: {
-    serverComponentsExternalPackages: ["onnxruntime-node", "sharp"],
-  },
+  serverExternalPackages: ["onnxruntime-node", "sharp"],
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.externals = config.externals || [];
