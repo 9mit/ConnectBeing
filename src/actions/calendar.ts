@@ -14,7 +14,11 @@ import { AppError } from "@/lib/errors";
 const createCalendarEventSchema = z.object({
   title: z.string().trim().min(1, "Title is required").max(120),
   description: z.string().trim().max(500).optional(),
-  eventDate: z.string().datetime(),
+  eventDate: z
+    .string()
+    .refine((val) => !isNaN(new Date(val).getTime()), {
+      message: "Please provide a valid date.",
+    }),
   category: z.enum(["date_night", "anniversary", "ritual", "custom"]).default("date_night"),
   reminderHours: z.number().int().min(0).max(168).default(24),
 });

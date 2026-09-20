@@ -12,7 +12,7 @@ import { rateLimitOrThrow } from "@/lib/security";
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
-  avatarUrl: z.string().url().or(z.string().length(0)).optional(),
+  avatarUrl: z.string().trim().max(2048).optional().nullable(),
   selfDescription: z.string().trim().max(500).optional(),
   partnerExpectation: z.string().trim().max(500).optional(),
   hobbies: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
@@ -20,7 +20,11 @@ const updateProfileSchema = z.object({
 });
 
 const updateAnniversarySchema = z.object({
-  anniversaryDate: z.string().datetime(),
+  anniversaryDate: z
+    .string()
+    .refine((val) => !isNaN(new Date(val).getTime()), {
+      message: "Please provide a valid anniversary date.",
+    }),
 });
 
 export type ProfileDTO = {

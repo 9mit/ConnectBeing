@@ -11,7 +11,11 @@ import { z } from "zod";
 
 const createSchema = z.object({
   title: z.string().trim().min(1).max(120),
-  dueAt: z.string().datetime(),
+  dueAt: z
+    .string()
+    .refine((val) => !isNaN(new Date(val).getTime()), {
+      message: "Please provide a valid due date.",
+    }),
 });
 
 export async function listRemindersAction(): Promise<

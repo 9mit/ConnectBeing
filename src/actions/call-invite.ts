@@ -16,7 +16,7 @@ export async function ringPartnerAction(
   input: unknown,
 ): Promise<ActionResult<{ callId: string }>> {
   try {
-    const parsed = z.object({ callId: z.string().uuid() }).parse(input);
+    const parsed = z.object({ callId: z.string().trim().min(1).max(128) }).parse(input);
     const { user, couple } = await requireVerifiedCouple();
     await redis.set(
       callKey(couple.id),
@@ -42,9 +42,9 @@ export async function getIncomingCallAction(): Promise<
 > {
   try {
     const { user, couple } = await requireVerifiedCouple();
-    const raw = await redis.get<string>(callKey(couple.id));
+    const raw = await redis.get<string | Record<string, unknown>>(callKey(couple.id));
     if (!raw) return ok(null);
-    const parsed = JSON.parse(raw) as {
+    const parsed = (typeof raw === "string" ? JSON.parse(raw) : raw) as {
       callId: string;
       fromUserId: string;
       at: number;
@@ -71,11 +71,11 @@ export async function acceptCallInviteAction(
 ): Promise<ActionResult<{ accepted: boolean }>> {
   try {
     const { couple } = await requireVerifiedCouple();
-    const raw = await redis.get<string>(callKey(couple.id));
+    const raw = await redis.get<string | Record<string, unknown>>(callKey(couple.id));
     if (!raw) {
       throw new AppError("NOT_FOUND", "Call invite expired.", 404);
     }
-    const parsed = JSON.parse(raw) as { callId: string };
+    const parsed = (typeof raw === "string" ? JSON.parse(raw) : raw) as { callId: string };
     if (parsed.callId !== callId) {
       throw new AppError("CONFLICT", "Stale call invite.", 409);
     }

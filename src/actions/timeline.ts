@@ -24,7 +24,11 @@ import { rateLimitOrThrow } from "@/lib/security";
 const createTimeCapsuleSchema = z.object({
   title: z.string().trim().min(1).max(120),
   message: z.string().trim().min(1).max(4000),
-  unlockAt: z.string().datetime(),
+  unlockAt: z
+    .string()
+    .refine((val) => !isNaN(new Date(val).getTime()), {
+      message: "Please provide a valid unlock date.",
+    }),
   mediaStorageKey: z.string().max(500).optional(),
 });
 

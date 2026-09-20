@@ -257,6 +257,11 @@ export function ChatPanel({
     }
   }, [refreshDisplay, userId]);
 
+  const gapFillRef = useRef(gapFill);
+  gapFillRef.current = gapFill;
+  const flushOutboxRef = useRef(flushOutbox);
+  flushOutboxRef.current = flushOutbox;
+
   useEffect(() => {
     void (async () => {
       try {
@@ -388,8 +393,8 @@ export function ChatPanel({
       if (status === "SUBSCRIBED") {
         setHealth("connected");
         await channel.track({ userId, at: Date.now() });
-        await gapFill();
-        await flushOutbox();
+        await gapFillRef.current();
+        await flushOutboxRef.current();
       } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
         setHealth("reconnecting");
       } else if (status === "CLOSED") {
@@ -399,7 +404,7 @@ export function ChatPanel({
 
     const onOnline = () => {
       setHealth("reconnecting");
-      void gapFill().then(() => flushOutbox());
+      void gapFillRef.current().then(() => flushOutboxRef.current());
     };
     const onOffline = () => setHealth("offline");
     window.addEventListener("online", onOnline);
@@ -412,7 +417,7 @@ export function ChatPanel({
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [coupleId, userId, decryptMessage, gapFill, flushOutbox]);
+  }, [coupleId, userId, decryptMessage]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

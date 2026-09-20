@@ -16,12 +16,21 @@ import { sendMessageSchema } from "@/lib/validations";
 import { z } from "zod";
 
 const getMessagesSchema = z.object({
-  cursor: z.string().datetime().optional(),
+  cursor: z
+    .string()
+    .optional()
+    .refine((v) => !v || !isNaN(new Date(v).getTime()), {
+      message: "Invalid cursor date.",
+    }),
   limit: z.coerce.number().int().min(1).max(50).optional(),
 });
 
 const syncSinceSchema = z.object({
-  since: z.string().datetime(),
+  since: z
+    .string()
+    .refine((v) => !isNaN(new Date(v).getTime()), {
+      message: "Invalid since date.",
+    }),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 

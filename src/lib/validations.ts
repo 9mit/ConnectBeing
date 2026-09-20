@@ -18,9 +18,12 @@ export const registerSchema = z.object({
   inviteToken: z
     .string()
     .trim()
-    .regex(/^[a-f0-9]{64}$/i, "Invalid invite token")
     .optional()
-    .or(z.literal("")),
+    .nullable()
+    .refine(
+      (val) => !val || /^[a-f0-9]{64}$/i.test(val),
+      { message: "Invalid invite token" },
+    ),
 });
 
 export const loginSchema = z.object({
@@ -63,7 +66,7 @@ export const submitVerificationCodeSchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[0-9A-HJKMNP-TV-Z]{8}$/, "Enter the 8-character code"),
+    .regex(/^[0-9A-HJKMNP-TV-Z]{8}$/i, "Enter the 8-character code"),
 });
 
 export const moodSchema = z.object({
@@ -77,14 +80,18 @@ export const renamePetSchema = z.object({
 
 export const quizAnswerSchema = z.object({
   questionSetId: z.string().min(1),
-  answers: z.array(z.string().min(1)).min(1).max(3),
+  answers: z.array(z.string().min(1)).min(1).max(20),
 });
 
 export const memoryMetaSchema = z.object({
   storageKey: z.string().min(1).max(500),
   mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
   caption: z.string().trim().max(300).optional(),
-  takenAt: z.string().datetime(),
+  takenAt: z
+    .string()
+    .refine((val) => !isNaN(new Date(val).getTime()), {
+      message: "Please provide a valid date.",
+    }),
   eventLabel: z.string().trim().max(80).optional(),
 });
 
