@@ -353,10 +353,87 @@ export function useTheaterWebRTC({
       return;
     }
 
-    const topic = `room:${sessionId}`;
-    const channel = supabase.channel(topic, {
-      config: { broadcast: { self: false } },
-    });
+    const topic = `room-signaling:${sessionId}`;
+    const channel = supabase
+      .channel(topic, {
+        config: { broadcast: { self: false } },
+      })
+      .on("broadcast", { event: "theater:offer" }, async ({ payload }: { payload: any }) => {
+        if (payload.senderUserId === userId) return;
+        try {
+          const pc = getOrCreatePc();
+          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          await flushPendingIce(pc);
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          sendSignal("theater:answer", { sdp: answer });
+
+          if (payload.surface) {
+            setStreamSourceType(payload.surface);
+          }
+          updateState("LIVE");
+        } catch (e) {
+          console.error("Failed handling WebRTC offer", e);
+        }
+      })
+      .on("broadcast", { event: "theater:answer" }, async ({ payload }: { payload: any }) => {
+        if (payload.senderUserId === userId) return;
+        try {
+          const pc = pcRef.current;
+          if (pc && pc.signalingState !== "stable") {
+            await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+            await flushPendingIce(pc);
+          }
+        } catch (e) {
+          console.error("Failed handling WebRTC answer", e);
+        }
+      })
+      .on("broadcast", { event: "theater:ice-candidate" }, async ({ payload }: { payload: any }) => {
+        if (payload.senderUserId === userId) return;
+        const candidate = payload.candidate as RTCIceCandidateInit;
+        if (!candidate) return;
+
+        const pc = pcRef.current;
+        if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch {
+            // ignore
+          }
+        } else {
+          pendingIceRef.current.push(candidate);
+        }
+      })
+      .on("broadcast", { event: "theater:stream-state" }, ({ payload }: { payload: any }) => {
+        if (payload.senderUserId === userId) return;
+        if (payload.state) {
+          updateState(payload.state);
+          if (payload.surface) setStreamSourceType(payload.surface);
+          if (payload.state === "STREAM_ENDED" || payload.state === "FALLBACK_MODE") {
+            setRemoteStream(null);
+          }
+        }
+      })
+      .on("broadcast", { event: "theater:voice-status" }, ({ payload }: { payload: any }) => {
+        if (payload.senderUserId === userId) return;
+        setPartnerVoiceActive(!!payload.active);
+      })
+      .on("broadcast", { event: "theater:voice-ready" }, async ({ payload }: { payload: any }) => {
+        if (payload.senderUserId === userId) return;
+        if (isHost && pcRef.current) {
+          const offer = await pcRef.current.createOffer();
+          await pcRef.current.setLocalDescription(offer);
+          sendSignal("theater:offer", { sdp: offer });
+        }
+      })
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState();
+        const keys = Object.keys(state);
+        const hasPartner = keys.some((k) => k !== userId);
+        setPartnerPresence(hasPartner ? "watching" : "offline");
+      });
+
     channelRef.current = channel;
 
     // Load TURN credentials
@@ -370,87 +447,11 @@ export function useTheaterWebRTC({
     void authorizeRealtimeTopicAction(topic).then((auth) => {
       if (disposed || !auth.ok) return;
 
-      channel
-        .on("broadcast", { event: "theater:offer" }, async ({ payload }: { payload: any }) => {
-          if (payload.senderUserId === userId) return;
-          try {
-            const pc = getOrCreatePc();
-            await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-            await flushPendingIce(pc);
-
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            sendSignal("theater:answer", { sdp: answer });
-
-            if (payload.surface) {
-              setStreamSourceType(payload.surface);
-            }
-            updateState("LIVE");
-          } catch (e) {
-            console.error("Failed handling WebRTC offer", e);
-          }
-        })
-        .on("broadcast", { event: "theater:answer" }, async ({ payload }: { payload: any }) => {
-          if (payload.senderUserId === userId) return;
-          try {
-            const pc = pcRef.current;
-            if (pc && pc.signalingState !== "stable") {
-              await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-              await flushPendingIce(pc);
-            }
-          } catch (e) {
-            console.error("Failed handling WebRTC answer", e);
-          }
-        })
-        .on("broadcast", { event: "theater:ice-candidate" }, async ({ payload }: { payload: any }) => {
-          if (payload.senderUserId === userId) return;
-          const candidate = payload.candidate as RTCIceCandidateInit;
-          if (!candidate) return;
-
-          const pc = pcRef.current;
-          if (pc && pc.remoteDescription && pc.remoteDescription.type) {
-            try {
-              await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch {
-              // ignore
-            }
-          } else {
-            pendingIceRef.current.push(candidate);
-          }
-        })
-        .on("broadcast", { event: "theater:stream-state" }, ({ payload }: { payload: any }) => {
-          if (payload.senderUserId === userId) return;
-          if (payload.state) {
-            updateState(payload.state);
-            if (payload.surface) setStreamSourceType(payload.surface);
-            if (payload.state === "STREAM_ENDED" || payload.state === "FALLBACK_MODE") {
-              setRemoteStream(null);
-            }
-          }
-        })
-        .on("broadcast", { event: "theater:voice-status" }, ({ payload }: { payload: any }) => {
-          if (payload.senderUserId === userId) return;
-          setPartnerVoiceActive(!!payload.active);
-        })
-        .on("broadcast", { event: "theater:voice-ready" }, async ({ payload }: { payload: any }) => {
-          if (payload.senderUserId === userId) return;
-          if (isHost && pcRef.current) {
-            const offer = await pcRef.current.createOffer();
-            await pcRef.current.setLocalDescription(offer);
-            sendSignal("theater:offer", { sdp: offer });
-          }
-        })
-        .on("presence", { event: "sync" }, () => {
-          const state = channel.presenceState();
-          const keys = Object.keys(state);
-          const hasPartner = keys.some((k) => k !== userId);
-          setPartnerPresence(hasPartner ? "watching" : "offline");
-        })
-        .subscribe(async (status: string) => {
-          if (status === "SUBSCRIBED") {
-            await channel.track({ userId, joinedAt: Date.now() });
-          }
-        });
+      channel.subscribe(async (status: string) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({ userId, joinedAt: Date.now() });
+        }
+      });
     });
 
     return () => {

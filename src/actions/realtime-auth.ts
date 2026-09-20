@@ -10,7 +10,8 @@ import { AppError } from "@/lib/errors";
 
 const COUPLE_TOPIC =
   /^couple:([a-zA-Z0-9_-]+):(chat|call|location|presence|moods)$/;
-const ROOM_TOPIC = /^room:([a-zA-Z0-9_-]+)$/;
+const ROOM_TOPIC =
+  /^(?:room:([a-zA-Z0-9_-]+)(?::[a-zA-Z0-9_-]+)?|room-(?:signaling|chat|presence|reactions):([a-zA-Z0-9_-]+))$/;
 
 /**
  * Client must call before joining a private Realtime channel.
@@ -32,9 +33,10 @@ export async function authorizeRealtimeTopicAction(
 
     const roomMatch = topic.match(ROOM_TOPIC);
     if (roomMatch) {
+      const sessionId = roomMatch[1] || roomMatch[2]!;
       const session = await db.query.watchSessions.findFirst({
         where: and(
-          eq(watchSessions.id, roomMatch[1]!),
+          eq(watchSessions.id, sessionId),
           eq(watchSessions.coupleId, couple.id),
         ),
       });

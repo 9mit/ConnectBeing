@@ -193,10 +193,49 @@ export function VirtualRoom({
       return;
     }
 
-    const topic = `room:${sessionId}`;
-    const channel = supabase.channel(topic, {
-      config: { broadcast: { self: false } },
-    });
+    const topic = `room-chat:${sessionId}`;
+    const channel = supabase
+      .channel(topic, {
+        config: { broadcast: { self: false } },
+      })
+      .on("broadcast", { event: "theater:reaction" }, ({ payload }: { payload: any }) => {
+        if (payload.userId === userId) return;
+        applyReaction(payload.emoji);
+      })
+      .on("broadcast", { event: "theater:playback" }, ({ payload }: { payload: any }) => {
+        if (payload.userId === userId) return;
+        if (payload.state) setPlaybackState(payload.state);
+        if (typeof payload.position === "number") setPositionSeconds(payload.position);
+      })
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "watch_messages",
+          filter: `session_id=eq.${sessionId}`,
+        },
+        (payload: any) => {
+          const row = payload.new as {
+            id: string;
+            content: string;
+            user_id: string;
+            playback_position?: number | null;
+            created_at: string;
+          };
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: row.id,
+              content: row.content,
+              userId: row.user_id,
+              playbackPosition: row.playback_position,
+              createdAt: row.created_at,
+            },
+          ]);
+        },
+      );
+
     channelRef.current = channel;
 
     const applyReaction = (emoji: string) => {
@@ -216,46 +255,7 @@ export function VirtualRoom({
 
     void authorizeRealtimeTopicAction(topic).then((auth) => {
       if (disposed || !auth.ok) return;
-
-      channel
-        .on("broadcast", { event: "theater:reaction" }, ({ payload }: { payload: any }) => {
-          if (payload.userId === userId) return;
-          applyReaction(payload.emoji);
-        })
-        .on("broadcast", { event: "theater:playback" }, ({ payload }: { payload: any }) => {
-          if (payload.userId === userId) return;
-          if (payload.state) setPlaybackState(payload.state);
-          if (typeof payload.position === "number") setPositionSeconds(payload.position);
-        })
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "watch_messages",
-            filter: `session_id=eq.${sessionId}`,
-          },
-          (payload: any) => {
-            const row = payload.new as {
-              id: string;
-              content: string;
-              user_id: string;
-              playback_position?: number | null;
-              created_at: string;
-            };
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: row.id,
-                content: row.content,
-                userId: row.user_id,
-                playbackPosition: row.playback_position,
-                createdAt: row.created_at,
-              },
-            ]);
-          },
-        )
-        .subscribe();
+      channel.subscribe();
     });
 
     const timers = reactionTimersRef;
