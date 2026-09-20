@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { Search, Sparkles, Tv, ShieldCheck, Film } from "lucide-react";
+import { Search, Sparkles, Tv, ShieldCheck, Film, Check } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import {
@@ -29,6 +29,15 @@ export default function NewWatchSessionPage() {
   const [selectedPoster, setSelectedPoster] = useState("");
 
   const allProviders = getAllProviders();
+
+  // Pre-fill next hour as comfortable default
+  const defaultDateTime = useMemo(() => {
+    const d = new Date();
+    d.setMinutes(0, 0, 0);
+    d.setHours(d.getHours() + 1);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, []);
 
   async function handleSearch(q: string) {
     setSearchQuery(q);
@@ -60,12 +69,33 @@ export default function NewWatchSessionPage() {
     e.preventDefault();
     setError(null);
     const fd = new FormData(e.currentTarget);
+
+    const titleVal = (selectedTitle || fd.get("title")?.toString() || "").trim();
+    const providerVal = (selectedProvider || fd.get("provider")?.toString() || "netflix").trim();
+    const rawScheduledFor = fd.get("scheduledFor")?.toString()?.trim();
+    const invitationMessageVal = fd.get("invitationMessage")?.toString()?.trim();
+
+    if (!titleVal) {
+      setError("Please enter a movie or show title.");
+      return;
+    }
+
+    let scheduledForIso: string | undefined;
+    if (rawScheduledFor) {
+      const parsedDate = new Date(rawScheduledFor);
+      if (!isNaN(parsedDate.getTime())) {
+        scheduledForIso = parsedDate.toISOString();
+      } else {
+        scheduledForIso = rawScheduledFor;
+      }
+    }
+
     const payload = {
-      provider: selectedProvider || fd.get("provider"),
-      title: selectedTitle || fd.get("title"),
-      posterUrl: selectedPoster || undefined,
-      scheduledFor: fd.get("scheduledFor"),
-      invitationMessage: fd.get("invitationMessage"),
+      provider: providerVal,
+      title: titleVal,
+      posterUrl: selectedPoster?.trim() || undefined,
+      scheduledFor: scheduledForIso,
+      invitationMessage: invitationMessageVal || undefined,
     };
 
     startTransition(async () => {
@@ -206,15 +236,23 @@ export default function NewWatchSessionPage() {
               <label className="block text-xs font-bold uppercase tracking-wider text-amber-300">
                 Movie / Show Title
               </label>
-              <input
-                name="title"
-                type="text"
-                value={selectedTitle}
-                onChange={(e) => setSelectedTitle(e.target.value)}
-                required
-                placeholder="e.g. Interstellar, Brahmāstra, or custom title"
-                className="w-full rounded-2xl border border-amber-500/30 bg-purple-950/60 px-4 py-3 text-sm text-white placeholder-slate-400 outline-none focus:border-amber-400 transition-all"
-              />
+              <div className="flex items-center gap-3">
+                {selectedPoster ? (
+                  <div className="w-12 h-14 rounded-xl overflow-hidden shrink-0 border border-amber-500/40 shadow-md">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={selectedPoster} alt="Poster" className="w-full h-full object-cover" />
+                  </div>
+                ) : null}
+                <input
+                  name="title"
+                  type="text"
+                  value={selectedTitle}
+                  onChange={(e) => setSelectedTitle(e.target.value)}
+                  required
+                  placeholder="e.g. Interstellar, Brahmāstra, or custom title"
+                  className="w-full rounded-2xl border border-amber-500/30 bg-purple-950/60 px-4 py-3 text-sm text-white placeholder-slate-400 outline-none focus:border-amber-400 transition-all"
+                />
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -224,6 +262,7 @@ export default function NewWatchSessionPage() {
               <input
                 name="scheduledFor"
                 type="datetime-local"
+                defaultValue={defaultDateTime}
                 required
                 className="w-full rounded-2xl border border-amber-500/30 bg-purple-950/60 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 transition-all [color-scheme:dark]"
               />

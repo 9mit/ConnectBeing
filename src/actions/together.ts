@@ -68,18 +68,34 @@ export async function createWatchSessionAction(
       ? (parsed.provider.toLowerCase() as (typeof validDbEnum)[number])
       : "other";
 
+    const defaultPoster =
+      "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=600&auto=format&fit=crop&q=80";
+    const posterUrl = parsed.posterUrl?.trim() || defaultPoster;
+
+    let scheduledForDate = new Date();
+    if (parsed.scheduledFor) {
+      const d = new Date(parsed.scheduledFor);
+      if (!isNaN(d.getTime())) {
+        scheduledForDate = d;
+      }
+    }
+
     await db.insert(watchSessions).values({
       id: sessionId,
       coupleId: couple.id,
       provider: dbProvider,
       title: parsed.title,
-      posterUrl: parsed.posterUrl,
-      scheduledFor: parsed.scheduledFor ? new Date(parsed.scheduledFor) : new Date(),
-      invitationMessage: parsed.invitationMessage,
-      theme: parsed.theme,
+      posterUrl,
+      scheduledFor: scheduledForDate,
+      invitationMessage: parsed.invitationMessage || null,
+      theme: parsed.theme || null,
     });
 
-    revalidatePath("/together");
+    try {
+      revalidatePath("/together");
+    } catch {
+      // ignore if invoked during render
+    }
 
     return ok({ sessionId });
   } catch (e) {
@@ -137,7 +153,11 @@ export async function joinWatchSessionAction(
       });
     }
 
-    revalidatePath(`/together/room/${sessionId}`);
+    try {
+      revalidatePath(`/together/room/${sessionId}`);
+    } catch {
+      // safe fallback if invoked during RSC render
+    }
     return ok();
   } catch (e) {
     return fail(e);

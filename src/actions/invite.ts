@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 
 import { db } from "@/db";
 import { inAppNotifications, inviteTokens, onboardingProfiles, users } from "@/db/schema";
@@ -45,12 +45,15 @@ export async function generateInviteLinkAction(): Promise<
       ),
     });
 
-    for (const token of active) {
+    if (active.length > 0) {
+      const activeIds = active.map((t) => t.id);
       await db
         .update(inviteTokens)
         .set({ used: true })
-        .where(eq(inviteTokens.id, token.id));
-      await redis.del(inviteRedisKey(token.tokenHash));
+        .where(inArray(inviteTokens.id, activeIds));
+      await Promise.all(
+        active.map((t) => redis.del(inviteRedisKey(t.tokenHash))),
+      );
     }
 
     const raw = generateInviteToken();

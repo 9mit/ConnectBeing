@@ -115,12 +115,24 @@ export const personaSchema = z.object({
 });
 
 export const createWatchSessionSchema = z.object({
-  provider: z.string().trim().min(1).max(50),
-  title: z.string().trim().min(1).max(100),
-  posterUrl: z.string().url().optional().or(z.literal("")),
-  scheduledFor: z.string().datetime().optional(), // ISO string
-  invitationMessage: z.string().trim().max(300).optional(),
-  theme: z.string().trim().max(50).optional(),
+  provider: z.string().trim().min(1, "Please select a streaming provider.").max(50),
+  title: z.string().trim().min(1, "Please enter a movie or show title.").max(100),
+  posterUrl: z.string().trim().max(2048).optional().nullable(),
+  scheduledFor: z
+    .string()
+    .optional()
+    .nullable()
+    .refine(
+      (val) => !val || !isNaN(new Date(val).getTime()),
+      { message: "Please provide a valid date and time." },
+    ),
+  invitationMessage: z
+    .string()
+    .trim()
+    .max(300, "Invitation message must be 300 characters or less.")
+    .optional()
+    .nullable(),
+  theme: z.string().trim().max(50).optional().nullable(),
 });
 
 export const watchSessionMessageSchema = z.object({

@@ -5,8 +5,21 @@ import Link from "next/link";
 import { useEffect } from "react";
 
 type TogetherProps = {
-  activeSessions: { id: string; provider: string; status: string; title: string; scheduledFor: string | Date; invitationMessage?: string | null }[];
-  pastSessions: { id: string; title: string; scheduledFor: string | Date }[];
+  activeSessions: {
+    id: string;
+    provider: string;
+    status: string;
+    title: string;
+    scheduledFor: string | Date;
+    posterUrl?: string | null;
+    invitationMessage?: string | null;
+  }[];
+  pastSessions: {
+    id: string;
+    title: string;
+    scheduledFor: string | Date;
+    posterUrl?: string | null;
+  }[];
 };
 
 const containerVariants: Variants = {
@@ -91,17 +104,25 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
         ) : (
           <div className="grid gap-6 sm:grid-cols-2">
             {activeSessions.map((session) => (
-              <motion.div variants={itemVariants} key={session.id} className="group relative overflow-hidden rounded-3xl glass-panel border border-white/[0.04] bg-white/[0.02] p-8 shadow-2xl interactive">
-                {/* Poster Mock Background */}
-                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-purple-500/5 opacity-50 group-hover:opacity-100 transition-opacity duration-500" />
+              <motion.div variants={itemVariants} key={session.id} className="group relative overflow-hidden rounded-3xl glass-panel border border-white/[0.06] bg-[#0c0a14]/80 p-8 shadow-2xl interactive">
+                {/* Poster Backdrop */}
+                {session.posterUrl ? (
+                  <div
+                    className="absolute inset-0 bg-cover bg-center opacity-25 group-hover:opacity-35 group-hover:scale-105 transition-all duration-700"
+                    style={{ backgroundImage: `url('${session.posterUrl}')` }}
+                  />
+                ) : (
+                  <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 to-purple-500/10 opacity-50 group-hover:opacity-100 transition-opacity duration-500" />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-[#090711] via-[#090711]/80 to-transparent" />
                 
                 <div className="relative z-10 flex flex-col h-full justify-between">
                   <div>
                     <div className="mb-4 flex items-center justify-between">
-                      <span className="rounded-full bg-black/40 border border-white/[0.08] px-3 py-1 text-[9px] font-bold text-slate-300 uppercase tracking-widest backdrop-blur-md">
+                      <span className="rounded-full bg-black/60 border border-white/[0.12] px-3 py-1 text-[9px] font-bold text-amber-300 uppercase tracking-widest backdrop-blur-md">
                         {session.provider}
                       </span>
-                      <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2 py-1 rounded-full">
+                      <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/15 px-2.5 py-1 rounded-full border border-amber-500/20">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                         {session.status}
                       </span>
@@ -113,7 +134,7 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
                       {new Date(session.scheduledFor).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                     </p>
                     {session.invitationMessage && (
-                      <p className="mt-4 text-xs italic text-slate-300 bg-black/20 border-l-2 border-amber-500/30 p-3 rounded-r-xl">
+                      <p className="mt-4 text-xs italic text-slate-200 bg-black/40 border-l-2 border-amber-500/50 p-3 rounded-r-xl">
                         &ldquo;{session.invitationMessage}&rdquo;
                       </p>
                     )}
@@ -121,9 +142,9 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
                   <div className="mt-8">
                     <Link
                       href={`/together/room/${session.id}`}
-                      className="inline-flex w-full justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-3 text-[10px] font-extrabold uppercase tracking-widest text-white transition-all duration-300 backdrop-blur-sm"
+                      className="inline-flex w-full justify-center rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 px-4 py-3 text-[11px] font-extrabold uppercase tracking-widest text-white transition-all duration-300 backdrop-blur-sm shadow-[0_0_20px_rgba(251,191,36,0.15)]"
                     >
-                      Enter Room
+                      Enter Room 🍿
                     </Link>
                   </div>
                 </div>
@@ -147,14 +168,25 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
               <Link
                 href={`/together/memory/${session.id}`}
                 key={session.id}
-                className="snap-start flex-none w-[280px] rounded-2xl glass-panel border border-white/[0.04] bg-white/[0.01] p-6 hover:border-white/[0.15] hover:bg-white/[0.04] opacity-80 hover:opacity-100 transition-all duration-500 group"
+                className="snap-start flex-none w-[280px] rounded-2xl glass-panel border border-white/[0.06] bg-white/[0.02] p-4 hover:border-amber-500/30 hover:bg-white/[0.04] opacity-90 hover:opacity-100 transition-all duration-500 group"
               >
-                <div className="aspect-video w-full rounded-lg bg-[#050208] border border-white/5 mb-4 relative overflow-hidden flex items-center justify-center">
-                  <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent" />
-                  <span className="text-3xl opacity-30 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500">🎞️</span>
+                <div className="aspect-video w-full rounded-xl bg-[#050208] border border-white/10 mb-3 relative overflow-hidden flex items-center justify-center">
+                  {session.posterUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={session.posterUrl}
+                      alt={session.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                  ) : (
+                    <>
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent" />
+                      <span className="text-3xl opacity-40 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500">🎞️</span>
+                    </>
+                  )}
                 </div>
                 <h3 className="font-bold text-slate-100 font-display text-sm tracking-tight truncate">{session.title}</h3>
-                <p className="text-[10px] font-semibold text-slate-500 mt-1 uppercase tracking-widest">
+                <p className="text-[10px] font-semibold text-slate-400 mt-1 uppercase tracking-widest">
                   {new Date(session.scheduledFor).toLocaleDateString()}
                 </p>
               </Link>

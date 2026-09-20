@@ -4,7 +4,6 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { watchSessions } from "@/db/schema";
-import { joinWatchSessionAction } from "@/actions/together";
 import { getRoomCustomizationAction } from "@/actions/room";
 import { AppShell } from "@/components/app-shell";
 import { redirectPathForAuthError, requireActiveCouple } from "@/lib/auth";
@@ -47,8 +46,6 @@ export default async function RoomPage({
   if (!session) {
     redirect("/together");
   }
-
-  await joinWatchSessionAction(session.id);
 
   const provider = getProvider(session.provider);
   const providerName = provider ? provider.name : session.provider;

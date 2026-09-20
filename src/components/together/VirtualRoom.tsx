@@ -19,7 +19,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { endWatchSessionAction, sendWatchMessageAction } from "@/actions/together";
+import { endWatchSessionAction, joinWatchSessionAction, sendWatchMessageAction } from "@/actions/together";
 import { authorizeRealtimeTopicAction } from "@/actions/realtime-auth";
 import { createClient } from "@/lib/supabase/client";
 import { getProvider } from "@/features/together/providers";
@@ -79,10 +79,20 @@ export function VirtualRoom({
   const [messages, setMessages] = useState<WatchMsg[]>([]);
   const [newMessage, setNewMessage] = useState("");
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const positionRef = useRef(position);
+  positionRef.current = position;
+
   const reactionTimers = useRef<number[]>([]);
   const internalTimerRef = useRef<number | null>(null);
   const heartbeatTimerRef = useRef<number | null>(null);
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
+
+  // Join session participant record on mount
+  useEffect(() => {
+    void joinWatchSessionAction(sessionId);
+  }, [sessionId]);
 
   // Synchronized countdown runner
   useEffect(() => {
@@ -146,7 +156,7 @@ export function VirtualRoom({
             case "PLAY": {
               setState("playing");
               const target = protocol.calculateTargetPosition(validated);
-              const report = protocol.evaluateDrift(position, target);
+              const report = protocol.evaluateDrift(positionRef.current, target);
               setDrift(report);
               if (report.requiresCorrection) {
                 setPosition(Math.round(target));
@@ -157,9 +167,9 @@ export function VirtualRoom({
               setState("paused");
               setPosition(validated.position);
               setDrift({
-                localPos: position,
+                localPos: positionRef.current,
                 remotePos: validated.position,
-                driftSeconds: Math.abs(position - validated.position),
+                driftSeconds: Math.abs(positionRef.current - validated.position),
                 inSync: true,
                 requiresCorrection: false,
               });
@@ -185,7 +195,7 @@ export function VirtualRoom({
             }
             case "STATE_SYNC": {
               const target = protocol.calculateTargetPosition(validated);
-              const report = protocol.evaluateDrift(position, target);
+              const report = protocol.evaluateDrift(positionRef.current, target);
               setDrift(report);
               if (report.requiresCorrection) {
                 setPosition(Math.round(target));
@@ -230,7 +240,7 @@ export function VirtualRoom({
     // Lightweight periodic heartbeat ping every 12s
     heartbeatTimerRef.current = window.setInterval(() => {
       if (channelRef.current) {
-        const ping = protocol.createEvent("HEARTBEAT_PING", state, position);
+        const ping = protocol.createEvent("HEARTBEAT_PING", stateRef.current, positionRef.current);
         void channelRef.current.send({
           type: "broadcast",
           event: "protocol_sync",
@@ -248,7 +258,7 @@ export function VirtualRoom({
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [sessionId, userId, protocol, position, state]);
+  }, [sessionId, userId, protocol]);
 
   // Local playback progression timer
   useEffect(() => {
