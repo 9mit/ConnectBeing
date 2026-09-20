@@ -18,7 +18,7 @@ import {
   watchEventSchema,
   watchSessionMessageSchema,
 } from "@/lib/validations";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { tryUnlockAchievement } from "@/lib/achievements";
@@ -45,7 +45,7 @@ export async function createWatchSessionAction(
 ): Promise<ActionResult<{ sessionId: string }>> {
   try {
     const parsed = createWatchSessionSchema.parse(input);
-    const { couple } = await requireVerifiedCouple();
+    const { user, couple } = await requireVerifiedCouple();
 
     const sessionId = createId();
 
@@ -83,12 +83,17 @@ export async function createWatchSessionAction(
     await db.insert(watchSessions).values({
       id: sessionId,
       coupleId: couple.id,
+      hostUserId: user.id,
       provider: dbProvider,
       title: parsed.title,
       posterUrl,
       scheduledFor: scheduledForDate,
       invitationMessage: parsed.invitationMessage || null,
       theme: parsed.theme || null,
+      hostStreamActive: false,
+      hostStreamType: "none",
+      playbackState: "idle",
+      currentPosition: 0,
     });
 
     try {
@@ -302,3 +307,137 @@ export async function endWatchSessionAction(
     return fail(e);
   }
 }
+
+export async function updateWatchSessionStreamAction(
+  sessionId: string,
+  updates: {
+    hostStreamActive?: boolean;
+    hostStreamType?: "none" | "tab" | "window" | "screen";
+    playbackState?: "idle" | "playing" | "paused" | "buffering";
+    currentPosition?: number;
+    status?: "scheduled" | "active" | "completed" | "cancelled";
+  },
+): Promise<ActionResult<{ success: true }>> {
+  try {
+    const { couple } = await requireVerifiedCouple();
+    await assertWatchSessionOwned(sessionId, couple.id);
+
+    const updateData: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
+    if (typeof updates.hostStreamActive === "boolean") {
+      updateData.hostStreamActive = updates.hostStreamActive;
+    }
+    if (updates.hostStreamType) {
+      updateData.hostStreamType = updates.hostStreamType;
+    }
+    if (updates.playbackState) {
+      updateData.playbackState = updates.playbackState;
+    }
+    if (typeof updates.currentPosition === "number") {
+      updateData.currentPosition = Math.max(0, Math.round(updates.currentPosition));
+    }
+    if (updates.status) {
+      updateData.status = updates.status;
+    }
+
+    await db
+      .update(watchSessions)
+      .set(updateData)
+      .where(eq(watchSessions.id, sessionId));
+
+    return ok({ success: true });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function getWatchSessionDetailsAction(
+  sessionId: string,
+): Promise<
+  ActionResult<{
+    id: string;
+    coupleId: string;
+    hostUserId: string | null;
+    provider: string;
+    title: string;
+    posterUrl: string | null;
+    scheduledFor: string;
+    status: string;
+    hostStreamActive: boolean;
+    hostStreamType: string;
+    playbackState: string;
+    currentPosition: number;
+    isHost: boolean;
+  }>
+> {
+  try {
+    const { user, couple } = await requireVerifiedCouple();
+    const session = await db.query.watchSessions.findFirst({
+      where: and(
+        eq(watchSessions.id, sessionId),
+        eq(watchSessions.coupleId, couple.id),
+      ),
+    });
+
+    if (!session) {
+      throw new AppError("NOT_FOUND", "Watch session not found.", 404);
+    }
+
+    return ok({
+      id: session.id,
+      coupleId: session.coupleId,
+      hostUserId: session.hostUserId,
+      provider: session.provider,
+      title: session.title,
+      posterUrl: session.posterUrl,
+      scheduledFor: session.scheduledFor.toISOString(),
+      status: session.status,
+      hostStreamActive: !!session.hostStreamActive,
+      hostStreamType: session.hostStreamType || "none",
+      playbackState: session.playbackState || "idle",
+      currentPosition: session.currentPosition || 0,
+      isHost: session.hostUserId ? session.hostUserId === user.id : couple.userAId === user.id,
+    });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function getWatchMessagesAction(
+  sessionId: string,
+): Promise<
+  ActionResult<
+    Array<{
+      id: string;
+      userId: string;
+      content: string;
+      playbackPosition: number | null;
+      createdAt: string;
+    }>
+  >
+> {
+  try {
+    const { couple } = await requireVerifiedCouple();
+    await assertWatchSessionOwned(sessionId, couple.id);
+
+    const msgs = await db.query.watchMessages.findMany({
+      where: eq(watchMessages.sessionId, sessionId),
+      orderBy: [asc(watchMessages.createdAt)],
+      limit: 100,
+    });
+
+    return ok(
+      msgs.map((m) => ({
+        id: m.id,
+        userId: m.userId,
+        content: m.content,
+        playbackPosition: m.playbackPosition,
+        createdAt: m.createdAt.toISOString(),
+      })),
+    );
+  } catch (e) {
+    return fail(e);
+  }
+}
+

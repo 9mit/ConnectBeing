@@ -516,6 +516,14 @@ export const watchSessions = pgTable(
     theme: text("theme"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
+    hostUserId: text("host_user_id").references(() => users.id, { onDelete: "set null" }),
+    hostStreamActive: boolean("host_stream_active").default(false),
+    hostStreamType: text("host_stream_type").default("none"),
+    playbackState: text("playback_state").default("idle"),
+    currentPosition: integer("current_position").default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1258,6 +1266,10 @@ export const watchSessionsRelations = relations(watchSessions, ({ one, many }) =
   couple: one(couples, {
     fields: [watchSessions.coupleId],
     references: [couples.id],
+  }),
+  hostUser: one(users, {
+    fields: [watchSessions.hostUserId],
+    references: [users.id],
   }),
   participants: many(watchParticipants),
   events: many(watchEvents),

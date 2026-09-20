@@ -4,9 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Play,
   Pause,
-  FastForward,
-  Rewind,
   Phone,
+  PhoneOff,
+  Mic,
+  MicOff,
+  Maximize2,
+  Minimize2,
   ExternalLink,
   Tv,
   Sparkles,
@@ -14,32 +17,54 @@ import {
   CheckCircle2,
   Clock,
   Radio,
+  Share2,
+  MessageSquare,
+  Compass,
+  Film,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { endWatchSessionAction, joinWatchSessionAction, sendWatchMessageAction } from "@/actions/together";
+import {
+  endWatchSessionAction,
+  getWatchMessagesAction,
+  joinWatchSessionAction,
+  sendWatchMessageAction,
+} from "@/actions/together";
 import { authorizeRealtimeTopicAction } from "@/actions/realtime-auth";
 import { createClient } from "@/lib/supabase/client";
 import { getProvider } from "@/features/together/providers";
 import {
-  SyncProtocolManager,
-  SyncMessage,
-  DriftReport,
-  SYNC_CONFIG,
-} from "@/features/together/sync/protocol";
-import { CapabilityLevel, PlaybackState } from "@/features/together/providers/types";
+  isBrowserScreenShareSupported,
+  getProviderTechnicalCapability,
+} from "@/features/together/providers/capabilities";
+import {
+  useTheaterWebRTC,
+  TheaterRoomState,
+} from "@/features/together/webrtc/useTheaterWebRTC";
 
 type Reaction = { id: string; emoji: string; x: number; y: number };
-type WatchMsg = { id: string; content: string; userId: string; playbackPosition?: number | null };
+type WatchMsg = {
+  id: string;
+  content: string;
+  userId: string;
+  playbackPosition?: number | null;
+  createdAt?: string;
+};
+
+const THEATER_REACTIONS = ["❤️", "😂", "🔥", "😱", "👏", "🍿"] as const;
 
 export function VirtualRoom({
   sessionId,
   userId,
   partnerId,
+  coupleId,
   providerName = "JioHotstar",
   title,
+  posterUrl,
+  isHost = true,
   theme = "rose-dusk",
 }: {
   sessionId: string;
@@ -48,67 +73,117 @@ export function VirtualRoom({
   coupleId?: string;
   providerName?: string;
   title: string;
+  posterUrl?: string | null;
+  isHost?: boolean;
   theme?: string;
   decor?: Record<string, unknown>;
 }) {
   const router = useRouter();
+  const cinemaContainerRef = useRef<HTMLDivElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Find provider adapter from registry
+  // Provider & technical capability
   const provider = useMemo(() => {
     return getProvider(providerName.toLowerCase()) || getProvider("jiohotstar");
   }, [providerName]);
 
-  const capabilityLevel: CapabilityLevel = provider?.capabilityLevel || 3;
+  const capabilities = useMemo(() => {
+    return getProviderTechnicalCapability(providerName);
+  }, [providerName]);
 
-  // Sync Protocol Manager
-  const protocol = useMemo(() => new SyncProtocolManager(sessionId, userId), [sessionId, userId]);
+  const canShareScreen = useMemo(() => isBrowserScreenShareSupported(), []);
 
-  const [state, setState] = useState<"playing" | "paused" | "buffering" | "idle">("idle");
-  const [position, setPosition] = useState(0);
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [partnerReady, setPartnerReady] = useState(false);
-  const [drift, setDrift] = useState<DriftReport>({
-    localPos: 0,
-    remotePos: 0,
-    driftSeconds: 0,
-    inSync: true,
-    requiresCorrection: false,
+  // WebRTC & Streaming Engine
+  const {
+    roomState,
+    localStream,
+    remoteStream,
+    voiceActive,
+    micMuted,
+    partnerVoiceActive,
+    partnerPresence,
+    streamSourceType,
+    errorMessage,
+    updateState,
+    startScreenShare,
+    stopScreenShare,
+    startVoiceCall,
+    stopVoiceCall,
+    toggleMic,
+    remoteVoiceAudioRef,
+  } = useTheaterWebRTC({
+    sessionId,
+    userId,
+    isHost,
   });
 
-  const [reactions, setReactions] = useState<Reaction[]>([]);
+  // Theater Session & Playback States
+  const [playbackState, setPlaybackState] = useState<"playing" | "paused">("playing");
+  const [positionSeconds, setPositionSeconds] = useState(0);
+  const [stampTimestamp, setStampTimestamp] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [chatOpenMobile, setChatOpenMobile] = useState(false);
+
+  // Chat & Reactions
   const [messages, setMessages] = useState<WatchMsg[]>([]);
   const [newMessage, setNewMessage] = useState("");
+  const [reactions, setReactions] = useState<Reaction[]>([]);
 
-  const stateRef = useRef(state);
-  stateRef.current = state;
-  const positionRef = useRef(position);
-  positionRef.current = position;
-
-  const reactionTimers = useRef<number[]>([]);
-  const internalTimerRef = useRef<number | null>(null);
-  const heartbeatTimerRef = useRef<number | null>(null);
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
+  const reactionTimersRef = useRef<number[]>([]);
+  const positionTimerRef = useRef<number | null>(null);
 
-  // Join session participant record on mount
+  // Default cinematic backdrop if no poster provided
+  const backdrop =
+    posterUrl ||
+    "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1600&auto=format&fit=crop&q=80";
+
+  // Join session participant record & load initial chat
   useEffect(() => {
     void joinWatchSessionAction(sessionId);
+    void getWatchMessagesAction(sessionId).then((res) => {
+      if (res.ok) setMessages(res.data);
+    });
   }, [sessionId]);
 
-  // Synchronized countdown runner
+  // Attach local media stream to local video element
   useEffect(() => {
-    if (countdown === null) return;
-    if (countdown > 0) {
-      const timer = window.setTimeout(() => {
-        setCountdown((c) => (c !== null ? c - 1 : null));
-      }, 1000);
-      return () => clearTimeout(timer);
-    } else if (countdown === 0) {
-      setState("playing");
-      setCountdown(null);
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+      void localVideoRef.current.play().catch(() => {});
     }
-  }, [countdown]);
+  }, [localStream]);
 
-  // Main Realtime Connection & Protocol Event Handlers
+  // Attach remote media stream to remote video element
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      void remoteVideoRef.current.play().catch(() => {});
+    }
+  }, [remoteStream]);
+
+  // Local clock runner for movie time
+  useEffect(() => {
+    if (playbackState === "playing") {
+      positionTimerRef.current = window.setInterval(() => {
+        setPositionSeconds((p) => p + 1);
+      }, 1000);
+    } else if (positionTimerRef.current) {
+      clearInterval(positionTimerRef.current);
+    }
+    return () => {
+      if (positionTimerRef.current) clearInterval(positionTimerRef.current);
+    };
+  }, [playbackState]);
+
+  // Scroll chat to bottom on new message
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
+
+  // Realtime channel for chat & emoji reactions
   useEffect(() => {
     let disposed = false;
     let supabase: ReturnType<typeof createClient>;
@@ -128,14 +203,14 @@ export function VirtualRoom({
       const r: Reaction = {
         id: Math.random().toString(36),
         emoji,
-        x: 20 + Math.random() * 60,
-        y: 75 + Math.random() * 20,
+        x: 15 + Math.random() * 70,
+        y: 65 + Math.random() * 25,
       };
       setReactions((prev) => [...prev, r]);
-      reactionTimers.current.push(
+      reactionTimersRef.current.push(
         window.setTimeout(() => {
           setReactions((prev) => prev.filter((x) => x.id !== r.id));
-        }, 2200),
+        }, 2500),
       );
     };
 
@@ -143,70 +218,14 @@ export function VirtualRoom({
       if (disposed || !auth.ok) return;
 
       channel
-        .on("broadcast", { event: "protocol_sync" }, ({ payload }: { payload: any }) => {
-          const validated = protocol.processIncoming(payload as SyncMessage);
-          if (!validated) return;
-
-          switch (validated.type) {
-            case "COUNTDOWN_START": {
-              setCountdown(validated.countdown ?? SYNC_CONFIG.COUNTDOWN_DURATION_SECONDS);
-              setPosition(validated.position);
-              break;
-            }
-            case "PLAY": {
-              setState("playing");
-              const target = protocol.calculateTargetPosition(validated);
-              const report = protocol.evaluateDrift(positionRef.current, target);
-              setDrift(report);
-              if (report.requiresCorrection) {
-                setPosition(Math.round(target));
-              }
-              break;
-            }
-            case "PAUSE": {
-              setState("paused");
-              setPosition(validated.position);
-              setDrift({
-                localPos: positionRef.current,
-                remotePos: validated.position,
-                driftSeconds: Math.abs(positionRef.current - validated.position),
-                inSync: true,
-                requiresCorrection: false,
-              });
-              break;
-            }
-            case "SEEK": {
-              setPosition(validated.position);
-              setState(validated.state);
-              break;
-            }
-            case "READY_STATE": {
-              setPartnerReady(!!validated.isReady);
-              break;
-            }
-            case "HEARTBEAT_PING": {
-              const pong = protocol.handlePing(validated);
-              void channel.send({ type: "broadcast", event: "protocol_sync", payload: pong });
-              break;
-            }
-            case "HEARTBEAT_PONG": {
-              protocol.handlePong(validated);
-              break;
-            }
-            case "STATE_SYNC": {
-              const target = protocol.calculateTargetPosition(validated);
-              const report = protocol.evaluateDrift(positionRef.current, target);
-              setDrift(report);
-              if (report.requiresCorrection) {
-                setPosition(Math.round(target));
-              }
-              break;
-            }
-          }
-        })
-        .on("broadcast", { event: "reaction" }, ({ payload }: { payload: any }) => {
+        .on("broadcast", { event: "theater:reaction" }, ({ payload }: { payload: any }) => {
           if (payload.userId === userId) return;
           applyReaction(payload.emoji);
+        })
+        .on("broadcast", { event: "theater:playback" }, ({ payload }: { payload: any }) => {
+          if (payload.userId === userId) return;
+          if (payload.state) setPlaybackState(payload.state);
+          if (typeof payload.position === "number") setPositionSeconds(payload.position);
         })
         .on(
           "postgres_changes",
@@ -222,6 +241,7 @@ export function VirtualRoom({
               content: string;
               user_id: string;
               playback_position?: number | null;
+              created_at: string;
             };
             setMessages((prev) => [
               ...prev,
@@ -230,6 +250,7 @@ export function VirtualRoom({
                 content: row.content,
                 userId: row.user_id,
                 playbackPosition: row.playback_position,
+                createdAt: row.created_at,
               },
             ]);
           },
@@ -237,94 +258,76 @@ export function VirtualRoom({
         .subscribe();
     });
 
-    // Lightweight periodic heartbeat ping every 12s
-    heartbeatTimerRef.current = window.setInterval(() => {
-      if (channelRef.current) {
-        const ping = protocol.createEvent("HEARTBEAT_PING", stateRef.current, positionRef.current);
-        void channelRef.current.send({
-          type: "broadcast",
-          event: "protocol_sync",
-          payload: ping,
-        });
-      }
-    }, SYNC_CONFIG.HEARTBEAT_INTERVAL_MS);
-
-    const timersRef = reactionTimers;
+    const timers = reactionTimersRef;
     return () => {
       disposed = true;
-      timersRef.current.forEach(clearTimeout);
-      timersRef.current = [];
-      if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
+      timers.current.forEach(clearTimeout);
+      timers.current = [];
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [sessionId, userId, protocol]);
+  }, [sessionId, userId]);
 
-  // Local playback progression timer
+  // Fullscreen change listener
   useEffect(() => {
-    if (state === "playing") {
-      internalTimerRef.current = window.setInterval(() => {
-        setPosition((p) => p + 1);
-      }, 1000);
-    } else if (internalTimerRef.current) {
-      clearInterval(internalTimerRef.current);
-    }
-    return () => {
-      if (internalTimerRef.current) clearInterval(internalTimerRef.current);
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
     };
-  }, [state]);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
 
-  // Dispatch authoritative protocol sync event
-  const dispatchEvent = (
-    type: "PLAY" | "PAUSE" | "SEEK" | "COUNTDOWN_START",
-    targetState: PlaybackState,
-    targetPos: number,
-  ) => {
-    const event = protocol.createEvent(type, targetState, targetPos, {
-      countdown: type === "COUNTDOWN_START" ? SYNC_CONFIG.COUNTDOWN_DURATION_SECONDS : undefined,
-    });
-
-    if (type === "COUNTDOWN_START") {
-      setCountdown(SYNC_CONFIG.COUNTDOWN_DURATION_SECONDS);
+  const toggleFullscreen = () => {
+    if (!cinemaContainerRef.current) return;
+    if (!document.fullscreenElement) {
+      void cinemaContainerRef.current.requestFullscreen().catch(() => {});
     } else {
-      setState(targetState);
-      setPosition(targetPos);
+      void document.exitFullscreen().catch(() => {});
     }
+  };
 
+  const broadcastReaction = (emoji: string) => {
+    const r: Reaction = {
+      id: Math.random().toString(36),
+      emoji,
+      x: 20 + Math.random() * 60,
+      y: 70 + Math.random() * 20,
+    };
+    setReactions((prev) => [...prev, r]);
+    reactionTimersRef.current.push(
+      window.setTimeout(() => {
+        setReactions((prev) => prev.filter((x) => x.id !== r.id));
+      }, 2500),
+    );
     void channelRef.current?.send({
       type: "broadcast",
-      event: "protocol_sync",
-      payload: event,
+      event: "theater:reaction",
+      payload: { userId, emoji },
     });
   };
 
-  const handleToggleReady = () => {
-    const next = !partnerReady;
-    setPartnerReady(next);
-    const event = protocol.createEvent("READY_STATE", state, position, { isReady: next });
-    void channelRef.current?.send({
-      type: "broadcast",
-      event: "protocol_sync",
-      payload: event,
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim()) return;
+
+    const pos = stampTimestamp ? positionSeconds : null;
+    const content = newMessage.trim();
+    setNewMessage("");
+
+    void sendWatchMessageAction({
+      sessionId,
+      content,
+      playbackPosition: pos,
     });
   };
-
-  const formattedTime = useMemo(() => {
-    const hrs = Math.floor(position / 3600);
-    const mins = Math.floor((position % 3600) / 60);
-    const secs = position % 60;
-    if (hrs > 0) {
-      return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-    }
-    return `${mins}:${String(secs).padStart(2, "0")}`;
-  }, [position]);
 
   const providerSearchUrl = useMemo(() => {
     const cleanTitle = encodeURIComponent(title);
     const id = providerName.toLowerCase();
     if (id.includes("hotstar")) return `https://www.hotstar.com/in/search?q=${cleanTitle}`;
     if (id.includes("netflix")) return `https://www.netflix.com/search?q=${cleanTitle}`;
-    if (id.includes("prime")) return `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${cleanTitle}`;
+    if (id.includes("prime"))
+      return `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${cleanTitle}`;
     if (id.includes("disney")) return `https://www.disneyplus.com/search?q=${cleanTitle}`;
     if (id.includes("apple")) return `https://tv.apple.com/search?term=${cleanTitle}`;
     if (id.includes("sonyliv")) return `https://www.sonyliv.com/search/${cleanTitle}`;
@@ -333,93 +336,155 @@ export function VirtualRoom({
     return `https://www.youtube.com/results?search_query=${cleanTitle}`;
   }, [providerName, title]);
 
-  const themeClass =
-    theme === "violet-night"
-      ? "from-violet-950 via-zinc-950 to-[#060204]"
-      : theme === "amber-glow"
-        ? "from-amber-950 via-zinc-950 to-[#060204]"
-        : "from-rose-950 via-zinc-950 to-[#060204]";
+  const formattedTime = useMemo(() => {
+    const hrs = Math.floor(positionSeconds / 3600);
+    const mins = Math.floor((positionSeconds % 3600) / 60);
+    const secs = positionSeconds % 60;
+    if (hrs > 0) {
+      return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+    return `${mins}:${String(secs).padStart(2, "0")}`;
+  }, [positionSeconds]);
+
+  const formatMsgTime = (seconds?: number | null) => {
+    if (typeof seconds !== "number") return null;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${String(secs).padStart(2, "0")}`;
+  };
+
+  // Determine if active video stream is present
+  const hasActiveStream =
+    roomState === "LIVE" && (isHost ? !!localStream : !!remoteStream);
+
+  const isCompanionMode =
+    roomState === "FALLBACK_MODE" || (!canShareScreen && !hasActiveStream);
 
   return (
     <div
-      className="relative flex h-full min-h-[70vh] flex-col overflow-hidden rounded-2xl bg-[#06070a] border border-white/[0.08] shadow-2xl"
+      ref={cinemaContainerRef}
+      className={`relative flex h-full w-full flex-col overflow-hidden rounded-2xl bg-[#050608] border border-white/[0.08] shadow-2xl text-[#f7f6f2] select-none ${
+        isFullscreen ? "p-0 rounded-none" : ""
+      }`}
     >
-      {/* Synchronized 3-2-1 Countdown Overlay */}
-      <AnimatePresence>
-        {countdown !== null && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md"
-          >
-            <span className="text-[11px] font-medium uppercase tracking-[0.25em] text-zinc-400 mb-2">
-              Synchronizing Playback
-            </span>
-            <motion.div
-              key={countdown}
-              initial={{ scale: 0.6, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 1.4, opacity: 0 }}
-              className="font-serif text-7xl sm:text-9xl font-light text-[#f7f6f2]"
-            >
-              {countdown > 0 ? countdown : "PLAY"}
-            </motion.div>
-            <p className="mt-4 text-xs text-zinc-400 font-light">
-              Screens are locking to play at the exact same instant
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Hidden audio element for remote partner voice */}
+      <audio ref={remoteVoiceAudioRef} autoPlay playsInline />
 
-      {/* Top Header & Telemetry Bar */}
-      <div className="flex flex-wrap items-center justify-between border-b border-white/[0.06] px-5 py-3 gap-2 bg-[#090a0f]/80 backdrop-blur-md">
-        <div className="flex items-center gap-3">
+      {/* TOP CINEMA HEADER */}
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/[0.07] px-4 md:px-6 bg-[#07090e]/90 backdrop-blur-md z-30">
+        <div className="flex items-center gap-3 min-w-0">
           <div
-            className="w-2.5 h-2.5 rounded-full shrink-0"
-            style={{ backgroundColor: provider?.brandColor || "#7dd3fc" }}
+            className="w-2.5 h-2.5 rounded-full shrink-0 animate-pulse"
+            style={{ backgroundColor: provider?.brandColor || "#f43f5e" }}
           />
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs sm:text-sm font-medium text-[#f7f6f2]">{title}</p>
-              <span className="text-[10px] font-mono text-zinc-400 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06]">
-                {providerName}
+          <div className="flex items-center gap-2 truncate">
+            <h2 className="text-xs md:text-sm font-semibold truncate tracking-wide text-white">
+              {title}
+            </h2>
+            <span className="hidden sm:inline-block text-[10px] font-mono uppercase tracking-wider text-zinc-400 bg-white/[0.05] px-2 py-0.5 rounded border border-white/[0.08]">
+              {providerName}
+            </span>
+          </div>
+
+          {/* Status Badge */}
+          <div className="flex items-center gap-1.5 ml-2">
+            {hasActiveStream ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                Live ({streamSourceType})
               </span>
-            </div>
-            <div className="flex items-center gap-2 text-[10px] text-zinc-400 font-mono mt-0.5">
-              <span>{formattedTime}</span>
-              <span>·</span>
-              <span className={state === "playing" ? "text-emerald-400" : "text-amber-300"}>
-                {state.toUpperCase()}
+            ) : isCompanionMode ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                <Compass size={10} /> Companion Mode
               </span>
-              <span>·</span>
-              <span>DRIFT: ±{drift.driftSeconds}s</span>
-            </div>
+            ) : roomState === "RECONNECTING" ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full animate-pulse">
+                <RefreshCw size={10} className="animate-spin" /> Reconnecting
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-zinc-400 bg-white/[0.04] border border-white/[0.08] px-2 py-0.5 rounded-full">
+                <Film size={10} /> Private Theater
+              </span>
+            )}
           </div>
         </div>
 
+        {/* Right Controls in Header */}
         <div className="flex items-center gap-2">
-          {/* Partner Readiness Toggle */}
+          {/* Partner Presence Badge */}
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-zinc-400 font-medium px-2 py-1 rounded-full bg-white/[0.03] border border-white/[0.06]">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                partnerPresence !== "offline" ? "bg-emerald-400" : "bg-zinc-600"
+              }`}
+            />
+            <span className="text-[11px]">
+              {partnerPresence !== "offline" ? "Partner watching" : "Partner offline"}
+            </span>
+          </div>
+
+          {/* Voice Chat Toggle */}
           <button
             type="button"
-            onClick={handleToggleReady}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-all ${
-              partnerReady
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                : "bg-white/[0.02] border-white/[0.08] text-zinc-300 hover:text-white"
+            onClick={() => {
+              if (voiceActive) {
+                stopVoiceCall();
+              } else {
+                void startVoiceCall();
+              }
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all ${
+              voiceActive
+                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm"
+                : "bg-white/[0.04] text-zinc-300 border-white/[0.08] hover:text-white"
             }`}
+            title={voiceActive ? "Leave voice call" : "Join voice call with partner"}
           >
-            <CheckCircle2 size={12} />
-            <span>{partnerReady ? "Partner Ready" : "Set Ready"}</span>
+            {voiceActive ? <Phone size={12} /> : <Phone size={12} />}
+            <span className="hidden md:inline">
+              {voiceActive ? "Voice Connected" : "Voice Call"}
+            </span>
           </button>
 
-          <Link
-            href="/call"
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.02] px-3 py-1 text-xs text-zinc-300 hover:text-white transition-colors"
-          >
-            <Phone size={12} /> <span>Voice Call</span>
-          </Link>
+          {/* Mic Mute Toggle when Voice Active */}
+          {voiceActive && (
+            <button
+              type="button"
+              onClick={toggleMic}
+              className={`p-1.5 rounded-full border transition-all ${
+                micMuted
+                  ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                  : "bg-white/[0.05] text-zinc-200 border-white/[0.1] hover:text-white"
+              }`}
+              title={micMuted ? "Unmute microphone" : "Mute microphone"}
+            >
+              {micMuted ? <MicOff size={13} /> : <Mic size={13} />}
+            </button>
+          )}
 
+          {/* Fullscreen Button */}
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-white/[0.05] transition-colors"
+            title="Toggle fullscreen"
+          >
+            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+
+          {/* Mobile Chat Drawer Toggle */}
+          <button
+            type="button"
+            onClick={() => setChatOpenMobile((o) => !o)}
+            className="md:hidden relative p-1.5 rounded-full text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors"
+          >
+            <MessageSquare size={14} />
+            {messages.length > 0 && (
+              <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-rose-500" />
+            )}
+          </button>
+
+          {/* Leave Session */}
           <button
             type="button"
             onClick={() =>
@@ -427,206 +492,449 @@ export function VirtualRoom({
                 router.push(`/together/memory/${sessionId}`),
               )
             }
-            className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-xs font-medium text-rose-200 hover:bg-rose-500/20 transition-colors"
+            className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-xs font-medium text-rose-300 hover:bg-rose-500/20 transition-colors"
           >
             Leave
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Main Theater Centerpiece & Reaction Canvas */}
-      <div className="relative flex-1 flex flex-col items-center justify-center p-6 text-center overflow-hidden">
-        {/* Floating Emoji Reactions */}
-        <AnimatePresence>
-          {reactions.map((r) => (
-            <motion.span
-              key={r.id}
-              initial={{ opacity: 0, y: 30, scale: 0.6 }}
-              animate={{ opacity: 1, y: -70, scale: 1.1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              className="pointer-events-none absolute text-3xl select-none"
-              style={{ left: `${r.x}%`, top: `${r.y}%` }}
-            >
-              {r.emoji}
-            </motion.span>
-          ))}
-        </AnimatePresence>
-
-        {/* Private Cinema Center Hub */}
-        <div className="z-10 max-w-md w-full rounded-2xl bg-[#0d0f15]/90 border border-white/[0.08] p-6 backdrop-blur-xl shadow-2xl space-y-4 text-center">
-          <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-white shadow-lg"
-            style={{
-              backgroundColor: provider?.brandColor ? `${provider.brandColor}22` : "#ffffff11",
-              border: `1px solid ${provider?.brandColor || "#ffffff"}33`,
-            }}
-          >
-            <Tv size={24} style={{ color: provider?.brandColor || "#ffffff" }} />
+      {/* MAIN CINEMA STAGE: 75% VIDEO SURFACE + 25% CHAT SIDEBAR */}
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* 1. CINEMA VIEWPORT (DOMINATES 75% OF SCREEN) */}
+        <div className="relative flex-1 flex flex-col bg-black overflow-hidden">
+          {/* FLOATING MICRO-ANIMATED REACTIONS OVER VIDEO */}
+          <div className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
+            <AnimatePresence>
+              {reactions.map((r) => (
+                <motion.span
+                  key={r.id}
+                  initial={{ opacity: 0, y: 30, scale: 0.5 }}
+                  animate={{ opacity: 1, y: -90, scale: 1.25 }}
+                  exit={{ opacity: 0, scale: 0.7 }}
+                  transition={{ duration: 2.2, ease: "easeOut" }}
+                  className="absolute text-4xl select-none filter drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]"
+                  style={{ left: `${r.x}%`, top: `${r.y}%` }}
+                >
+                  {r.emoji}
+                </motion.span>
+              ))}
+            </AnimatePresence>
           </div>
 
-          <div>
-            <h3 className="text-xl font-serif font-light text-[#f7f6f2]">{title}</h3>
-            <div className="mt-1 flex items-center justify-center gap-2">
-              <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider">
-                {providerName}
-              </span>
-              <span className="text-[10px] text-zinc-600">·</span>
-              <span className="text-[11px] text-amber-200/90 flex items-center gap-1 font-sans">
-                <ShieldCheck size={12} />
-                <span>Synchronized Theater Room</span>
-              </span>
+          {/* VIDEO STAGE CONTAINER */}
+          <div className="relative flex-1 flex items-center justify-center bg-black overflow-hidden">
+            {/* A. HOST VIEW: LOCAL SHARED TAB STREAM */}
+            {isHost && localStream && (
+              <video
+                ref={localVideoRef}
+                muted
+                autoPlay
+                playsInline
+                className="h-full w-full object-contain"
+              />
+            )}
+
+            {/* B. VIEWER VIEW: REMOTE WEBRTC VIDEO STREAM */}
+            {!isHost && remoteStream && (
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="h-full w-full object-contain"
+              />
+            )}
+
+            {/* C. CONTEXTUAL OVERLAY: HOST SETUP GUIDE (When no stream is live) */}
+            {isHost && !hasActiveStream && !isCompanionMode && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-[#090b11]/90 via-[#07080d]/95 to-black backdrop-blur-md">
+                <div className="max-w-lg w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15]/90 p-8 shadow-2xl space-y-6">
+                  <div
+                    className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto text-white shadow-xl"
+                    style={{
+                      backgroundColor: provider?.brandColor ? `${provider.brandColor}22` : "#ffffff11",
+                      border: `1px solid ${provider?.brandColor || "#ffffff"}44`,
+                    }}
+                  >
+                    <Tv size={28} style={{ color: provider?.brandColor || "#ffffff" }} />
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-mono font-medium uppercase tracking-[0.25em] text-amber-400">
+                      Private Cinema Setup
+                    </span>
+                    <h3 className="text-2xl font-serif font-normal text-white mt-1">
+                      {title}
+                    </h3>
+                    <p className="text-xs text-zinc-400 font-light mt-2 leading-relaxed">
+                      To watch together, launch the movie in a separate browser tab, then share
+                      that tab with your partner. Audio & video stream privately via WebRTC.
+                    </p>
+                  </div>
+
+                  {/* Step-by-Step Guidance */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5 space-y-1">
+                      <span className="text-[10px] font-mono text-zinc-400">STEP 1</span>
+                      <p className="text-xs font-medium text-white">Open {providerName}</p>
+                      <p className="text-[11px] text-zinc-400">
+                        Launch the movie in a dedicated tab and press play.
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5 space-y-1">
+                      <span className="text-[10px] font-mono text-zinc-400">STEP 2</span>
+                      <p className="text-xs font-medium text-white">Share Browser Tab</p>
+                      <p className="text-[11px] text-zinc-400">
+                        Select the tab where your movie is running.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                    <a
+                      href={providerSearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => updateState("OTT_OPEN")}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs font-semibold text-zinc-900 bg-white hover:bg-zinc-200 transition-all shadow-md"
+                    >
+                      <ExternalLink size={13} /> 1. Open {providerName} ↗
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => void startScreenShare()}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 transition-all shadow-md shadow-rose-600/20"
+                    >
+                      <Share2 size={13} /> 2. Share Movie Tab
+                    </button>
+                  </div>
+
+                  {/* Fallback to Companion Mode option */}
+                  <div className="pt-2 border-t border-white/[0.06]">
+                    <button
+                      type="button"
+                      onClick={() => updateState("FALLBACK_MODE")}
+                      className="text-[11px] text-zinc-400 hover:text-white transition-colors"
+                    >
+                      Watching via TV or DRM blocked? Switch to Companion Mode →
+                    </button>
+                  </div>
+
+                  {errorMessage && (
+                    <div className="flex items-center gap-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg p-2.5">
+                      <AlertCircle size={14} className="shrink-0" />
+                      <span>{errorMessage}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* D. CONTEXTUAL OVERLAY: VIEWER WAITING LOUNGE */}
+            {!isHost && !hasActiveStream && !isCompanionMode && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-[#090b11]/90 via-[#07080d]/95 to-black backdrop-blur-md">
+                <div className="max-w-md w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15]/90 p-8 shadow-2xl space-y-6">
+                  <div className="relative w-20 h-28 rounded-xl overflow-hidden mx-auto border border-white/[0.1] shadow-2xl">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={backdrop} alt={title} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <Film size={28} className="text-white/80 animate-pulse" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-mono font-medium uppercase tracking-[0.25em] text-rose-400">
+                      Private Cinema Lounge
+                    </span>
+                    <h3 className="text-xl font-serif font-normal text-white mt-1">
+                      {title}
+                    </h3>
+                    <p className="text-xs text-zinc-400 font-light mt-2 leading-relaxed">
+                      Your partner is preparing the movie stream. As soon as they share their tab,
+                      the theater will play here automatically in high definition.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-center gap-2 text-xs text-zinc-300 bg-white/[0.03] border border-white/[0.06] rounded-full py-2 px-4 w-fit mx-auto">
+                    <RefreshCw size={12} className="animate-spin text-rose-400" />
+                    <span>Awaiting partner WebRTC broadcast…</span>
+                  </div>
+
+                  <div className="pt-2 border-t border-white/[0.06]">
+                    <button
+                      type="button"
+                      onClick={() => updateState("FALLBACK_MODE")}
+                      className="text-[11px] text-zinc-400 hover:text-white transition-colors"
+                    >
+                      Want to open movie on your own app? Switch to Companion Mode →
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* E. CONTEXTUAL OVERLAY: STREAM ENDED */}
+            {roomState === "STREAM_ENDED" && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center bg-black/90 backdrop-blur-md">
+                <div className="max-w-md w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15] p-8 shadow-2xl space-y-5">
+                  <Film size={32} className="text-zinc-500 mx-auto" />
+                  <h3 className="text-xl font-serif text-white">The Movie Stream Ended</h3>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    The host stopped sharing their browser tab. You can resume sharing, switch to
+                    synchronized Companion Mode, or save your movie memory archive.
+                  </p>
+
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
+                    {isHost && (
+                      <button
+                        type="button"
+                        onClick={() => void startScreenShare()}
+                        className="w-full sm:w-auto rounded-full bg-white text-zinc-900 px-5 py-2.5 text-xs font-semibold hover:bg-zinc-200 transition-all shadow-md"
+                      >
+                        Resume Sharing Tab
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => updateState("FALLBACK_MODE")}
+                      className="w-full sm:w-auto rounded-full border border-white/[0.12] bg-white/[0.04] px-4 py-2.5 text-xs font-medium text-zinc-300 hover:text-white transition-colors"
+                    >
+                      Switch to Companion Mode
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* F. CONTEXTUAL OVERLAY: COMPANION MODE (Fallback when DRM or mobile prevents screen capture) */}
+            {isCompanionMode && (
+              <div className="relative inset-0 flex-1 w-full h-full flex flex-col items-center justify-center p-6 overflow-hidden">
+                {/* Cinematic Ambient Backdrop */}
+                <div
+                  className="absolute inset-0 bg-cover bg-center filter blur-2xl opacity-20 scale-105"
+                  style={{ backgroundImage: `url(${backdrop})` }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/90 to-[#06070a]" />
+
+                <div className="relative z-10 max-w-lg w-full rounded-2xl border border-amber-500/20 bg-[#0d0f17]/90 p-8 shadow-2xl text-center space-y-5 backdrop-blur-xl">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-300 shadow-lg">
+                    <Compass size={24} />
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-mono uppercase tracking-[0.25em] text-amber-400">
+                      Companion Mode Active
+                    </span>
+                    <h3 className="text-2xl font-serif font-light text-white mt-1">
+                      {title}
+                    </h3>
+                    <p className="text-xs text-zinc-400 font-light mt-2 leading-relaxed">
+                      Streaming provider protection prevents direct tab capture in this browser.
+                      Open the movie on your device—MadLove synchronizes your shared timeline,
+                      whispers, reactions, and voice connection.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                    <a
+                      href={providerSearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs font-semibold text-zinc-950 bg-amber-400 hover:bg-amber-300 transition-all shadow-md shadow-amber-400/20"
+                    >
+                      <ExternalLink size={13} /> Open {providerName} on Device ↗
+                    </a>
+
+                    {canShareScreen && (
+                      <button
+                        type="button"
+                        onClick={() => void startScreenShare()}
+                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full border border-white/[0.1] bg-white/[0.04] px-4 py-2.5 text-xs font-medium text-zinc-200 hover:text-white transition-colors"
+                      >
+                        <Share2 size={13} /> Try Tab Share Again
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* CINEMA CONTROL & TIMELINE BAR */}
+          <div className="border-t border-white/[0.07] px-4 py-2.5 bg-[#07090e]/95 backdrop-blur-md z-30">
+            <div className="flex items-center justify-between gap-4">
+              {/* Left: Time & Playback status */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = playbackState === "playing" ? "paused" : "playing";
+                    setPlaybackState(next);
+                    void channelRef.current?.send({
+                      type: "broadcast",
+                      event: "theater:playback",
+                      payload: { userId, state: next, position: positionSeconds },
+                    });
+                  }}
+                  className="p-2 rounded-full bg-white text-zinc-950 hover:bg-zinc-200 transition-all shadow-sm"
+                  title={playbackState === "playing" ? "Pause timeline" : "Resume timeline"}
+                >
+                  {playbackState === "playing" ? <Pause size={14} /> : <Play size={14} />}
+                </button>
+
+                <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+                  <Clock size={12} className="text-zinc-500" />
+                  <span className="text-white font-medium">{formattedTime}</span>
+                </div>
+              </div>
+
+              {/* Center: Realtime Reaction Pills */}
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {THEATER_REACTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => broadcastReaction(emoji)}
+                    className="text-lg sm:text-xl p-1 sm:p-1.5 rounded-full hover:scale-130 transition-transform active:scale-95 opacity-85 hover:opacity-100"
+                    title={`React with ${emoji}`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+
+              {/* Right: Screen Sharing Control */}
+              <div className="flex items-center gap-2">
+                {isHost && hasActiveStream && (
+                  <button
+                    type="button"
+                    onClick={stopScreenShare}
+                    className="text-xs font-medium text-rose-300 hover:text-rose-200 px-3 py-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 transition-all"
+                  >
+                    Stop Sharing
+                  </button>
+                )}
+
+                {isHost && !hasActiveStream && canShareScreen && (
+                  <button
+                    type="button"
+                    onClick={() => void startScreenShare()}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-200 hover:text-white px-3 py-1.5 rounded-full border border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] transition-all"
+                  >
+                    <Share2 size={12} />
+                    <span className="hidden sm:inline">Share Tab</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-
-          <p className="text-xs text-zinc-400 font-light leading-relaxed">
-            Open the movie in your streaming app or tab. This sanctuary synchronizes your
-            timeline, instant whispers, reactions, and post-movie memory archive.
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
-            <a
-              href={providerSearchUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full px-5 py-2 text-xs font-semibold text-[#07080b] bg-[#f7f6f2] hover:bg-white transition-all shadow-sm"
-            >
-              <ExternalLink size={13} /> Open {providerName} ↗
-            </a>
-
-            <button
-              type="button"
-              onClick={() => dispatchEvent("COUNTDOWN_START", "playing", position)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-full border border-white/[0.12] bg-white/[0.04] px-4 py-2 text-xs font-medium text-zinc-200 hover:bg-white/[0.08] transition-colors"
-            >
-              <Sparkles size={13} className="text-amber-300" /> Start 3-2-1 Countdown
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Master Playback Remote Controls & Reaction Bar */}
-      <div className="border-t border-white/[0.06] bg-[#090a0f]/90 backdrop-blur-md px-5 py-3 space-y-3">
-        {/* Timeline Slider */}
-        <div className="flex items-center gap-3 text-xs text-zinc-400 font-mono">
-          <span>{formattedTime}</span>
-          <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden relative cursor-pointer">
-            <div
-              className="h-full bg-gradient-to-r from-amber-200 to-rose-200"
-              style={{ width: `${Math.min(100, (position / 7200) * 100)}%` }}
-            />
-          </div>
-          <span className="text-zinc-500">Shared Timeline</span>
         </div>
 
-        {/* Buttons Row */}
-        <div className="flex items-center justify-between gap-2">
-          {/* Play/Pause/Scrub */}
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => dispatchEvent("SEEK", state, Math.max(0, position - 10))}
-              className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/[0.05] transition-colors"
-              title="Rewind 10 seconds"
-            >
-              <Rewind size={16} />
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                dispatchEvent(
-                  state === "playing" ? "PAUSE" : "PLAY",
-                  state === "playing" ? "paused" : "playing",
-                  position,
-                )
-              }
-              className="p-2.5 rounded-full bg-[#f7f6f2] text-[#07080b] hover:bg-white transition-all shadow-sm"
-              title={state === "playing" ? "Pause" : "Play"}
-            >
-              {state === "playing" ? <Pause size={16} /> : <Play size={16} />}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => dispatchEvent("SEEK", state, position + 10)}
-              className="p-2 rounded-full text-zinc-400 hover:text-white hover:bg-white/[0.05] transition-colors"
-              title="Fast forward 10 seconds"
-            >
-              <FastForward size={16} />
-            </button>
-          </div>
-
-          {/* Emoji Reactions Strip */}
-          <div className="flex items-center gap-1">
-            {["❤️", "😂", "🔥", "👏", "🍿", "🥺", "😱"].map((e) => (
-              <button
-                key={e}
-                type="button"
-                className="text-base hover:scale-125 transition-transform p-1 opacity-85 hover:opacity-100"
-                onClick={() =>
-                  void channelRef.current?.send({
-                    type: "broadcast",
-                    event: "reaction",
-                    payload: { userId, emoji: e },
-                  })
-                }
-              >
-                {e}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Timestamped Whisper Message Log */}
-      <div className="max-h-24 space-y-1 overflow-y-auto border-t border-white/[0.06] px-5 py-2 text-xs text-zinc-300 bg-[#07080b]/90 scrollbar-none">
-        {messages.length === 0 ? (
-          <p className="text-zinc-500 italic text-center py-1">
-            Whispers sent here are synced to the exact movie second.
-          </p>
-        ) : (
-          messages.map((m) => (
-            <p key={m.id} className="flex items-baseline gap-2">
-              <span className="text-[10px] font-mono text-zinc-400 bg-white/[0.04] px-1.5 py-0.5 rounded">
-                {m.playbackPosition
-                  ? `${Math.floor(m.playbackPosition / 60)}:${String(m.playbackPosition % 60).padStart(2, "0")}`
-                  : formattedTime}
-              </span>
-              <span className="text-zinc-400 font-medium">
-                {m.userId === userId ? "You" : "Partner"}:
-              </span>
-              <span className="text-zinc-200">{m.content}</span>
-            </p>
-          ))
-        )}
-      </div>
-
-      {/* Message Input Form */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!newMessage.trim()) return;
-          void sendWatchMessageAction({
-            sessionId,
-            content: newMessage,
-            playbackPosition: position,
-          }).then(() => setNewMessage(""));
-        }}
-        className="flex gap-2 border-t border-white/[0.06] p-3 bg-[#090a0f]"
-      >
-        <input
-          value={newMessage}
-          onChange={(e) => setNewMessage(e.target.value)}
-          placeholder="Whisper to your partner at this moment…"
-          className="flex-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 outline-none focus:border-white/20 transition-colors"
-        />
-        <button
-          type="submit"
-          className="rounded-full bg-[#f7f6f2] text-[#07080b] px-4 py-2 text-xs font-semibold hover:bg-white transition-all"
+        {/* 2. CHAT SIDEBAR (25% ON DESKTOP, COLLAPSIBLE ON MOBILE) */}
+        <aside
+          className={`fixed inset-y-0 right-0 z-40 w-80 md:w-[28%] md:min-w-[280px] md:max-w-sm md:static flex flex-col border-l border-white/[0.07] bg-[#07090e] transition-transform duration-300 ${
+            chatOpenMobile ? "translate-x-0" : "translate-x-full md:translate-x-0"
+          }`}
         >
-          Send
-        </button>
-      </form>
+          {/* Chat Header */}
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/[0.07] px-4">
+            <div className="flex items-center gap-2">
+              <MessageSquare size={14} className="text-rose-400" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                Theater Whispers
+              </h3>
+            </div>
+            <span className="text-[10px] font-mono text-zinc-500">
+              Synced to movie
+            </span>
+          </div>
+
+          {/* Messages List */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3.5 scrollbar-thin scrollbar-thumb-white/10">
+            {messages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-4 space-y-2 text-zinc-500">
+                <Sparkles size={20} className="text-zinc-600" />
+                <p className="text-xs">No whispers yet.</p>
+                <p className="text-[11px] text-zinc-600 leading-relaxed">
+                  Send thoughts, laugh at scenes, or react together. Each whisper captures the
+                  exact movie second!
+                </p>
+              </div>
+            ) : (
+              messages.map((m) => {
+                const isMe = m.userId === userId;
+                const timeTag = formatMsgTime(m.playbackPosition);
+                return (
+                  <div
+                    key={m.id}
+                    className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
+                  >
+                    <div className="flex items-baseline gap-1.5 mb-1">
+                      <span className="text-[10px] font-medium text-zinc-400">
+                        {isMe ? "You" : "Partner"}
+                      </span>
+                      {timeTag && (
+                        <span className="text-[9px] font-mono text-rose-300/80 bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/20">
+                          {timeTag}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs leading-relaxed ${
+                        isMe
+                          ? "bg-rose-600/90 text-white rounded-tr-none shadow-sm"
+                          : "bg-white/[0.06] text-zinc-200 rounded-tl-none border border-white/[0.06]"
+                      }`}
+                    >
+                      {m.content}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            <div ref={chatBottomRef} />
+          </div>
+
+          {/* Chat Composer */}
+          <form
+            onSubmit={handleSendMessage}
+            className="border-t border-white/[0.07] p-3 space-y-2 bg-[#050609]"
+          >
+            <div className="flex items-center justify-between text-[10px] text-zinc-400 px-1">
+              <button
+                type="button"
+                onClick={() => setStampTimestamp((s) => !s)}
+                className={`inline-flex items-center gap-1 font-mono transition-colors ${
+                  stampTimestamp ? "text-rose-400 font-semibold" : "text-zinc-500"
+                }`}
+              >
+                <Clock size={10} />
+                <span>Stamp at {formattedTime}</span>
+              </button>
+              <span className="text-zinc-600">Enter to send</span>
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder="Whisper at this moment…"
+                className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-xs text-white placeholder-zinc-500 outline-none focus:border-rose-500/50 transition-colors"
+              />
+              <button
+                type="submit"
+                disabled={!newMessage.trim()}
+                className="rounded-xl bg-white text-zinc-950 px-4 py-2 text-xs font-semibold hover:bg-zinc-200 disabled:opacity-40 transition-all shadow-sm"
+              >
+                Send
+              </button>
+            </div>
+          </form>
+        </aside>
+      </div>
     </div>
   );
 }

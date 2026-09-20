@@ -64,6 +64,8 @@ export default async function RoomPage({
           coupleId={couple.id}
           providerName={providerName}
           title={session.title}
+          posterUrl={session.posterUrl}
+          isHost={session.hostUserId ? session.hostUserId === user.id : couple.userAId === user.id}
           theme={theme}
           decor={decor}
         />
