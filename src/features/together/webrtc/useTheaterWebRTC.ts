@@ -134,6 +134,10 @@ export function useTheaterWebRTC({
         const stream = ev.streams[0] || new MediaStream([ev.track]);
         setRemoteStream(stream);
         updateState("LIVE");
+        ev.track.onended = () => {
+          setRemoteStream(null);
+          updateState("STREAM_ENDED");
+        };
       } else if (ev.track.kind === "audio") {
         // Tab audio or voice audio
         const stream = ev.streams[0] || new MediaStream([ev.track]);
@@ -419,6 +423,9 @@ export function useTheaterWebRTC({
           if (payload.state) {
             updateState(payload.state);
             if (payload.surface) setStreamSourceType(payload.surface);
+            if (payload.state === "STREAM_ENDED" || payload.state === "FALLBACK_MODE") {
+              setRemoteStream(null);
+            }
           }
         })
         .on("broadcast", { event: "theater:voice-status" }, ({ payload }: { payload: any }) => {

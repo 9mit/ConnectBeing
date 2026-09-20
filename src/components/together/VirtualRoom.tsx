@@ -286,7 +286,14 @@ export function VirtualRoom({
     }
   };
 
+  const lastReactionTimeRef = useRef<number>(0);
   const broadcastReaction = (emoji: string) => {
+    const now = Date.now();
+    if (now - lastReactionTimeRef.current < 400) {
+      return; // Rate limit reactions: max 1 per 400ms
+    }
+    lastReactionTimeRef.current = now;
+
     const r: Reaction = {
       id: Math.random().toString(36),
       emoji,
