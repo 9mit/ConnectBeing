@@ -8,6 +8,7 @@ import {
   MatchmakingProfile,
 } from "@/db/schema";
 import { calculateCompatibility } from "./compatibility";
+import { generateCandidateToken } from "./tokens";
 import { PrivacySafeMatchCard } from "./types";
 
 /**
@@ -89,7 +90,6 @@ export function toPrivacySafeMatchCard(
   compatibilityLevel: PrivacySafeMatchCard["compatibilityLevel"],
   viewerUserId?: string,
 ): PrivacySafeMatchCard {
-  const { generateCandidateToken } = require("./tokens");
   const candidateToken = viewerUserId
     ? generateCandidateToken(candidate.userId, viewerUserId)
     : candidate.userId;

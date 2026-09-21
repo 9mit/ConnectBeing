@@ -1,8 +1,8 @@
 import { UpdatePasswordForm } from "@/components/update-password-form";
 
 export const metadata = {
-  title: "Update Password - CoupleConnect",
-  description: "Set your new CoupleConnect password.",
+  title: "Update Password — MadLove",
+  description: "Set your new MadLove password.",
 };
 
 export default function UpdatePasswordPage() {

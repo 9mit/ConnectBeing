@@ -1,8 +1,8 @@
 import { ForgotPasswordForm } from "@/components/forgot-password-form";
 
 export const metadata = {
-  title: "Forgot Password - CoupleConnect",
-  description: "Reset your CoupleConnect password.",
+  title: "Forgot Password — MadLove",
+  description: "Reset your MadLove password.",
 };
 
 export default function ForgotPasswordPage() {

@@ -61,7 +61,7 @@ export default async function MovieMemoryPage({
             <h1 className="mt-4 text-3xl sm:text-4xl font-extrabold text-white font-display tracking-tight text-glow-gold">
               {memory.title}
             </h1>
-            <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
+            <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-slate-400" suppressHydrationWarning>
               Watched Together on {new Date(memory.date).toLocaleDateString()}
             </p>
             <div className="mt-6 flex justify-center gap-4">

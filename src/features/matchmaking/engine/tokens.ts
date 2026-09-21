@@ -1,7 +1,20 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { AppError } from "@/lib/errors";
+import { isProductionRuntime } from "@/lib/runtime";
 
-const TOKEN_SECRET = process.env.SESSION_SECRET || "madlove-matchmaking-secret-key-32b!";
+function getTokenSecret(): string {
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (secret && secret.length >= 32) return secret;
+  if (isProductionRuntime()) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "SESSION_SECRET is misconfigured in production.",
+      500,
+    );
+  }
+  return "madlove-matchmaking-secret-key-32b!";
+}
+
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /**
@@ -13,7 +26,7 @@ export function generateCandidateToken(targetUserId: string, viewerUserId: strin
   const payload = Buffer.from(
     JSON.stringify({ u: targetUserId, v: viewerUserId, exp: expiresAt }),
   ).toString("base64url");
-  const sig = createHmac("sha256", TOKEN_SECRET)
+  const sig = createHmac("sha256", getTokenSecret())
     .update(`${payload}:${viewerUserId}`)
     .digest("base64url");
   return `${payload}.${sig}`;
@@ -25,7 +38,10 @@ export function generateCandidateToken(targetUserId: string, viewerUserId: strin
  */
 export function resolveCandidateId(tokenOrId: string, viewerUserId: string): string {
   if (!tokenOrId.includes(".")) {
-    // Direct ID fallback (for internal testing or connection operations)
+    if (isProductionRuntime()) {
+      throw new AppError("FORBIDDEN", "Direct candidate IDs are not accepted in production.", 403);
+    }
+    // Direct ID fallback (for local development or automated test fixtures only)
     return tokenOrId;
   }
 
@@ -35,7 +51,7 @@ export function resolveCandidateId(tokenOrId: string, viewerUserId: string): str
   }
 
   const [payloadB64, sig] = parts;
-  const expectedSig = createHmac("sha256", TOKEN_SECRET)
+  const expectedSig = createHmac("sha256", getTokenSecret())
     .update(`${payloadB64}:${viewerUserId}`)
     .digest("base64url");
 

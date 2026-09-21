@@ -283,7 +283,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                           {event.title}
                         </h3>
                       </div>
-                      <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/[0.04] text-zinc-300 border border-white/[0.06] whitespace-nowrap">
+                      <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/[0.04] text-zinc-300 border border-white/[0.06] whitespace-nowrap" suppressHydrationWarning>
                         {isToday ? "Today" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                       </span>
                     </div>

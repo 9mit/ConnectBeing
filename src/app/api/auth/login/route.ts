@@ -124,16 +124,6 @@ export async function POST(request: NextRequest) {
           targetUser = authData?.user;
         }
 
-        if (!targetUser) {
-          const { data: listed } = await admin.auth.admin.listUsers({
-            page: 1,
-            perPage: 50,
-          });
-          targetUser = listed?.users?.find(
-            (u) => u.email?.toLowerCase() === email,
-          );
-        }
-
         if (targetUser && !targetUser.email_confirmed_at) {
           await admin.auth.admin.updateUserById(targetUser.id, {
             email_confirm: true,

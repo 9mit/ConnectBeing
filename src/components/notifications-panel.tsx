@@ -205,7 +205,7 @@ export function NotificationsPanel({
                     </p>
 
                     <div className="flex items-center gap-3 pt-1 text-[10px] text-slate-400">
-                      <span>{d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {d.toLocaleDateString()}</span>
+                      <span suppressHydrationWarning>{d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {d.toLocaleDateString()}</span>
                       {item.link && (
                         <Link
                           href={item.link}

@@ -475,6 +475,7 @@ export function VirtualRoom({
             onClick={toggleFullscreen}
             className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-white/[0.05] transition-colors"
             title="Toggle fullscreen"
+            aria-label="Toggle fullscreen"
           >
             {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
@@ -483,6 +484,7 @@ export function VirtualRoom({
           <button
             type="button"
             onClick={() => setChatOpenMobile((o) => !o)}
+            aria-label="Toggle chat"
             className="md:hidden relative p-1.5 rounded-full text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors"
           >
             <MessageSquare size={14} />
@@ -929,6 +931,7 @@ export function VirtualRoom({
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder="Whisper at this moment…"
+                aria-label="Whisper message"
                 className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-xs text-white placeholder-zinc-500 outline-none focus:border-rose-500/50 transition-colors"
               />
               <button

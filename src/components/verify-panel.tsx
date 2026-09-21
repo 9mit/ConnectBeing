@@ -92,7 +92,7 @@ export function VerifyPanel() {
         ) : dueSoon ? (
           <p className="text-amber-300 font-bold">Verification due soon{countdown ? ` · ${countdown}` : ""}.</p>
         ) : (
-          <p>
+          <p suppressHydrationWarning>
             Status: active
             {countdown ? ` · ${countdown}` : ""}
             {verifiedUntil

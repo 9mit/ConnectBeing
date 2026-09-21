@@ -67,7 +67,14 @@ export async function getInsightsAction(): Promise<
           "What is a shared adventure we should begin planning?",
           "How can I best support your world today?",
         ],
-        compatibility: (raw?.compatibility as any) ?? {
+        compatibility: (raw?.compatibility as {
+          communication: number;
+          qualityTime: number;
+          planning: number;
+          consistency: number;
+          sharedInterests: number;
+          overall: number;
+        } | undefined) ?? {
           communication: 88,
           qualityTime: 92,
           planning: 78,

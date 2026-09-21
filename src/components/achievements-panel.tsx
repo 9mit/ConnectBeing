@@ -173,7 +173,7 @@ export function AchievementsPanel({
                   </p>
 
                   {isUnlocked && item.unlockedAt && (
-                    <p className="text-[10px] text-amber-400/80 pt-1 font-semibold flex items-center gap-1">
+                    <p className="text-[10px] text-amber-400/80 pt-1 font-semibold flex items-center gap-1" suppressHydrationWarning>
                       <Sparkles className="w-3 h-3" />
                       Unlocked on {new Date(item.unlockedAt).toLocaleDateString()}
                     </p>

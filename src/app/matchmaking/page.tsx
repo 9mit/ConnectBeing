@@ -25,7 +25,7 @@ export default async function MatchmakingPage() {
       };
 
   return (
-    <AppShell>
+    <AppShell coupleId={user.coupleId} userId={user.id}>
       <MatchmakingHub initialStatus={initialStatus} />
     </AppShell>
   );
