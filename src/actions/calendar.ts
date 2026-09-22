@@ -4,8 +4,9 @@ import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
-import { calendarEvents, onboardingProfiles } from "@/db/schema";
+import { calendarEvents, inAppNotifications, onboardingProfiles } from "@/db/schema";
 import { createPartnerNotification } from "@/actions/notifications";
+import { revalidatePath } from "next/cache";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { requireCoupleVerified } from "@/lib/couple-verification";
@@ -111,15 +112,43 @@ export async function createCalendarEventAction(
     });
     const senderName = profile?.name?.trim() || "Your partner";
 
-    void createPartnerNotification({
-      coupleId: couple.id,
-      senderUserId: user.id,
-      partnerUserId: partnerId,
-      title: "📅 Date Added to Calendar",
-      body: `${senderName} scheduled: "${parsed.title}"`,
-      kind: "general",
-      link: "/calendar",
-    }).catch(() => {});
+    if (partnerId) {
+      await createPartnerNotification({
+        coupleId: couple.id,
+        senderUserId: user.id,
+        partnerUserId: partnerId,
+        title: "📅 Date Added to Calendar",
+        body: `${senderName} scheduled: "${parsed.title}"`,
+        kind: "calendar",
+        link: "/calendar",
+      }).catch((err) => {
+        console.error("Failed to notify partner of calendar event:", err);
+      });
+
+      // Keep confirmation in notifications for the creator too
+      await db
+        .insert(inAppNotifications)
+        .values({
+          id: createId(),
+          coupleId: couple.id,
+          userId: user.id,
+          title: "📅 Date Scheduled",
+          body: `You scheduled: "${parsed.title}"`,
+          kind: "calendar",
+          link: "/calendar",
+          read: true,
+        })
+        .catch((err) => {
+          console.error("Failed to log planner calendar notification:", err);
+        });
+    }
+
+    try {
+      revalidatePath("/calendar");
+      revalidatePath("/notifications");
+    } catch {
+      // ignore
+    }
 
     return ok({ id });
   } catch (e) {
@@ -146,6 +175,13 @@ export async function deleteCalendarEventAction(
 
     if (!deleted.length) {
       throw new AppError("NOT_FOUND", "Calendar event not found.", 404);
+    }
+
+    try {
+      revalidatePath("/calendar");
+      revalidatePath("/notifications");
+    } catch {
+      // ignore
     }
 
     return ok({ deleted: true });

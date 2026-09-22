@@ -52,15 +52,17 @@ export async function setMoodAction(
     });
     const senderName = profile?.name?.trim() || "Your partner";
 
-    void createPartnerNotification({
-      coupleId: couple.id,
-      senderUserId: user.id,
-      partnerUserId: partnerId,
-      title: "✨ Partner Vibe Shared",
-      body: `${senderName} shared their vibe: ${parsed.mood.toUpperCase()}`,
-      kind: "general",
-      link: "/mood",
-    }).catch(() => {});
+    if (partnerId) {
+      await createPartnerNotification({
+        coupleId: couple.id,
+        senderUserId: user.id,
+        partnerUserId: partnerId,
+        title: "✨ Partner Vibe Shared",
+        body: `${senderName} shared their vibe: ${parsed.mood.toUpperCase()}`,
+        kind: "general",
+        link: "/mood",
+      }).catch(() => {});
+    }
 
     return ok({ id });
   } catch (e) {

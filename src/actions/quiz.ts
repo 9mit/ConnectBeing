@@ -202,15 +202,17 @@ export async function submitQuizAction(
     });
     const senderName = profile?.name?.trim() || "Your partner";
 
-    void createPartnerNotification({
-      coupleId: couple.id,
-      senderUserId: user.id,
-      partnerUserId: partnerId,
-      title: "❓ Daily Quiz Completed",
-      body: `${senderName} submitted today's quiz answers! See if you match.`,
-      kind: "quiz",
-      link: "/quiz",
-    }).catch(() => {});
+    if (partnerId) {
+      await createPartnerNotification({
+        coupleId: couple.id,
+        senderUserId: user.id,
+        partnerUserId: partnerId,
+        title: "❓ Daily Quiz Completed",
+        body: `${senderName} submitted today's quiz answers! See if you match.`,
+        kind: "quiz",
+        link: "/quiz",
+      }).catch(() => {});
+    }
 
     return ok({ score, maxScore: graded.length, streak });
   } catch (e) {

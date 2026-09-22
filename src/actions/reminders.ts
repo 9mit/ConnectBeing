@@ -3,10 +3,12 @@
 import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { reminders } from "@/db/schema";
+import { inAppNotifications, onboardingProfiles, reminders } from "@/db/schema";
+import { createPartnerNotification } from "@/actions/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { createId } from "@/lib/ids";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 const createSchema = z.object({
@@ -62,6 +64,48 @@ export async function createReminderAction(
       title: parsed.title,
       dueAt: new Date(parsed.dueAt),
     });
+
+    const partnerId =
+      couple.userAId === user.id ? couple.userBId : couple.userAId;
+
+    if (partnerId) {
+      const profile = await db.query.onboardingProfiles.findFirst({
+        where: eq(onboardingProfiles.userId, user.id),
+      });
+      const senderName = profile?.name?.trim() || "Your partner";
+
+      await createPartnerNotification({
+        coupleId: couple.id,
+        senderUserId: user.id,
+        partnerUserId: partnerId,
+        title: "⏰ Reminder Added",
+        body: `${senderName} added a shared reminder: "${parsed.title}"`,
+        kind: "general",
+        link: "/play",
+      }).catch(() => {});
+
+      await db
+        .insert(inAppNotifications)
+        .values({
+          id: createId(),
+          coupleId: couple.id,
+          userId: user.id,
+          title: "⏰ Reminder Created",
+          body: `You set a shared reminder: "${parsed.title}"`,
+          kind: "general",
+          link: "/play",
+          read: true,
+        })
+        .catch(() => {});
+    }
+
+    try {
+      revalidatePath("/play");
+      revalidatePath("/notifications");
+    } catch {
+      // ignore
+    }
+
     return ok({ id });
   } catch (e) {
     return fail(e);

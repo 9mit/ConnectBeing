@@ -122,15 +122,17 @@ export async function sendMessageAction(
         : parsed.content
       : "Sent a message";
 
-    void createPartnerNotification({
-      coupleId: couple.id,
-      senderUserId: user.id,
-      partnerUserId: partnerId,
-      title: "💬 New Message",
-      body: `${senderName}: "${preview}"`,
-      kind: "general",
-      link: "/chat",
-    }).catch(() => {});
+    if (partnerId) {
+      await createPartnerNotification({
+        coupleId: couple.id,
+        senderUserId: user.id,
+        partnerUserId: partnerId,
+        title: "💬 New Message",
+        body: `${senderName}: "${preview}"`,
+        kind: "general",
+        link: "/chat",
+      }).catch(() => {});
+    }
 
     return ok({ id, clientMsgId: parsed.clientMsgId ?? null });
   } catch (e) {

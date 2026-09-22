@@ -2,6 +2,7 @@
 
 import { db } from "@/db";
 import {
+  inAppNotifications,
   movieMemories,
   onboardingProfiles,
   watchEvents,
@@ -106,18 +107,41 @@ export async function createWatchSessionAction(
     });
     const senderName = profile?.name?.trim() || "Your partner";
 
-    void createPartnerNotification({
-      coupleId: couple.id,
-      senderUserId: user.id,
-      partnerUserId: partnerId,
-      title: "🍿 Movie Night Planned",
-      body: `${senderName} planned a movie date: "${parsed.title}"`,
-      kind: "watch",
-      link: `/together/${sessionId}`,
-    }).catch(() => {});
+    if (partnerId) {
+      await createPartnerNotification({
+        coupleId: couple.id,
+        senderUserId: user.id,
+        partnerUserId: partnerId,
+        title: "🍿 Movie Night Planned",
+        body: `${senderName} planned a movie date: "${parsed.title}"`,
+        kind: "watch",
+        link: `/together/room/${sessionId}`,
+      }).catch((err) => {
+        console.error("Failed to notify partner of watch session:", err);
+      });
+
+      // Keep confirmation in notifications for the creator too so both partners have it logged
+      await db
+        .insert(inAppNotifications)
+        .values({
+          id: createId(),
+          coupleId: couple.id,
+          userId: user.id,
+          title: "🍿 Movie Night Scheduled",
+          body: `You planned a movie date with your partner: "${parsed.title}"`,
+          kind: "watch",
+          link: `/together/room/${sessionId}`,
+          read: true,
+        })
+        .catch((err) => {
+          console.error("Failed to log movie plan for user:", err);
+        });
+    }
 
     try {
       revalidatePath("/together");
+      revalidatePath("/notifications");
+      revalidatePath("/dashboard");
     } catch {
       // ignore if invoked during render
     }
@@ -497,8 +521,15 @@ export async function deleteWatchSessionAction(
   sessionId: string,
 ): Promise<ActionResult<{ deleted: true }>> {
   try {
-    const { couple } = await requireVerifiedCouple();
+    const { user, couple } = await requireVerifiedCouple();
     await assertWatchSessionOwned(sessionId, couple.id);
+
+    const session = await db.query.watchSessions.findFirst({
+      where: and(
+        eq(watchSessions.id, sessionId),
+        eq(watchSessions.coupleId, couple.id),
+      ),
+    });
 
     await db
       .delete(watchSessions)
@@ -509,8 +540,30 @@ export async function deleteWatchSessionAction(
         ),
       );
 
+    const partnerId =
+      couple.userAId === user.id ? couple.userBId : couple.userAId;
+
+    if (session && partnerId) {
+      const profile = await db.query.onboardingProfiles.findFirst({
+        where: eq(onboardingProfiles.userId, user.id),
+      });
+      const senderName = profile?.name?.trim() || "Your partner";
+
+      await createPartnerNotification({
+        coupleId: couple.id,
+        senderUserId: user.id,
+        partnerUserId: partnerId,
+        title: "🍿 Movie Night Cancelled",
+        body: `${senderName} cancelled the planned movie: "${session.title}"`,
+        kind: "watch",
+        link: "/together",
+      }).catch(() => {});
+    }
+
     try {
       revalidatePath("/together");
+      revalidatePath("/notifications");
+      revalidatePath("/dashboard");
     } catch {
       // ignore outside request
     }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
-import { Bell, CheckCheck, Sparkles, MessageCircle, Film, Trophy, Check, ArrowRight } from "lucide-react";
+import { Bell, CheckCheck, Sparkles, MessageCircle, Film, Calendar, Trophy, Check, ArrowRight } from "lucide-react";
 
 import {
   listNotificationsAction,
@@ -14,9 +14,10 @@ import { usePresence } from "@/components/presence-provider";
 const FILTER_TAGS = [
   { value: "all", label: "All Activity" },
   { value: "unread", label: "Unread" },
+  { value: "watch", label: "🍿 Watch Party" },
+  { value: "calendar", label: "📅 Dates & Plans" },
   { value: "nudge", label: "🔔 Nudges" },
   { value: "quiz", label: "❓ Quizzes" },
-  { value: "watch", label: "🍿 Watch Party" },
   { value: "achievement", label: "✨ Trophies" },
 ] as const;
 
@@ -28,6 +29,8 @@ function getNotificationIcon(kind: string) {
       return <MessageCircle className="w-4 h-4 text-pink-400" />;
     case "watch":
       return <Film className="w-4 h-4 text-amber-400" />;
+    case "calendar":
+      return <Calendar className="w-4 h-4 text-indigo-400" />;
     case "achievement":
       return <Trophy className="w-4 h-4 text-yellow-300" />;
     case "verification":
@@ -49,7 +52,7 @@ export function NotificationsPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const { nudgePartner, nudgePending } = usePresence();
+  const { nudgePartner, nudgePending, activeNotification, unreadNotificationsCount: presenceUnreadCount } = usePresence();
   const [nudgeMsg, setNudgeMsg] = useState<string | null>(null);
 
   async function loadData() {
@@ -68,7 +71,27 @@ export function NotificationsPanel({
     if (!initialNotifications) {
       void loadData();
     }
+
+    const handleFocus = () => {
+      void loadData();
+    };
+    window.addEventListener("focus", handleFocus);
+
+    const interval = setInterval(() => {
+      void loadData();
+    }, 12000);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      clearInterval(interval);
+    };
   }, [initialNotifications]);
+
+  useEffect(() => {
+    if (activeNotification) {
+      void loadData();
+    }
+  }, [activeNotification]);
 
   function handleMarkRead(id?: string) {
     startTransition(async () => {

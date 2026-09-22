@@ -354,6 +354,9 @@ export function AppShell({
                   <div className="flex items-center gap-2 sm:gap-3">
                     <HeaderPresenceControl />
 
+                    {/* Always visible notification bell with unread badge */}
+                    <HeaderBellButton onSelect={() => setPendingPath("/notifications")} />
+
                     <div className="hidden lg:flex items-center gap-1.5 border-l border-white/[0.08] pl-2.5">
                       <Link
                         href="/search"
@@ -364,7 +367,6 @@ export function AppShell({
                       >
                         <Search className="w-4 h-4" />
                       </Link>
-                      <HeaderBellButton onSelect={() => setPendingPath("/notifications")} />
                       <Link
                         href="/profile"
                         prefetch={true}
