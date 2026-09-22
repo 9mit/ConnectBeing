@@ -58,6 +58,15 @@ export default async function InviteTokenPage({
         if (inviterProfile?.name) {
           inviterName = inviterProfile.name.trim();
         }
+
+        // Partner B opened the link — mark in Redis so Partner A's screen updates in real-time
+        if (!ctx.user || ctx.user.id !== tokenRow.inviterId) {
+          try {
+            await redis.set(`invite-opened:${tokenRow.inviterId}`, "true", { ex: 3600 });
+          } catch {
+            /* ignore redis error */
+          }
+        }
       }
     }
   }

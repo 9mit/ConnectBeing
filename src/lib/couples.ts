@@ -355,7 +355,11 @@ export async function acceptInviteAndJoinCouple(input: {
 
   // Clean up Redis invite cache
   try {
-    await redis.del(inviteRedisKey(tokenHash));
+    await Promise.all([
+      redis.del(inviteRedisKey(tokenHash)),
+      redis.del(`active-invite-url:${partnerId}`),
+      redis.del(`invite-opened:${partnerId}`),
+    ]);
   } catch {
     /* ignore redis cache error */
   }

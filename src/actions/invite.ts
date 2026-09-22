@@ -1,9 +1,9 @@
 "use server";
 
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, ne } from "drizzle-orm";
 
 import { db } from "@/db";
-import { inAppNotifications, inviteTokens, onboardingProfiles, users } from "@/db/schema";
+import { couples, inAppNotifications, inviteTokens, onboardingProfiles, users } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireAppUser, requireOnboardedUser } from "@/lib/auth";
 import {
@@ -62,6 +62,8 @@ export async function generateInviteLinkAction(): Promise<
       await Promise.all(
         active.map((t) => redis.del(inviteRedisKey(t.tokenHash))),
       );
+      await redis.del(`active-invite-url:${user.id}`);
+      await redis.del(`invite-opened:${user.id}`);
     }
 
     const raw = generateInviteToken();
@@ -83,10 +85,54 @@ export async function generateInviteLinkAction(): Promise<
     });
 
     const base = getAppUrl();
+    const url = `${base}/invite/${raw}`;
+
+    // Cache active invite URL so it survives page reloads
+    await redis.set(`active-invite-url:${user.id}`, url, {
+      ex: INVITE_TOKEN_TTL_SECONDS,
+    });
 
     return ok({
-      url: `${base}/invite/${raw}`,
+      url,
       expiresAt: expiresAt.toISOString(),
+    });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function getActiveInviteAction(): Promise<
+  ActionResult<{ url: string | null; hasOpened?: boolean }>
+> {
+  try {
+    const user = await requireOnboardedUser();
+
+    // If user is already connected in an active couple, no pending invite needed
+    if (user.couple && user.couple.status === "active") {
+      return ok({ url: null, hasOpened: false });
+    }
+
+    // Check if an active, non-expired pending invite exists in DB
+    const activeToken = await db.query.inviteTokens.findFirst({
+      where: and(
+        eq(inviteTokens.inviterId, user.id),
+        eq(inviteTokens.status, "pending"),
+        gt(inviteTokens.expiresAt, new Date()),
+      ),
+    });
+
+    if (!activeToken) {
+      await redis.del(`active-invite-url:${user.id}`);
+      await redis.del(`invite-opened:${user.id}`);
+      return ok({ url: null, hasOpened: false });
+    }
+
+    const cachedUrl = await redis.get<string>(`active-invite-url:${user.id}`);
+    const hasOpened = !!(await redis.get<string>(`invite-opened:${user.id}`));
+
+    return ok({
+      url: cachedUrl || null,
+      hasOpened,
     });
   } catch (e) {
     return fail(e);
@@ -154,43 +200,72 @@ export async function redeemInviteToken(
 export async function checkPartnerJoinedAction(): Promise<
   ActionResult<{
     hasJoined: boolean;
+    hasOpened?: boolean;
     partnerName?: string;
     coupleId?: string;
   }>
 > {
   try {
     const user = await requireAppUser();
+
+    // 1. Authoritative check: Is the couple status active and userBId populated?
     if (user.coupleId) {
-      const partner = await db.query.users.findFirst({
+      const couple = await db.query.couples.findFirst({
         where: and(
-          eq(users.coupleId, user.coupleId),
-          ne(users.id, user.id),
+          eq(couples.id, user.coupleId),
+          eq(couples.status, "active"),
         ),
-        with: { onboardingProfile: true },
       });
-      const partnerName = partner?.onboardingProfile?.name || "Your partner";
-      return ok({
-        hasJoined: true,
-        partnerName,
-        coupleId: user.coupleId,
-      });
+
+      if (couple && couple.userBId) {
+        const partnerId =
+          couple.userAId === user.id ? couple.userBId : couple.userAId;
+        const partner = await db.query.users.findFirst({
+          where: eq(users.id, partnerId),
+          with: { onboardingProfile: true },
+        });
+        const partnerName =
+          partner?.onboardingProfile?.name?.trim() || "Your partner";
+
+        return ok({
+          hasJoined: true,
+          hasOpened: true,
+          partnerName,
+          coupleId: couple.id,
+        });
+      }
     }
 
+    // 2. Check Redis signal for partner join event (verified against DB)
     const raw = await redis.get<string>(`partner-joined:${user.id}`);
     if (raw) {
       try {
         const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-        return ok({
-          hasJoined: true,
-          partnerName: parsed.partnerName || "Your partner",
-          coupleId: parsed.coupleId,
-        });
+        if (parsed.coupleId) {
+          const couple = await db.query.couples.findFirst({
+            where: and(
+              eq(couples.id, parsed.coupleId),
+              eq(couples.status, "active"),
+            ),
+          });
+          if (couple && couple.userBId) {
+            return ok({
+              hasJoined: true,
+              hasOpened: true,
+              partnerName: parsed.partnerName || "Your partner",
+              coupleId: parsed.coupleId,
+            });
+          }
+        }
       } catch {
-        return ok({ hasJoined: true, partnerName: "Your partner" });
+        /* ignore parsing error */
       }
     }
 
-    return ok({ hasJoined: false });
+    // 3. Check if partner opened the link
+    const hasOpened = !!(await redis.get<string>(`invite-opened:${user.id}`));
+
+    return ok({ hasJoined: false, hasOpened });
   } catch (e) {
     return fail(e);
   }
