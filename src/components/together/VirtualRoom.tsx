@@ -138,7 +138,7 @@ export function VirtualRoom({
   const [positionSeconds, setPositionSeconds] = useState(initialPosition);
   const [stampTimestamp, setStampTimestamp] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [chatOpenMobile, setChatOpenMobile] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
   const [isAutoplayMuted, setIsAutoplayMuted] = useState(false);
   const [userSwitchedToCompanion, setUserSwitchedToCompanion] = useState(false);
@@ -246,6 +246,16 @@ export function VirtualRoom({
         if (payload.state) setPlaybackState(payload.state);
         if (typeof payload.position === "number") setPositionSeconds(payload.position);
       })
+      .on("broadcast", { event: "theater:message" }, ({ payload }: { payload: any }) => {
+        if (!payload || payload.userId === userId) return;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === payload.id)) return prev;
+          return [...prev, payload];
+        });
+        if (!chatOpen) {
+          setUnreadCount((c) => c + 1);
+        }
+      })
       .on(
         "postgres_changes",
         {
@@ -262,17 +272,20 @@ export function VirtualRoom({
             playback_position?: number | null;
             created_at: string;
           };
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: row.id,
-              content: row.content,
-              userId: row.user_id,
-              playbackPosition: row.playback_position,
-              createdAt: row.created_at,
-            },
-          ]);
-          if (row.user_id !== userId && !chatOpenMobile) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === row.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: row.id,
+                content: row.content,
+                userId: row.user_id,
+                playbackPosition: row.playback_position,
+                createdAt: row.created_at,
+              },
+            ];
+          });
+          if (row.user_id !== userId && !chatOpen) {
             setUnreadCount((c) => c + 1);
           }
         },
@@ -308,7 +321,7 @@ export function VirtualRoom({
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [chatOpenMobile, sessionId, userId]);
+  }, [chatOpen, sessionId, userId]);
 
   // Fullscreen change listener
   useEffect(() => {
@@ -357,16 +370,41 @@ export function VirtualRoom({
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim()) return;
-
-    const pos = stampTimestamp ? positionSeconds : null;
     const content = newMessage.trim();
+    if (!content) return;
     setNewMessage("");
 
+    const pos = stampTimestamp ? positionSeconds : null;
+    const tempId = `wm_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const msg: WatchMsg = {
+      id: tempId,
+      content,
+      userId,
+      playbackPosition: pos,
+      createdAt: new Date().toISOString(),
+    };
+
+    // 1. Immediate optimistic update locally
+    setMessages((prev) => [...prev, msg]);
+
+    // 2. Realtime broadcast directly to partner over websocket
+    void channelRef.current?.send({
+      type: "broadcast",
+      event: "theater:message",
+      payload: msg,
+    });
+
+    // 3. Persist to database in background
     void sendWatchMessageAction({
       sessionId,
       content,
       playbackPosition: pos,
+    }).then((res) => {
+      if (res.ok && res.data.id) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, id: res.data.id } : m)),
+        );
+      }
     });
   };
 
@@ -466,7 +504,8 @@ export function VirtualRoom({
 
   // Determine active video stream presence
   const hasActiveStream =
-    roomState === "LIVE" && (isHost ? !!localStream : !!remoteStream);
+    (roomState === "LIVE" || roomState === "STREAM_CONNECTING") &&
+    (isHost ? !!localStream : !!remoteStream);
 
   // Companion Mode decision:
   // Automatically activate Companion Mode if:
@@ -611,19 +650,24 @@ export function VirtualRoom({
             {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
 
-          {/* Mobile Chat Drawer Toggle with Unread Badge */}
+          {/* Whispers Chat Toggle with Unread Badge */}
           <button
             type="button"
             onClick={() => {
-              setChatOpenMobile((o) => !o);
+              setChatOpen((o) => !o);
               setUnreadCount(0);
             }}
-            aria-label="Toggle chat"
-            className="md:hidden relative p-1.5 rounded-full text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors"
+            aria-label="Toggle whispers chat"
+            className={`relative inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 rounded-full text-xs font-medium border transition-all ${
+              chatOpen
+                ? "bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm"
+                : "bg-white/[0.04] text-zinc-300 border-white/[0.08] hover:text-white"
+            }`}
           >
-            <MessageSquare size={15} />
+            <MessageSquare size={13} />
+            <span className="hidden sm:inline">Whispers</span>
             {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center">
+              <span className="w-3.5 h-3.5 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center">
                 {unreadCount}
               </span>
             )}
@@ -714,9 +758,7 @@ export function VirtualRoom({
                 ref={remoteVideoRef}
                 autoPlay
                 playsInline
-                className={`h-full w-full object-contain ${
-                  hasActiveStream ? "block" : "hidden"
-                }`}
+                className="h-full w-full object-contain"
               />
             )}
 
@@ -1050,46 +1092,45 @@ export function VirtualRoom({
         </div>
 
         {/* MOBILE CHAT BACKDROP OVERLAY */}
-        {chatOpenMobile && (
+        {chatOpen && (
           <div
             className="md:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setChatOpenMobile(false)}
+            onClick={() => setChatOpen(false)}
           />
         )}
 
-        {/* 2. CHAT SIDEBAR (28% ON DESKTOP, SLIDE-UP BOTTOM SHEET ON MOBILE) */}
-        <aside
-          className={`fixed inset-x-0 bottom-0 top-auto md:top-0 md:bottom-0 md:left-auto md:right-0 z-50 md:z-40 h-[75vh] md:h-full w-full md:w-80 md:w-[28%] md:min-w-[280px] md:max-w-sm flex flex-col rounded-t-3xl md:rounded-none border-t md:border-t-0 md:border-l border-white/[0.1] bg-[#07090e] shadow-2xl md:shadow-none transition-transform duration-300 ease-out ${
-            chatOpenMobile ? "translate-y-0 md:translate-x-0" : "translate-y-full md:translate-x-0 md:translate-y-0"
-          }`}
-        >
-          {/* Mobile Handle */}
-          <div className="md:hidden flex items-center justify-center pt-2 pb-1">
-            <div className="w-10 h-1 rounded-full bg-white/20" />
-          </div>
+        {/* 2. CHAT SIDEBAR (DOCKED ON DESKTOP, SLIDE-UP BOTTOM SHEET ON MOBILE) */}
+        {chatOpen && (
+          <aside
+            className="fixed inset-x-0 bottom-0 top-auto z-50 h-[75vh] w-full rounded-t-3xl border-t border-white/[0.1] bg-[#07090e] shadow-2xl md:static md:z-20 md:h-full md:w-80 md:w-[28%] md:min-w-[280px] md:max-w-sm md:rounded-none md:border-t-0 md:border-l md:shadow-none flex flex-col transition-all duration-300 ease-out"
+          >
+            {/* Mobile Handle */}
+            <div className="md:hidden flex items-center justify-center pt-2 pb-1">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
+            </div>
 
-          {/* Chat Header */}
-          <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/[0.07] px-4">
-            <div className="flex items-center gap-2">
-              <MessageSquare size={14} className="text-rose-400" />
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                Theater Whispers
-              </h3>
+            {/* Chat Header */}
+            <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/[0.07] px-4">
+              <div className="flex items-center gap-2">
+                <MessageSquare size={14} className="text-rose-400" />
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                  Theater Whispers
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-zinc-500">
+                  Synced to movie
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(false)}
+                  className="p-1 text-zinc-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+                  aria-label="Close whispers"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono text-zinc-500">
-                Synced to movie
-              </span>
-              <button
-                type="button"
-                onClick={() => setChatOpenMobile(false)}
-                className="md:hidden p-1 text-zinc-400 hover:text-white"
-                aria-label="Close whispers"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
 
           {/* Messages List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10">
@@ -1175,6 +1216,7 @@ export function VirtualRoom({
             </div>
           </form>
         </aside>
+      )}
       </div>
     </div>
   );

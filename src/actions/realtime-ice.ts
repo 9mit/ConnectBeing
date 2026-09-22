@@ -56,11 +56,11 @@ export async function getTurnCredentialsAction(): Promise<
         username: turnUsername,
         credential: turnCredential,
       });
-    } else if (process.env.NODE_ENV === "production") {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "TURN credentials (TURN_SECRET or TURN_USERNAME/TURN_CREDENTIAL) are required in production for reliable calls.",
-        503,
+    } else {
+      // Graceful fallback to reliable STUN servers when dedicated TURN relay is not provisioned
+      iceServers.push(
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun.cloudflare.com:3478" },
       );
     }
 

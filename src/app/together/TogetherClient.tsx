@@ -2,7 +2,9 @@
 
 import { motion, Variants } from "framer-motion";
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Trash2, Loader2 } from "lucide-react";
+import { deleteWatchSessionAction } from "@/actions/together";
 
 type TogetherProps = {
   activeSessions: {
@@ -41,11 +43,35 @@ const itemVariants: Variants = {
 };
 
 export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) {
+  const [sessions, setSessions] = useState(activeSessions);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSessions(activeSessions);
+  }, [activeSessions]);
+
   useEffect(() => {
     // Force a "movie night" theme on this specific page
     document.documentElement.setAttribute("data-theme", "movie-night");
     return () => document.documentElement.removeAttribute("data-theme");
   }, []);
+
+  const handleDelete = async (sessionId: string, title: string) => {
+    if (!window.confirm(`Delete scheduled night plan for "${title}"?`)) return;
+    setDeletingId(sessionId);
+    try {
+      const res = await deleteWatchSessionAction(sessionId);
+      if (res.ok) {
+        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      } else {
+        alert(res.error.message || "Failed to delete scheduled night plan.");
+      }
+    } catch {
+      alert("An error occurred while deleting the plan.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <motion.div 
@@ -91,7 +117,7 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
           <span className="w-8 h-px bg-white/20" />
         </motion.h2>
 
-        {activeSessions.length === 0 ? (
+        {sessions.length === 0 ? (
           <motion.div variants={itemVariants} className="rounded-3xl glass-panel border border-white/[0.04] bg-white/[0.01] p-12 text-center flex flex-col items-center gap-4">
             <div className="w-16 h-16 rounded-full bg-white/[0.02] border border-white/[0.05] flex items-center justify-center text-2xl text-slate-600">
               🍿
@@ -103,7 +129,7 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
           </motion.div>
         ) : (
           <div className="grid gap-6 sm:grid-cols-2">
-            {activeSessions.map((session) => (
+            {sessions.map((session) => (
               <motion.div variants={itemVariants} key={session.id} className="group relative overflow-hidden rounded-3xl glass-panel border border-white/[0.06] bg-[#0c0a14]/80 p-8 shadow-2xl interactive">
                 {/* Poster Backdrop */}
                 {session.posterUrl ? (
@@ -122,10 +148,26 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
                       <span className="rounded-full bg-black/60 border border-white/[0.12] px-3 py-1 text-[9px] font-bold text-amber-300 uppercase tracking-widest backdrop-blur-md">
                         {session.provider}
                       </span>
-                      <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/15 px-2.5 py-1 rounded-full border border-amber-500/20">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                        {session.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/15 px-2.5 py-1 rounded-full border border-amber-500/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                          {session.status}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={deletingId === session.id}
+                          onClick={() => handleDelete(session.id, session.title)}
+                          title="Delete scheduled night plan"
+                          aria-label="Delete scheduled night plan"
+                          className="p-1.5 rounded-full text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition-all duration-200 disabled:opacity-50"
+                        >
+                          {deletingId === session.id ? (
+                            <Loader2 size={13} className="animate-spin text-rose-400" />
+                          ) : (
+                            <Trash2 size={13} />
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <h3 className="text-2xl font-bold text-white font-display tracking-tight leading-tight group-hover:text-amber-100 transition-colors">
                       {session.title}
@@ -139,13 +181,27 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
                       </p>
                     )}
                   </div>
-                  <div className="mt-8">
+                  <div className="mt-8 flex items-center gap-3">
                     <Link
                       href={`/together/room/${session.id}`}
-                      className="inline-flex w-full justify-center rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 px-4 py-3 text-[11px] font-extrabold uppercase tracking-widest text-white transition-all duration-300 backdrop-blur-sm shadow-[0_0_20px_rgba(251,191,36,0.15)]"
+                      className="flex-1 inline-flex justify-center items-center rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 px-4 py-3 text-[11px] font-extrabold uppercase tracking-widest text-white transition-all duration-300 backdrop-blur-sm shadow-[0_0_20px_rgba(251,191,36,0.15)]"
                     >
                       Enter Room 🍿
                     </Link>
+                    <button
+                      type="button"
+                      disabled={deletingId === session.id}
+                      onClick={() => handleDelete(session.id, session.title)}
+                      title="Delete scheduled night plan"
+                      aria-label="Delete scheduled night plan"
+                      className="p-3 rounded-xl border border-white/[0.08] bg-black/40 hover:bg-rose-500/20 hover:border-rose-500/30 text-zinc-400 hover:text-rose-300 transition-all duration-200 disabled:opacity-50"
+                    >
+                      {deletingId === session.id ? (
+                        <Loader2 size={15} className="animate-spin text-rose-400" />
+                      ) : (
+                        <Trash2 size={15} />
+                      )}
+                    </button>
                   </div>
                 </div>
               </motion.div>

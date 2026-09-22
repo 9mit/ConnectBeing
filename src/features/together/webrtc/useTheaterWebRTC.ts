@@ -35,6 +35,8 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
       "stun:stun.l.google.com:19302",
       "stun:stun1.l.google.com:19302",
       "stun:stun2.l.google.com:19302",
+      "stun:stun.cloudflare.com:3478",
+      "stun:openrelay.metered.ca:80",
     ],
   },
   { urls: ["stun:global.stun.twilio.com:3478"] },
@@ -240,22 +242,71 @@ export function useTheaterWebRTC({
     return pc;
   }, [applyBitrateCap, isHost, sendSignal, updateState]);
 
+  const lastRenegotiateTimeRef = useRef<number>(0);
+
   // Host renegotiation logic when Viewer announces presence/readiness
   const renegotiateForViewer = useCallback(async (targetViewerId?: string) => {
     if (!isHost || !localStreamRef.current) return;
     const videoTrack = localStreamRef.current.getVideoTracks()[0];
     if (!videoTrack || videoTrack.readyState !== "live") return;
 
+    // 1. If already connected, re-announce stream state so viewer can confirm
+    if (pcRef.current && pcRef.current.connectionState === "connected") {
+      sendSignal("theater:stream-state", {
+        state: "LIVE",
+        surface: streamSourceTypeRef.current || "tab",
+      });
+      return;
+    }
+
+    // 2. If offer is already generated and pending viewer answer, re-send in-flight offer
+    if (
+      pcRef.current &&
+      pcRef.current.signalingState === "have-local-offer" &&
+      pcRef.current.localDescription
+    ) {
+      sendSignal("theater:offer", {
+        sdp: pcRef.current.localDescription,
+        surface: streamSourceTypeRef.current || "tab",
+        offerId: activeOfferIdRef.current,
+        targetViewerId,
+      });
+      sendSignal("theater:stream-state", {
+        state: "LIVE",
+        surface: streamSourceTypeRef.current || "tab",
+      });
+      return;
+    }
+
+    // 3. Debounce rapid renegotiations (at least 800ms between new offers)
+    const now = Date.now();
+    if (now - lastRenegotiateTimeRef.current < 800) {
+      return;
+    }
+    lastRenegotiateTimeRef.current = now;
+
     if (makingOfferRef.current) return;
     makingOfferRef.current = true;
 
     try {
-      const pc = getOrCreatePc(true);
+      const needFresh =
+        !pcRef.current ||
+        pcRef.current.connectionState === "failed" ||
+        pcRef.current.signalingState === "closed";
+      const pc = getOrCreatePc(needFresh);
 
-      // Add movie stream tracks
+      // Add movie stream tracks if not already added
+      const senders = pc.getSenders();
       localStreamRef.current.getTracks().forEach((track) => {
         if (track.readyState === "live") {
-          pc.addTrack(track, localStreamRef.current!);
+          const alreadyAdded = senders.some((s) => s.track?.id === track.id);
+          if (!alreadyAdded) {
+            try {
+              pc.addTrack(track, localStreamRef.current!);
+            } catch {
+              // ignore duplicate track
+            }
+          }
         }
       });
 
@@ -263,18 +314,44 @@ export function useTheaterWebRTC({
       if (localVoiceRef.current) {
         const vTrack = localVoiceRef.current.getAudioTracks()[0];
         if (vTrack && vTrack.readyState === "live") {
-          pc.addTrack(vTrack, localVoiceRef.current);
+          const alreadyAdded = senders.some((s) => s.track?.id === vTrack.id);
+          if (!alreadyAdded) {
+            try {
+              pc.addTrack(vTrack, localVoiceRef.current);
+            } catch {
+              // ignore duplicate track
+            }
+          }
         }
       }
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
+      // Wait up to 500ms for initial STUN candidates to gather into localDescription
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === "complete") {
+          resolve();
+        } else {
+          const check = () => {
+            if (pc.iceGatheringState === "complete") {
+              pc.removeEventListener("icegatheringstatechange", check);
+              resolve();
+            }
+          };
+          pc.addEventListener("icegatheringstatechange", check);
+          setTimeout(() => {
+            pc.removeEventListener("icegatheringstatechange", check);
+            resolve();
+          }, 500);
+        }
+      });
+
       const offerId = Math.random().toString(36).substring(2, 9);
       activeOfferIdRef.current = offerId;
 
       sendSignal("theater:offer", {
-        sdp: offer,
+        sdp: pc.localDescription || offer,
         surface: streamSourceTypeRef.current || "tab",
         offerId,
         targetViewerId,
@@ -404,9 +481,33 @@ export function useTheaterWebRTC({
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+
+        // Wait up to 500ms for initial STUN candidates to gather into localDescription
+        await new Promise<void>((resolve) => {
+          if (pc.iceGatheringState === "complete") {
+            resolve();
+          } else {
+            const check = () => {
+              if (pc.iceGatheringState === "complete") {
+                pc.removeEventListener("icegatheringstatechange", check);
+                resolve();
+              }
+            };
+            pc.addEventListener("icegatheringstatechange", check);
+            setTimeout(() => {
+              pc.removeEventListener("icegatheringstatechange", check);
+              resolve();
+            }, 500);
+          }
+        });
+
         const offerId = Math.random().toString(36).substring(2, 9);
         activeOfferIdRef.current = offerId;
-        sendSignal("theater:offer", { sdp: offer, surface: detectedSurface, offerId });
+        sendSignal("theater:offer", {
+          sdp: pc.localDescription || offer,
+          surface: detectedSurface,
+          offerId,
+        });
       } finally {
         makingOfferRef.current = false;
       }
@@ -496,20 +597,60 @@ export function useTheaterWebRTC({
       .on("broadcast", { event: "theater:offer" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
         try {
-          const pc = getOrCreatePc(true);
+          // If already processing or connected with this offerId, avoid resetting
+          if (
+            activeOfferIdRef.current === payload.offerId &&
+            pcRef.current?.connectionState === "connected"
+          ) {
+            return;
+          }
+          activeOfferIdRef.current = payload.offerId;
+
+          const needFresh =
+            !pcRef.current ||
+            pcRef.current.connectionState === "failed" ||
+            pcRef.current.signalingState !== "stable";
+          const pc = getOrCreatePc(needFresh);
+
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
           await flushPendingIce(pc);
 
           if (localVoiceRef.current) {
             const vTrack = localVoiceRef.current.getAudioTracks()[0];
             if (vTrack && vTrack.readyState === "live") {
-              pc.addTrack(vTrack, localVoiceRef.current);
+              const senders = pc.getSenders();
+              if (!senders.some((s) => s.track?.id === vTrack.id)) {
+                pc.addTrack(vTrack, localVoiceRef.current);
+              }
             }
           }
 
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          sendSignal("theater:answer", { sdp: answer, offerId: payload.offerId });
+
+          // Wait up to 500ms for initial STUN candidates to gather into localDescription
+          await new Promise<void>((resolve) => {
+            if (pc.iceGatheringState === "complete") {
+              resolve();
+            } else {
+              const check = () => {
+                if (pc.iceGatheringState === "complete") {
+                  pc.removeEventListener("icegatheringstatechange", check);
+                  resolve();
+                }
+              };
+              pc.addEventListener("icegatheringstatechange", check);
+              setTimeout(() => {
+                pc.removeEventListener("icegatheringstatechange", check);
+                resolve();
+              }, 500);
+            }
+          });
+
+          sendSignal("theater:answer", {
+            sdp: pc.localDescription || answer,
+            offerId: payload.offerId,
+          });
 
           if (payload.surface) {
             setStreamSourceType(payload.surface);
@@ -524,7 +665,11 @@ export function useTheaterWebRTC({
         if (payload.senderUserId === userId) return;
         try {
           const pc = pcRef.current;
-          if (pc && pc.signalingState === "have-local-offer") {
+          if (
+            pc &&
+            (pc.signalingState === "have-local-offer" ||
+              pc.signalingState === "have-remote-pranswer")
+          ) {
             await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
             await flushPendingIce(pc);
           }
@@ -589,8 +734,12 @@ export function useTheaterWebRTC({
         if (hasPartner) {
           hadPartnerEverRef.current = true;
           setPartnerPresence("watching");
-          // If host is live, trigger offer for partner
-          if (isHost && localStreamRef.current) {
+          // If host is live, trigger offer for partner if not already connected
+          if (
+            isHost &&
+            localStreamRef.current &&
+            (!pcRef.current || pcRef.current.connectionState !== "connected")
+          ) {
             void renegotiateForViewer();
           }
         } else {
@@ -700,15 +849,25 @@ export function useTheaterWebRTC({
     let count = 0;
     const interval = setInterval(() => {
       count++;
-      if (count > 8) {
+      if (count > 10) {
         clearInterval(interval);
         return;
       }
-      // If still waiting without a stream, ping viewer readiness
-      if (!remoteStreamRef.current && roomStateRef.current !== "STREAM_ENDED" && roomStateRef.current !== "FALLBACK_MODE") {
+      // If still waiting without a stream, ping viewer readiness ONLY if not already connecting/connected
+      const pc = pcRef.current;
+      const isConnecting =
+        pc &&
+        (pc.connectionState === "connecting" ||
+          pc.connectionState === "connected");
+      if (
+        !remoteStreamRef.current &&
+        !isConnecting &&
+        roomStateRef.current !== "STREAM_ENDED" &&
+        roomStateRef.current !== "FALLBACK_MODE"
+      ) {
         sendViewerReady();
       }
-    }, 3000);
+    }, 4000);
 
     return () => clearInterval(interval);
   }, [isHost, sendViewerReady]);

@@ -214,21 +214,24 @@ export async function leaveWatchSessionAction(
 
 export async function sendWatchMessageAction(
   input: unknown,
-): Promise<ActionResult<void>> {
+): Promise<ActionResult<{ id: string; content: string; createdAt: string }>> {
   try {
     const parsed = watchSessionMessageSchema.parse(input);
     const { user, couple } = await requireVerifiedCouple();
     await assertWatchSessionOwned(parsed.sessionId, couple.id);
 
+    const id = createId();
+    const now = new Date();
     await db.insert(watchMessages).values({
-      id: createId(),
+      id,
       sessionId: parsed.sessionId,
       userId: user.id,
       content: parsed.content,
       playbackPosition: parsed.playbackPosition,
+      createdAt: now,
     });
 
-    return ok();
+    return ok({ id, content: parsed.content, createdAt: now.toISOString() });
   } catch (e) {
     return fail(e);
   }
@@ -485,6 +488,34 @@ export async function getWatchMessagesAction(
         createdAt: m.createdAt.toISOString(),
       })),
     );
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function deleteWatchSessionAction(
+  sessionId: string,
+): Promise<ActionResult<{ deleted: true }>> {
+  try {
+    const { couple } = await requireVerifiedCouple();
+    await assertWatchSessionOwned(sessionId, couple.id);
+
+    await db
+      .delete(watchSessions)
+      .where(
+        and(
+          eq(watchSessions.id, sessionId),
+          eq(watchSessions.coupleId, couple.id),
+        ),
+      );
+
+    try {
+      revalidatePath("/together");
+    } catch {
+      // ignore outside request
+    }
+
+    return ok({ deleted: true });
   } catch (e) {
     return fail(e);
   }
