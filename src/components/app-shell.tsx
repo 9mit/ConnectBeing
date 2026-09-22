@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
+
+const AppShellContext = createContext<boolean>(false);
 import {
   Home,
   Film,
@@ -146,13 +148,14 @@ function HeaderPresenceControl() {
   );
 }
 
-function HeaderBellButton() {
+function HeaderBellButton({ onSelect }: { onSelect?: () => void }) {
   const { unreadNotificationsCount } = usePresence();
 
   return (
     <Link
       href="/notifications"
       prefetch={true}
+      onClick={onSelect}
       aria-label="Alerts"
       className="relative p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
     >
@@ -202,11 +205,11 @@ function MobileMenuTrigger({
 function DrawerItemLink({
   item,
   isActive,
-  onClose,
+  onSelect,
 }: {
   item: { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
   isActive: boolean;
-  onClose: () => void;
+  onSelect: (href: string) => void;
 }) {
   const { unreadNotificationsCount } = usePresence();
   const Icon = item.icon;
@@ -216,7 +219,7 @@ function DrawerItemLink({
     <Link
       href={item.href}
       prefetch={true}
-      onClick={onClose}
+      onClick={() => onSelect(item.href)}
       className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
         isActive
           ? "border-amber-400/40 bg-amber-400/[0.08] text-amber-100"
@@ -245,253 +248,285 @@ export function AppShell({
   userId?: string | null;
   children: React.ReactNode;
 }) {
+  const isInside = useContext(AppShellContext);
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
 
-  // Close drawer when route changes
+  // Close drawer and reset pending navigation state when route arrives
   useEffect(() => {
+    setPendingPath(null);
     setMenuOpen(false);
   }, [pathname]);
 
+  if (isInside) {
+    return <>{children}</>;
+  }
+
+  const activeHref = pendingPath ?? pathname;
+
   return (
-    <PresenceProvider coupleId={coupleId} userId={userId}>
-      <div className="min-h-screen bg-[#07080b] text-[#f7f6f2] flex flex-col font-sans select-none pb-24 md:pb-10 overflow-x-hidden selection:bg-amber-400/20 selection:text-amber-100">
-        
-        {/* Subtle Ambient Background Gradient */}
-        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" aria-hidden>
-          <div className="absolute -top-[20%] left-[20%] w-[60%] h-[45%] rounded-full bg-white/[0.015] blur-[160px] pointer-events-none" />
-        </div>
-
-        {/* Minimalist Editorial Top Navigation */}
-        <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#07080b]/85 backdrop-blur-xl transition-all">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 py-3.5">
-            
-            {/* Brand Mark */}
-            <Link 
-              href="/dashboard" 
-              className="group relative flex items-center gap-2"
-              aria-label="MadLove Sanctuary"
-            >
-              <span className="font-serif text-lg tracking-[0.22em] font-light text-[#f7f6f2] group-hover:text-amber-100/90 transition-colors">
-                MADLOVE
-              </span>
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80" aria-hidden />
-            </Link>
-            
-            {/* Primary Desktop Navigation */}
-            <nav className="hidden md:flex items-center gap-1 p-1 rounded-full border border-white/[0.07] bg-white/[0.02]" aria-label="Primary">
-              {primaryNavItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
-                return (
-                  <Link 
-                    key={item.href} 
-                    href={item.href} 
-                    prefetch={true}
-                    className={`relative px-3.5 py-1.5 text-xs font-medium tracking-wide transition-colors rounded-full ${
-                      isActive ? "text-[#f7f6f2]" : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    {isActive && (
-                      <motion.div
-                        layoutId="desktop-nav-active"
-                        className="absolute inset-0 rounded-full bg-white/[0.08] border border-white/[0.12]"
-                        transition={{ type: "spring", bounce: 0.15, duration: 0.45 }}
-                      />
-                    )}
-                    <span className="relative z-10 flex items-center gap-1.5">
-                      <Icon className="w-3.5 h-3.5 opacity-80" />
-                      <span>{item.label}</span>
-                    </span>
-                  </Link>
-                );
-              })}
-              
-              <button
-                type="button"
-                onClick={() => setMenuOpen((v) => !v)}
-                className={`relative px-3 py-1.5 text-xs font-medium tracking-wide transition-colors rounded-full flex items-center gap-1.5 ${
-                  menuOpen || allSecondaryLinks.some((l) => pathname === l.href || pathname.startsWith(`${l.href}/`))
-                    ? "text-amber-200 bg-white/[0.05]"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-                aria-expanded={menuOpen}
-              >
-                <LayoutGrid className="w-3.5 h-3.5 opacity-80" />
-                <span>More</span>
-              </button>
-            </nav>
-            
-            {/* Presence & Quick User Actions */}
-            <div className="flex items-center gap-2.5 relative z-10">
-              {coupleId && userId ? (
-                <div className="flex items-center gap-2 sm:gap-3">
-                  <HeaderPresenceControl />
-
-                  <div className="hidden lg:flex items-center gap-1.5 border-l border-white/[0.08] pl-2.5">
-                    <Link
-                      href="/search"
-                      prefetch={true}
-                      aria-label="Search sanctuary"
-                      className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
-                    >
-                      <Search className="w-4 h-4" />
-                    </Link>
-                    <HeaderBellButton />
-                    <Link
-                      href="/profile"
-                      prefetch={true}
-                      aria-label="Couple profile"
-                      className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
-                    >
-                      <User className="w-4 h-4" />
-                    </Link>
-                  </div>
-                </div>
-              ) : null}
-
-              <form action="/api/auth/logout" method="POST" className="hidden lg:block">
-                <button 
-                  type="submit" 
-                  className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
-                  title="Sign out"
-                  aria-label="Sign out"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </form>
-            </div>
-          </div>
-        </header>
-
-        {/* Main Content Viewport */}
-        <main className="mx-auto w-full max-w-6xl px-4 sm:px-6 py-6 md:py-10 flex-1 flex flex-col justify-start relative z-10">
-          <motion.div
-            key={pathname}
-            initial={{ opacity: 0.8 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.12, ease: "easeOut" }}
-            className="w-full"
-          >
-            {children}
-          </motion.div>
-        </main>
-
-        {/* Mobile Ergonomic Bottom Navigation */}
-        <nav 
-          className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#07080b]/90 backdrop-blur-2xl border-t border-white/[0.07] px-2 pt-1.5 pb-[calc(0.5rem+env(safe-area-inset-bottom))] flex items-center justify-around shadow-2xl"
-          aria-label="Mobile Navigation"
-        >
-          {primaryNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                prefetch={true}
-                className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition-all relative min-h-[44px] justify-center ${
-                  isActive ? "text-[#f7f6f2]" : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="mobile-nav-pill"
-                    className="absolute inset-0 bg-white/[0.08] rounded-2xl border border-white/[0.12]"
-                    transition={{ type: "spring", stiffness: 350, damping: 30 }}
-                  />
-                )}
-                <Icon className="w-4 h-4 relative z-10" />
-                <span className="text-[10px] font-medium tracking-wide relative z-10">{item.label}</span>
-              </Link>
-            );
-          })}
+    <AppShellContext.Provider value={true}>
+      <PresenceProvider coupleId={coupleId} userId={userId}>
+        <div className="min-h-screen bg-[#07080b] text-[#f7f6f2] flex flex-col font-sans select-none pb-24 md:pb-10 overflow-x-hidden selection:bg-amber-400/20 selection:text-amber-100">
           
-          {/* Mobile Drawer Trigger with Real-time Notification Badge */}
-          <MobileMenuTrigger
-            menuOpen={menuOpen}
-            onClick={() => setMenuOpen(!menuOpen)}
-          />
-        </nav>
-
-        {/* Sanctuary Universe Drawer */}
-        <AnimatePresence>
-          {menuOpen && (
-            <>
+          {/* Instant Ambient Route Transition Glow Bar */}
+          {pendingPath !== null && pendingPath !== pathname && (
+            <div className="fixed top-0 left-0 right-0 h-[2.5px] z-50 overflow-hidden pointer-events-none">
               <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setMenuOpen(false)}
-                className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm"
+                initial={{ x: "-100%" }}
+                animate={{ x: "0%" }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                className="h-full w-full bg-gradient-to-r from-amber-500 via-amber-300 to-rose-400 shadow-[0_0_10px_rgba(245,158,11,0.9)]"
               />
-              
-              <motion.div
-                initial={{ y: "100%" }}
-                animate={{ y: 0 }}
-                exit={{ y: "100%" }}
-                transition={{ type: "spring", damping: 28, stiffness: 240 }}
-                className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl border-t border-white/[0.12] bg-[#0c0d12]/95 backdrop-blur-2xl px-6 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto shadow-2xl md:left-1/2 md:right-auto md:bottom-auto md:top-16 md:w-full md:max-w-xl md:-translate-x-1/2 md:rounded-2xl md:border md:border-white/[0.12] md:max-h-[78vh]"
-              >
-                {/* Pull Bar */}
-                <div className="w-8 h-1 rounded-full bg-white/20 mx-auto mb-5 md:hidden" aria-hidden />
-                
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                    <span className="font-serif text-base font-light text-[#f7f6f2] tracking-wider">
-                      Sanctuary Menu
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setMenuOpen(false)}
-                    className="text-zinc-400 hover:text-white p-1 rounded-full hover:bg-white/[0.06] transition-colors"
-                    aria-label="Close menu"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="space-y-6 mb-6">
-                  {sanctuaryMenuGroups.map((group) => (
-                    <div key={group.title}>
-                      <p className="text-[11px] font-medium tracking-wider uppercase text-zinc-400 mb-2.5">
-                        {group.title}
-                      </p>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {group.links.map((item) => {
-                          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                          return (
-                            <DrawerItemLink
-                              key={item.href}
-                              item={item}
-                              isActive={isActive}
-                              onClose={() => setMenuOpen(false)}
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Drawer Footer Actions */}
-                <div className="border-t border-white/[0.08] pt-4 flex gap-3">
-                  <form action="/api/auth/logout" method="POST" className="w-full">
-                    <button
-                      type="submit"
-                      className="w-full py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.02] text-xs font-medium text-zinc-300 hover:text-rose-200 hover:border-rose-400/30 hover:bg-rose-500/10 transition-all flex items-center justify-center gap-2"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Sign Out</span>
-                    </button>
-                  </form>
-                </div>
-              </motion.div>
-            </>
+            </div>
           )}
-        </AnimatePresence>
-      </div>
-    </PresenceProvider>
+
+          {/* Subtle Ambient Background Gradient */}
+          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" aria-hidden>
+            <div className="absolute -top-[20%] left-[20%] w-[60%] h-[45%] rounded-full bg-white/[0.015] blur-[160px] pointer-events-none" />
+          </div>
+
+          {/* Minimalist Editorial Top Navigation */}
+          <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#07080b]/85 backdrop-blur-xl transition-all">
+            <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 py-3.5">
+              
+              {/* Brand Mark */}
+              <Link 
+                href="/dashboard" 
+                prefetch={true}
+                onClick={() => setPendingPath("/dashboard")}
+                className="group relative flex items-center gap-2"
+                aria-label="MadLove Sanctuary"
+              >
+                <span className="font-serif text-lg tracking-[0.22em] font-light text-[#f7f6f2] group-hover:text-amber-100/90 transition-colors">
+                  MADLOVE
+                </span>
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80" aria-hidden />
+              </Link>
+              
+              {/* Primary Desktop Navigation */}
+              <nav className="hidden md:flex items-center gap-1 p-1 rounded-full border border-white/[0.07] bg-white/[0.02]" aria-label="Primary">
+                {primaryNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeHref === item.href || (item.href !== "/dashboard" && activeHref.startsWith(`${item.href}/`));
+                  return (
+                    <Link 
+                      key={item.href} 
+                      href={item.href} 
+                      prefetch={true}
+                      onClick={() => setPendingPath(item.href)}
+                      className={`relative px-3.5 py-1.5 text-xs font-medium tracking-wide transition-colors rounded-full ${
+                        isActive ? "text-[#f7f6f2]" : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {isActive && (
+                        <motion.div
+                          layoutId="desktop-nav-active"
+                          className="absolute inset-0 rounded-full bg-white/[0.08] border border-white/[0.12]"
+                          transition={{ type: "spring", bounce: 0.15, duration: 0.45 }}
+                        />
+                      )}
+                      <span className="relative z-10 flex items-center gap-1.5">
+                        <Icon className="w-3.5 h-3.5 opacity-80" />
+                        <span>{item.label}</span>
+                      </span>
+                    </Link>
+                  );
+                })}
+                
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  className={`relative px-3 py-1.5 text-xs font-medium tracking-wide transition-colors rounded-full flex items-center gap-1.5 ${
+                    menuOpen || allSecondaryLinks.some((l) => activeHref === l.href || activeHref.startsWith(`${l.href}/`))
+                      ? "text-amber-200 bg-white/[0.05]"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                  aria-expanded={menuOpen}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5 opacity-80" />
+                  <span>More</span>
+                </button>
+              </nav>
+              
+              {/* Presence & Quick User Actions */}
+              <div className="flex items-center gap-2.5 relative z-10">
+                {coupleId && userId ? (
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <HeaderPresenceControl />
+
+                    <div className="hidden lg:flex items-center gap-1.5 border-l border-white/[0.08] pl-2.5">
+                      <Link
+                        href="/search"
+                        prefetch={true}
+                        onClick={() => setPendingPath("/search")}
+                        aria-label="Search sanctuary"
+                        className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+                      >
+                        <Search className="w-4 h-4" />
+                      </Link>
+                      <HeaderBellButton onSelect={() => setPendingPath("/notifications")} />
+                      <Link
+                        href="/profile"
+                        prefetch={true}
+                        onClick={() => setPendingPath("/profile")}
+                        aria-label="Couple profile"
+                        className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+                      >
+                        <User className="w-4 h-4" />
+                      </Link>
+                    </div>
+                  </div>
+                ) : null}
+
+                <form action="/api/auth/logout" method="POST" className="hidden lg:block">
+                  <button 
+                    type="submit" 
+                    className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+                    title="Sign out"
+                    aria-label="Sign out"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </form>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Content Viewport */}
+          <main className="mx-auto w-full max-w-6xl px-4 sm:px-6 py-6 md:py-10 flex-1 flex flex-col justify-start relative z-10">
+            <motion.div
+              key={pathname}
+              initial={{ opacity: 0.8 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.12, ease: "easeOut" }}
+              className="w-full"
+            >
+              {children}
+            </motion.div>
+          </main>
+
+          {/* Mobile Ergonomic Bottom Navigation */}
+          <nav 
+            className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#07080b]/90 backdrop-blur-2xl border-t border-white/[0.07] px-2 pt-1.5 pb-[calc(0.5rem+env(safe-area-inset-bottom))] flex items-center justify-around shadow-2xl"
+            aria-label="Mobile Navigation"
+          >
+            {primaryNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeHref === item.href || (item.href !== "/dashboard" && activeHref.startsWith(`${item.href}/`));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  prefetch={true}
+                  onClick={() => setPendingPath(item.href)}
+                  className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition-all relative min-h-[44px] justify-center ${
+                    isActive ? "text-[#f7f6f2]" : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="mobile-nav-pill"
+                      className="absolute inset-0 bg-white/[0.08] rounded-2xl border border-white/[0.12]"
+                      transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                    />
+                  )}
+                  <Icon className="w-4 h-4 relative z-10" />
+                  <span className="text-[10px] font-medium tracking-wide relative z-10">{item.label}</span>
+                </Link>
+              );
+            })}
+            
+            {/* Mobile Drawer Trigger with Real-time Notification Badge */}
+            <MobileMenuTrigger
+              menuOpen={menuOpen}
+              onClick={() => setMenuOpen(!menuOpen)}
+            />
+          </nav>
+
+          {/* Sanctuary Universe Drawer */}
+          <AnimatePresence>
+            {menuOpen && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setMenuOpen(false)}
+                  className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm"
+                />
+                
+                <motion.div
+                  initial={{ y: "100%" }}
+                  animate={{ y: 0 }}
+                  exit={{ y: "100%" }}
+                  transition={{ type: "spring", damping: 28, stiffness: 240 }}
+                  className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl border-t border-white/[0.12] bg-[#0c0d12]/95 backdrop-blur-2xl px-6 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto shadow-2xl md:left-1/2 md:right-auto md:bottom-auto md:top-16 md:w-full md:max-w-xl md:-translate-x-1/2 md:rounded-2xl md:border md:border-white/[0.12] md:max-h-[78vh]"
+                >
+                  {/* Pull Bar */}
+                  <div className="w-8 h-1 rounded-full bg-white/20 mx-auto mb-5 md:hidden" aria-hidden />
+                  
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-2">
+                      <span className="font-serif text-base font-light text-[#f7f6f2] tracking-wider">
+                        Sanctuary Menu
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMenuOpen(false)}
+                      className="text-zinc-400 hover:text-white p-1 rounded-full hover:bg-white/[0.06] transition-colors"
+                      aria-label="Close menu"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-6 mb-6">
+                    {sanctuaryMenuGroups.map((group) => (
+                      <div key={group.title}>
+                        <p className="text-[11px] font-medium tracking-wider uppercase text-zinc-400 mb-2.5">
+                          {group.title}
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {group.links.map((item) => {
+                            const isActive = activeHref === item.href || activeHref.startsWith(`${item.href}/`);
+                            return (
+                              <DrawerItemLink
+                                key={item.href}
+                                item={item}
+                                isActive={isActive}
+                                onSelect={(href) => {
+                                  setPendingPath(href);
+                                  setMenuOpen(false);
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Drawer Footer Actions */}
+                  <div className="border-t border-white/[0.08] pt-4 flex gap-3">
+                    <form action="/api/auth/logout" method="POST" className="w-full">
+                      <button
+                        type="submit"
+                        className="w-full py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.02] text-xs font-medium text-zinc-300 hover:text-rose-200 hover:border-rose-400/30 hover:bg-rose-500/10 transition-all flex items-center justify-center gap-2"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Sign Out</span>
+                      </button>
+                    </form>
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
+      </PresenceProvider>
+    </AppShellContext.Provider>
   );
 }

@@ -36,10 +36,20 @@ export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   // 1. Supabase SSR session refresh & cookie synchronization
+  // PERFORMANCE CRITICAL: Never block internal RSC navigations or prefetch requests on remote Supabase auth HTTP calls.
+  const isRscRequest = request.headers.get("RSC") === "1" || searchParams.has("_rsc");
+  const isPrefetch =
+    request.headers.get("purpose") === "prefetch" ||
+    request.headers.get("x-purpose") === "prefetch" ||
+    request.headers.get("next-router-prefetch") === "1";
+  const hasSupabaseCookie = request.cookies
+    .getAll()
+    .some((c) => c.name.startsWith("sb-") && c.name.includes("-auth-token"));
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (url && anonKey) {
+  if (url && anonKey && hasSupabaseCookie && !isRscRequest && !isPrefetch) {
     try {
       const supabase = createServerClient(url, anonKey, {
         cookies: {
@@ -58,7 +68,7 @@ export async function middleware(request: NextRequest) {
         },
       });
 
-      // Refreshes session tokens if expired/near expiry
+      // Refreshes session tokens if expired/near expiry on full document requests
       await supabase.auth.getUser();
     } catch {
       // Ignore network errors during background refresh

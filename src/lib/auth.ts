@@ -28,6 +28,7 @@ export type ActiveCouple = Omit<Couple, "userBId" | "status"> & {
 export type SessionUser = User & {
   couple: ActiveCouple | null;
   onboardingProfile?: OnboardingProfile | null;
+  coupleMemberships?: Array<CoupleMember & { couple?: Couple | null }>;
 };
 
 export const getAuthUser = safeCache(async function getAuthUser() {
@@ -69,6 +70,10 @@ export const getAppUser = safeCache(async function getAppUser(): Promise<Session
       with: {
         couple: true,
         onboardingProfile: true,
+        coupleMemberships: {
+          where: eq(coupleMembers.status, "active"),
+          with: { couple: true },
+        },
       },
     });
 
@@ -78,6 +83,10 @@ export const getAppUser = safeCache(async function getAppUser(): Promise<Session
         with: {
           couple: true,
           onboardingProfile: true,
+          coupleMemberships: {
+            where: eq(coupleMembers.status, "active"),
+            with: { couple: true },
+          },
         },
       });
     }
@@ -86,7 +95,14 @@ export const getAppUser = safeCache(async function getAppUser(): Promise<Session
       const normalizedEmail = authUser.email.trim().toLowerCase();
       const existingByEmail = await db.query.users.findFirst({
         where: eq(users.email, normalizedEmail),
-        with: { couple: true, onboardingProfile: true },
+        with: {
+          couple: true,
+          onboardingProfile: true,
+          coupleMemberships: {
+            where: eq(coupleMembers.status, "active"),
+            with: { couple: true },
+          },
+        },
       });
       if (existingByEmail) {
         if (existingByEmail.supabaseAuthId !== authUser.id) {
@@ -115,14 +131,28 @@ export const getAppUser = safeCache(async function getAppUser(): Promise<Session
         });
         row = await db.query.users.findFirst({
           where: eq(users.supabaseAuthId, authUser.id),
-          with: { couple: true, onboardingProfile: true },
+          with: {
+            couple: true,
+            onboardingProfile: true,
+            coupleMemberships: {
+              where: eq(coupleMembers.status, "active"),
+              with: { couple: true },
+            },
+          },
         });
       } catch (insertErr) {
         console.warn("[getAppUser] Insert fallback collision:", insertErr);
         if (normalizedEmail) {
           row = await db.query.users.findFirst({
             where: eq(users.email, normalizedEmail),
-            with: { couple: true, onboardingProfile: true },
+            with: {
+              couple: true,
+              onboardingProfile: true,
+              coupleMemberships: {
+                where: eq(coupleMembers.status, "active"),
+                with: { couple: true },
+              },
+            },
           });
         }
       }
@@ -131,8 +161,11 @@ export const getAppUser = safeCache(async function getAppUser(): Promise<Session
     if (!row) return null;
 
     let activeCouple: ActiveCouple | null = null;
-    if (row.couple && row.couple.status === "active" && row.couple.userBId) {
-      activeCouple = row.couple as ActiveCouple;
+    const candidateCouple =
+      row.coupleMemberships?.[0]?.couple ?? row.couple ?? null;
+
+    if (candidateCouple && candidateCouple.status === "active" && candidateCouple.userBId) {
+      activeCouple = candidateCouple as ActiveCouple;
     }
 
     return {
@@ -147,89 +180,15 @@ export const getAppUser = safeCache(async function getAppUser(): Promise<Session
 });
 
 export const requireAppUser = safeCache(async function requireAppUser(): Promise<SessionUser> {
-  const authUser = await requireAuthUser();
-  const targetUserId = authUser.userId;
-
-  let row;
-  try {
-    row = await db.query.users.findFirst({
-      where: eq(users.id, targetUserId),
-      with: { couple: true, onboardingProfile: true },
-    });
-    if (!row) {
-      row = await db.query.users.findFirst({
-        where: eq(users.supabaseAuthId, authUser.id),
-        with: { couple: true, onboardingProfile: true },
-      });
-    }
-    if (!row && authUser.email) {
-      const normalizedEmail = authUser.email.trim().toLowerCase();
-      const existingByEmail = await db.query.users.findFirst({
-        where: eq(users.email, normalizedEmail),
-        with: { couple: true, onboardingProfile: true },
-      });
-      if (existingByEmail) {
-        if (existingByEmail.supabaseAuthId !== authUser.id) {
-          try {
-            await db
-              .update(users)
-              .set({ supabaseAuthId: authUser.id, updatedAt: new Date() })
-              .where(eq(users.id, existingByEmail.id));
-            existingByEmail.supabaseAuthId = authUser.id;
-          } catch (e) {
-            console.warn("[requireAppUser] Link supabaseAuthId warning:", e);
-          }
-        }
-        row = existingByEmail;
-      }
-    }
-  } catch (err) {
-    console.error("[requireAppUser] DB error:", err);
-    throw new AppError("INTERNAL_ERROR", "Database connection issue. Please try again.", 500);
-  }
-
-  if (!row) {
-    const userId = createId();
-    const normalizedEmail = authUser.email ? authUser.email.trim().toLowerCase() : "";
-    try {
-      await db.insert(users).values({
-        id: userId,
-        supabaseAuthId: authUser.id,
-        email: normalizedEmail,
-      });
-      row = await db.query.users.findFirst({
-        where: eq(users.supabaseAuthId, authUser.id),
-        with: { couple: true, onboardingProfile: true },
-      });
-    } catch (insertErr) {
-      console.warn("[requireAppUser] Insert profile fallback collision:", insertErr);
-      if (normalizedEmail) {
-        row = await db.query.users.findFirst({
-          where: eq(users.email, normalizedEmail),
-          with: { couple: true, onboardingProfile: true },
-        });
-      }
-    }
-  }
-
-  if (!row) {
+  const user = await getAppUser();
+  if (!user) {
     throw new AppError(
       "UNAUTHORIZED",
       "App user profile missing. Complete registration again.",
       401,
     );
   }
-
-    let activeCouple: ActiveCouple | null = null;
-    if (row.couple && row.couple.status === "active" && row.couple.userBId) {
-      activeCouple = row.couple as ActiveCouple;
-    }
-
-    return {
-      ...row,
-      couple: activeCouple,
-      onboardingProfile: row.onboardingProfile ?? null,
-    };
+  return user;
 });
 
 export type OnboardingStatus =
@@ -254,6 +213,7 @@ export interface AuthenticatedUserContext {
  * Authoritative single server-side couple resolver.
  * Adheres strictly to the identity invariant:
  * AUTH USER ID -> COUPLE MEMBERSHIP -> COUPLE -> PARTNER
+ * Optimized for request-scoped single-pass resolution.
  */
 export const getAuthenticatedUserContext = safeCache(
   async function getAuthenticatedUserContext(): Promise<AuthenticatedUserContext> {
@@ -295,110 +255,54 @@ export const getAuthenticatedUserContext = safeCache(
       };
     }
 
-    // Query active couple membership from couple_members table
-    let membership = await db.query.coupleMembers.findFirst({
-      where: and(
-        eq(coupleMembers.userId, appUser.id),
-        eq(coupleMembers.status, "active"),
-      ),
-    });
+    // Fast-path: Check membership already populated from single-pass relational user query
+    let membership: (CoupleMember & { couple?: Couple | null }) | null =
+      appUser.coupleMemberships?.[0] ?? null;
 
-    if (membership) {
-      const coupleRow = await db.query.couples.findFirst({
-        where: eq(couples.id, membership.coupleId),
-      });
-
-      if (coupleRow && coupleRow.status === "active" && coupleRow.userBId) {
-        const activeCouple = coupleRow as ActiveCouple;
-        const partnerId =
-          coupleRow.userAId === appUser.id
-            ? coupleRow.userBId
-            : coupleRow.userAId;
-
-        const partnerProfile = await db.query.onboardingProfiles.findFirst({
-          where: eq(onboardingProfiles.userId, partnerId),
-        });
-
-        // Keep appUser.coupleId synchronized
-        if (appUser.coupleId !== coupleRow.id) {
-          try {
-            await db
-              .update(users)
-              .set({ coupleId: coupleRow.id, updatedAt: new Date() })
-              .where(eq(users.id, appUser.id));
-            appUser.coupleId = coupleRow.id;
-          } catch (e) {
-            console.warn("[getAuthenticatedUserContext] Sync coupleId warning:", e);
-          }
-        }
-
-        return {
-          user: { ...appUser, couple: activeCouple },
-          profile,
-          activeCouple,
-          membership,
-          partner: {
-            id: partnerId,
-            profile: partnerProfile ?? null,
-          },
-          onboardingStatus: "paired",
-        };
-      }
+    if (!membership) {
+      // Query active couple membership if not already loaded
+      membership = await db.query.coupleMembers.findFirst({
+        where: and(
+          eq(coupleMembers.userId, appUser.id),
+          eq(coupleMembers.status, "active"),
+        ),
+        with: { couple: true },
+      }) ?? null;
     }
 
-    // Fallback: If no couple_members row yet, but appUser.coupleId points to an active couple
-    if (!membership && appUser.coupleId) {
-      const coupleRow = await db.query.couples.findFirst({
-        where: eq(couples.id, appUser.coupleId),
+    const coupleRow = membership?.couple ?? appUser.couple ?? null;
+
+    if (coupleRow && coupleRow.status === "active" && coupleRow.userBId) {
+      const activeCouple = coupleRow as ActiveCouple;
+      const partnerId =
+        coupleRow.userAId === appUser.id
+          ? coupleRow.userBId
+          : coupleRow.userAId;
+
+      const partnerProfile = await db.query.onboardingProfiles.findFirst({
+        where: eq(onboardingProfiles.userId, partnerId),
       });
 
-      if (
-        coupleRow &&
-        coupleRow.status === "active" &&
-        coupleRow.userBId &&
-        (coupleRow.userAId === appUser.id || coupleRow.userBId === appUser.id)
-      ) {
-        const role = coupleRow.userAId === appUser.id ? "creator" : "partner";
-        try {
-          await db.insert(coupleMembers).values({
-            id: createId(),
-            coupleId: coupleRow.id,
-            userId: appUser.id,
-            role,
-            status: "active",
-          });
-          membership = await db.query.coupleMembers.findFirst({
-            where: and(
-              eq(coupleMembers.userId, appUser.id),
-              eq(coupleMembers.status, "active"),
-            ),
-          });
-        } catch (e) {
-          console.warn("[getAuthenticatedUserContext] Self-heal couple_members warning:", e);
-        }
-
-        const activeCouple = coupleRow as ActiveCouple;
-        const partnerId =
-          coupleRow.userAId === appUser.id
-            ? coupleRow.userBId
-            : coupleRow.userAId;
-
-        const partnerProfile = await db.query.onboardingProfiles.findFirst({
-          where: eq(onboardingProfiles.userId, partnerId),
-        });
-
-        return {
-          user: { ...appUser, couple: activeCouple },
-          profile,
-          activeCouple,
-          membership: membership ?? null,
-          partner: {
-            id: partnerId,
-            profile: partnerProfile ?? null,
-          },
-          onboardingStatus: "paired",
-        };
+      // Keep appUser.coupleId synchronized in background if mismatched
+      if (appUser.coupleId !== coupleRow.id) {
+        db.update(users)
+          .set({ coupleId: coupleRow.id, updatedAt: new Date() })
+          .where(eq(users.id, appUser.id))
+          .catch((e) => console.warn("[getAuthenticatedUserContext] Sync coupleId warning:", e));
+        appUser.coupleId = coupleRow.id;
       }
+
+      return {
+        user: { ...appUser, couple: activeCouple },
+        profile,
+        activeCouple,
+        membership,
+        partner: {
+          id: partnerId,
+          profile: partnerProfile ?? null,
+        },
+        onboardingStatus: "paired",
+      };
     }
 
     return {
@@ -413,15 +317,18 @@ export const getAuthenticatedUserContext = safeCache(
 );
 
 export const requireOnboardedUser = safeCache(async function requireOnboardedUser(): Promise<SessionUser> {
-  const user = await requireAppUser();
-  if (!user.isOnboarded || !user.onboardingProfile) {
+  const ctx = await getAuthenticatedUserContext();
+  if (ctx.onboardingStatus === "unauthenticated" || !ctx.user) {
+    throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
+  }
+  if (ctx.onboardingStatus === "needs_profile" || !ctx.user.isOnboarded || !ctx.profile) {
     throw new AppError(
       "FORBIDDEN",
       "Complete onboarding before accessing this feature.",
       403,
     );
   }
-  return user;
+  return ctx.user;
 });
 
 export const requireActiveCouple = safeCache(async function requireActiveCouple(): Promise<{

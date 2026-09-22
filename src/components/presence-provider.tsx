@@ -105,6 +105,11 @@ function playGentleNudgeSound() {
   }
 }
 
+// Module-level channel cache to keep Supabase Realtime connected seamlessly across route navigations
+let activeRealtimeChannel: RealtimeChannel | null = null;
+let activeChannelTopic = "";
+let channelCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+
 export function PresenceProvider({
   coupleId,
   userId,
@@ -189,6 +194,11 @@ export function PresenceProvider({
       return;
     }
 
+    if (channelCleanupTimer) {
+      clearTimeout(channelCleanupTimer);
+      channelCleanupTimer = null;
+    }
+
     let disposed = false;
     let supabase: ReturnType<typeof createClient>;
     try {
@@ -200,18 +210,27 @@ export function PresenceProvider({
 
     const topic = `couple:${coupleId}:presence`;
 
+    // Fast-path: Reuse existing connected channel if topic matches
+    if (activeRealtimeChannel && activeChannelTopic === topic) {
+      channelRef.current = activeRealtimeChannel;
+      setHealth("connected");
+      return () => {
+        disposed = true;
+      };
+    }
+
     void authorizeRealtimeTopicAction(topic).then((auth) => {
       if (disposed || !auth.ok) {
         setHealth("offline");
       }
     });
 
-    // We do NOT use private: true because the topic name already incorporates
-    // the secret couple UUID/CUID2. This avoids Supabase RLS CHANNEL_ERROR rejections.
     const channel = supabase.channel(topic, {
       config: { presence: { key: userId } },
     });
     channelRef.current = channel;
+    activeRealtimeChannel = channel;
+    activeChannelTopic = topic;
 
     const updateFromPresenceState = () => {
       if (disposed) return;
@@ -278,7 +297,15 @@ export function PresenceProvider({
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       channelRef.current = null;
-      void supabase.removeChannel(channel);
+      // Delay channel cleanup to allow next route component to seamlessly reuse active channel
+      if (channelCleanupTimer) clearTimeout(channelCleanupTimer);
+      channelCleanupTimer = setTimeout(() => {
+        if (activeRealtimeChannel) {
+          void supabase.removeChannel(activeRealtimeChannel);
+          activeRealtimeChannel = null;
+          activeChannelTopic = "";
+        }
+      }, 5000);
     };
   }, [coupleId, userId, triggerNudgeDisplay, triggerNotificationDisplay]);
 

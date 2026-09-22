@@ -24,17 +24,33 @@ export interface TheaterWebRTCProps {
   sessionId: string;
   userId: string;
   isHost: boolean;
+  initialHostStreamActive?: boolean;
   onStateChange?: (state: TheaterRoomState) => void;
   onDriftCorrect?: (remotePos: number) => void;
 }
+
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  {
+    urls: [
+      "stun:stun.l.google.com:19302",
+      "stun:stun1.l.google.com:19302",
+      "stun:stun2.l.google.com:19302",
+    ],
+  },
+  { urls: ["stun:global.stun.twilio.com:3478"] },
+];
 
 export function useTheaterWebRTC({
   sessionId,
   userId,
   isHost,
+  initialHostStreamActive = false,
   onStateChange,
 }: TheaterWebRTCProps) {
-  const [roomState, setRoomState] = useState<TheaterRoomState>("IDLE");
+  const [roomState, setRoomState] = useState<TheaterRoomState>(() => {
+    if (!isHost && initialHostStreamActive) return "STREAM_CONNECTING";
+    return "IDLE";
+  });
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [voiceStream, setVoiceStream] = useState<MediaStream | null>(null);
@@ -50,13 +66,19 @@ export function useTheaterWebRTC({
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
-  const iceServersRef = useRef<RTCIceServer[]>([{ urls: "stun:stun.l.google.com:19302" }]);
+  const isSubscribedRef = useRef(false);
+  const pendingSignalsRef = useRef<Array<{ event: string; payload: Record<string, unknown> }>>([]);
+  const iceServersRef = useRef<RTCIceServer[]>(DEFAULT_ICE_SERVERS);
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
   const restartAttemptsRef = useRef(0);
   const makingOfferRef = useRef(false);
+  const activeOfferIdRef = useRef<string | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const localVoiceRef = useRef<MediaStream | null>(null);
   const remoteVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const streamSourceTypeRef = useRef<"tab" | "window" | "screen" | "none">(streamSourceType);
+  streamSourceTypeRef.current = streamSourceType;
 
   // Sync state ref for safe callbacks
   const roomStateRef = useRef<TheaterRoomState>(roomState);
@@ -71,13 +93,17 @@ export function useTheaterWebRTC({
     [onStateChange],
   );
 
-  // Send signaling message via Supabase Realtime broadcast
+  // Send signaling message via Supabase Realtime broadcast with offline queue
   const sendSignal = useCallback((event: string, payload: Record<string, unknown>) => {
-    if (!channelRef.current) return;
+    const fullPayload = { ...payload, senderUserId: userId };
+    if (!channelRef.current || !isSubscribedRef.current) {
+      pendingSignalsRef.current.push({ event, payload: fullPayload });
+      return;
+    }
     void channelRef.current.send({
       type: "broadcast",
       event,
-      payload: { ...payload, senderUserId: userId },
+      payload: fullPayload,
     });
   }, [userId]);
 
@@ -111,10 +137,22 @@ export function useTheaterWebRTC({
     }
   }, []);
 
-  // Initialize or re-create PeerConnection
-  const getOrCreatePc = useCallback(() => {
-    if (pcRef.current && pcRef.current.signalingState !== "closed") {
+  // Initialize or re-create PeerConnection cleanly
+  const getOrCreatePc = useCallback((forceFresh = false) => {
+    if (!forceFresh && pcRef.current && pcRef.current.signalingState !== "closed") {
       return pcRef.current;
+    }
+
+    if (pcRef.current) {
+      try {
+        pcRef.current.onicecandidate = null;
+        pcRef.current.ontrack = null;
+        pcRef.current.onconnectionstatechange = null;
+        pcRef.current.close();
+      } catch {
+        /* ignore close errors */
+      }
+      pcRef.current = null;
     }
 
     const pc = new RTCPeerConnection({
@@ -126,27 +164,45 @@ export function useTheaterWebRTC({
 
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
-        sendSignal("theater:ice-candidate", { candidate: ev.candidate.toJSON() });
+        sendSignal("theater:ice-candidate", {
+          candidate: ev.candidate.toJSON(),
+          offerId: activeOfferIdRef.current,
+        });
       }
     };
 
     pc.ontrack = (ev) => {
       if (ev.track.kind === "video") {
         const stream = ev.streams[0] || new MediaStream([ev.track]);
+        remoteStreamRef.current = stream;
         setRemoteStream(stream);
         updateState("LIVE");
+
         ev.track.onended = () => {
           setRemoteStream(null);
+          remoteStreamRef.current = null;
           updateState("STREAM_ENDED");
         };
       } else if (ev.track.kind === "audio") {
-        // Tab audio or voice audio
-        const stream = ev.streams[0] || new MediaStream([ev.track]);
-        if (ev.track.label.includes("mic") || !remoteVoiceAudioRef.current?.srcObject) {
+        const isMic = ev.track.label.toLowerCase().includes("mic");
+        if (isMic) {
           if (remoteVoiceAudioRef.current) {
-            remoteVoiceAudioRef.current.srcObject = stream;
+            remoteVoiceAudioRef.current.srcObject = new MediaStream([ev.track]);
             void remoteVoiceAudioRef.current.play().catch(() => {});
           }
+        } else {
+          // Tab movie audio
+          setRemoteStream((prev) => {
+            if (!prev) {
+              const s = ev.streams[0] || new MediaStream([ev.track]);
+              remoteStreamRef.current = s;
+              return s;
+            }
+            if (!prev.getAudioTracks().some((t) => t.id === ev.track.id)) {
+              prev.addTrack(ev.track);
+            }
+            return prev;
+          });
         }
       }
     };
@@ -184,6 +240,66 @@ export function useTheaterWebRTC({
     return pc;
   }, [applyBitrateCap, isHost, sendSignal, updateState]);
 
+  // Host renegotiation logic when Viewer announces presence/readiness
+  const renegotiateForViewer = useCallback(async (targetViewerId?: string) => {
+    if (!isHost || !localStreamRef.current) return;
+    const videoTrack = localStreamRef.current.getVideoTracks()[0];
+    if (!videoTrack || videoTrack.readyState !== "live") return;
+
+    if (makingOfferRef.current) return;
+    makingOfferRef.current = true;
+
+    try {
+      const pc = getOrCreatePc(true);
+
+      // Add movie stream tracks
+      localStreamRef.current.getTracks().forEach((track) => {
+        if (track.readyState === "live") {
+          pc.addTrack(track, localStreamRef.current!);
+        }
+      });
+
+      // Add voice track if call is active
+      if (localVoiceRef.current) {
+        const vTrack = localVoiceRef.current.getAudioTracks()[0];
+        if (vTrack && vTrack.readyState === "live") {
+          pc.addTrack(vTrack, localVoiceRef.current);
+        }
+      }
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const offerId = Math.random().toString(36).substring(2, 9);
+      activeOfferIdRef.current = offerId;
+
+      sendSignal("theater:offer", {
+        sdp: offer,
+        surface: streamSourceTypeRef.current || "tab",
+        offerId,
+        targetViewerId,
+      });
+
+      sendSignal("theater:stream-state", {
+        state: "LIVE",
+        surface: streamSourceTypeRef.current || "tab",
+      });
+    } catch (err) {
+      console.error("[WebRTC Host] Failed creating renegotiated offer:", err);
+    } finally {
+      makingOfferRef.current = false;
+    }
+  }, [getOrCreatePc, isHost, sendSignal]);
+
+  // Viewer announces readiness to host
+  const sendViewerReady = useCallback(() => {
+    if (isHost) return;
+    sendSignal("theater:viewer-ready", {
+      viewerUserId: userId,
+      timestamp: Date.now(),
+    });
+  }, [isHost, sendSignal, userId]);
+
   // Stop screen sharing cleanly
   const stopScreenShare = useCallback(() => {
     if (localStreamRef.current) {
@@ -196,17 +312,22 @@ export function useTheaterWebRTC({
     }
 
     if (pcRef.current) {
-      // Remove screen tracks from PC
-      const senders = pcRef.current.getSenders();
-      senders.forEach((s) => {
-        if (s.track && s.track.kind === "video") {
-          try {
-            pcRef.current?.removeTrack(s);
-          } catch {
-            // ignore
+      try {
+        const senders = pcRef.current.getSenders();
+        senders.forEach((s) => {
+          if (s.track && s.track.kind === "video") {
+            try {
+              pcRef.current?.removeTrack(s);
+            } catch {
+              // ignore
+            }
           }
-        }
-      });
+        });
+        pcRef.current.close();
+      } catch {
+        // ignore
+      }
+      pcRef.current = null;
     }
 
     setStreamSourceType("none");
@@ -252,6 +373,7 @@ export function useTheaterWebRTC({
             : "screen";
 
       setStreamSourceType(detectedSurface);
+      streamSourceTypeRef.current = detectedSurface;
       localStreamRef.current = stream;
       setLocalStream(stream);
       updateState("STREAM_CONNECTING");
@@ -262,19 +384,29 @@ export function useTheaterWebRTC({
       };
 
       // Set up WebRTC transport
-      const pc = getOrCreatePc();
+      const pc = getOrCreatePc(true);
 
       // Add all tracks to PC
       stream.getTracks().forEach((track) => {
         pc.addTrack(track, stream);
       });
 
+      // Include voice audio if active
+      if (localVoiceRef.current) {
+        const vTrack = localVoiceRef.current.getAudioTracks()[0];
+        if (vTrack && vTrack.readyState === "live") {
+          pc.addTrack(vTrack, localVoiceRef.current);
+        }
+      }
+
       // Create offer
       makingOfferRef.current = true;
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        sendSignal("theater:offer", { sdp: offer, surface: detectedSurface });
+        const offerId = Math.random().toString(36).substring(2, 9);
+        activeOfferIdRef.current = offerId;
+        sendSignal("theater:offer", { sdp: offer, surface: detectedSurface, offerId });
       } finally {
         makingOfferRef.current = false;
       }
@@ -307,14 +439,16 @@ export function useTheaterWebRTC({
       setVoiceActive(true);
       setMicMuted(false);
 
-      const pc = getOrCreatePc();
+      const pc = getOrCreatePc(false);
       const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) {
         pc.addTrack(audioTrack, stream);
         if (isHost) {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          sendSignal("theater:offer", { sdp: offer });
+          const offerId = Math.random().toString(36).substring(2, 9);
+          activeOfferIdRef.current = offerId;
+          sendSignal("theater:offer", { sdp: offer, offerId });
         } else {
           sendSignal("theater:voice-ready", { active: true });
         }
@@ -362,32 +496,40 @@ export function useTheaterWebRTC({
       .on("broadcast", { event: "theater:offer" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
         try {
-          const pc = getOrCreatePc();
+          const pc = getOrCreatePc(true);
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
           await flushPendingIce(pc);
 
+          if (localVoiceRef.current) {
+            const vTrack = localVoiceRef.current.getAudioTracks()[0];
+            if (vTrack && vTrack.readyState === "live") {
+              pc.addTrack(vTrack, localVoiceRef.current);
+            }
+          }
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          sendSignal("theater:answer", { sdp: answer });
+          sendSignal("theater:answer", { sdp: answer, offerId: payload.offerId });
 
           if (payload.surface) {
             setStreamSourceType(payload.surface);
+            streamSourceTypeRef.current = payload.surface;
           }
-          updateState("LIVE");
+          updateState("STREAM_CONNECTING");
         } catch (e) {
-          console.error("Failed handling WebRTC offer", e);
+          console.error("[WebRTC Viewer] Failed handling WebRTC offer:", e);
         }
       })
       .on("broadcast", { event: "theater:answer" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
         try {
           const pc = pcRef.current;
-          if (pc && pc.signalingState !== "stable") {
+          if (pc && pc.signalingState === "have-local-offer") {
             await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
             await flushPendingIce(pc);
           }
         } catch (e) {
-          console.error("Failed handling WebRTC answer", e);
+          console.error("[WebRTC Host] Failed handling WebRTC answer:", e);
         }
       })
       .on("broadcast", { event: "theater:ice-candidate" }, async ({ payload }: { payload: any }) => {
@@ -400,19 +542,33 @@ export function useTheaterWebRTC({
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
           } catch {
-            // ignore
+            // ignore stale candidate
           }
         } else {
           pendingIceRef.current.push(candidate);
+        }
+      })
+      .on("broadcast", { event: "theater:viewer-ready" }, async ({ payload }: { payload: any }) => {
+        if (payload.senderUserId === userId) return;
+        // Host receives viewer readiness signal -> renegotiate fresh offer immediately
+        if (isHost && localStreamRef.current) {
+          await renegotiateForViewer(payload.senderUserId);
         }
       })
       .on("broadcast", { event: "theater:stream-state" }, ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
         if (payload.state) {
           updateState(payload.state);
-          if (payload.surface) setStreamSourceType(payload.surface);
+          if (payload.surface) {
+            setStreamSourceType(payload.surface);
+            streamSourceTypeRef.current = payload.surface;
+          }
           if (payload.state === "STREAM_ENDED" || payload.state === "FALLBACK_MODE") {
             setRemoteStream(null);
+            remoteStreamRef.current = null;
+          } else if (payload.state === "LIVE" && !isHost && !remoteStreamRef.current) {
+            // Host is live but viewer doesn't have stream yet -> request offer
+            sendViewerReady();
           }
         }
       })
@@ -422,10 +578,8 @@ export function useTheaterWebRTC({
       })
       .on("broadcast", { event: "theater:voice-ready" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
-        if (isHost && pcRef.current) {
-          const offer = await pcRef.current.createOffer();
-          await pcRef.current.setLocalDescription(offer);
-          sendSignal("theater:offer", { sdp: offer });
+        if (isHost && pcRef.current && localStreamRef.current) {
+          await renegotiateForViewer(payload.senderUserId);
         }
       })
       .on("presence", { event: "sync" }, () => {
@@ -435,6 +589,10 @@ export function useTheaterWebRTC({
         if (hasPartner) {
           hadPartnerEverRef.current = true;
           setPartnerPresence("watching");
+          // If host is live, trigger offer for partner
+          if (isHost && localStreamRef.current) {
+            void renegotiateForViewer();
+          }
         } else {
           setPartnerPresence(hadPartnerEverRef.current ? "left" : "offline");
         }
@@ -444,6 +602,9 @@ export function useTheaterWebRTC({
         if (partnerJoined) {
           hadPartnerEverRef.current = true;
           setPartnerPresence("watching");
+          if (isHost && localStreamRef.current) {
+            void renegotiateForViewer();
+          }
         }
       })
       .on("presence", { event: "leave" }, ({ leftPresences }: { leftPresences: any[] }) => {
@@ -462,8 +623,11 @@ export function useTheaterWebRTC({
 
     // Load TURN credentials
     void getTurnCredentialsAction().then((res) => {
-      if (res.ok && res.data.iceServers) {
-        iceServersRef.current = res.data.iceServers;
+      if (res.ok && res.data.iceServers && res.data.iceServers.length > 0) {
+        iceServersRef.current = [
+          ...DEFAULT_ICE_SERVERS,
+          ...res.data.iceServers,
+        ];
       }
     });
 
@@ -473,13 +637,32 @@ export function useTheaterWebRTC({
 
       channel.subscribe(async (status: string) => {
         if (status === "SUBSCRIBED") {
+          isSubscribedRef.current = true;
           await channel.track({ userId, joinedAt: Date.now() });
+
+          // Flush queued signals
+          while (pendingSignalsRef.current.length > 0) {
+            const item = pendingSignalsRef.current.shift();
+            if (item && channelRef.current) {
+              void channelRef.current.send({
+                type: "broadcast",
+                event: item.event,
+                payload: item.payload,
+              });
+            }
+          }
+
+          // If viewer, actively signal readiness to the host
+          if (!isHost) {
+            sendViewerReady();
+          }
         }
       });
     });
 
     return () => {
       disposed = true;
+      isSubscribedRef.current = false;
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop());
         localStreamRef.current = null;
@@ -489,7 +672,11 @@ export function useTheaterWebRTC({
         localVoiceRef.current = null;
       }
       if (pcRef.current) {
-        pcRef.current.close();
+        try {
+          pcRef.current.close();
+        } catch {
+          // ignore
+        }
         pcRef.current = null;
       }
       channelRef.current = null;
@@ -499,11 +686,32 @@ export function useTheaterWebRTC({
     flushPendingIce,
     getOrCreatePc,
     isHost,
+    renegotiateForViewer,
     sendSignal,
+    sendViewerReady,
     sessionId,
     updateState,
     userId,
   ]);
+
+  // Periodic heartbeat / retry for viewer awaiting stream
+  useEffect(() => {
+    if (isHost) return;
+    let count = 0;
+    const interval = setInterval(() => {
+      count++;
+      if (count > 8) {
+        clearInterval(interval);
+        return;
+      }
+      // If still waiting without a stream, ping viewer readiness
+      if (!remoteStreamRef.current && roomStateRef.current !== "STREAM_ENDED" && roomStateRef.current !== "FALLBACK_MODE") {
+        sendViewerReady();
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [isHost, sendViewerReady]);
 
   const notifyPartnerLeaving = useCallback(async () => {
     try {
@@ -535,5 +743,6 @@ export function useTheaterWebRTC({
     toggleMic,
     remoteVoiceAudioRef,
     notifyPartnerLeaving,
+    sendViewerReady,
   };
 }

@@ -66,6 +66,9 @@ export default async function RoomPage({
           title={session.title}
           posterUrl={session.posterUrl}
           isHost={session.hostUserId ? session.hostUserId === user.id : couple.userAId === user.id}
+          initialHostStreamActive={!!session.hostStreamActive}
+          initialPlaybackState={session.playbackState || "idle"}
+          initialPosition={session.currentPosition || 0}
           theme={theme}
           decor={decor}
         />

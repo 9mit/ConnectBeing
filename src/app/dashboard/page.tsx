@@ -38,13 +38,11 @@ export default async function DashboardPage() {
     getRecentEventsAction(),
   ]);
 
+  // Non-blocking: Generate initial AI insight in background if not yet generated
   if (insights.ok && !insights.data.insight) {
-    await refreshInsightsAction();
+    void refreshInsightsAction().catch(() => {});
   }
-  const insightResult =
-    insights.ok && !insights.data.insight
-      ? await getInsightsAction()
-      : insights;
+  const insightResult = insights;
 
   const togetherSince = user.couple.anniversaryDate ?? user.couple.createdAt;
   const daysTogether = daysBetween(togetherSince);

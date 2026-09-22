@@ -879,6 +879,11 @@ export const inAppNotifications = pgTable(
       table.read,
       table.createdAt,
     ),
+    index("in_app_notifications_couple_user_idx").on(
+      table.coupleId,
+      table.userId,
+      table.createdAt,
+    ),
   ],
 );
 
