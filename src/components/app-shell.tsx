@@ -29,7 +29,6 @@ import {
   Lock,
   Shield,
   CheckCircle,
-  CreditCard,
   Radio,
   LogOut,
   X,
@@ -75,7 +74,6 @@ const sanctuaryMenuGroups = [
       { href: "/privacy", label: "Privacy Vault", icon: Lock },
       { href: "/security", label: "Encryption", icon: Shield },
       { href: "/verify", label: "Couple Seal", icon: CheckCircle },
-      { href: "/billing", label: "Membership", icon: CreditCard },
     ],
   },
 ];
