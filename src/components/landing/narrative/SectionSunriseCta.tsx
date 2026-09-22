@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, ShieldCheck, Lock, Heart } from "lucide-react";
 
 import { LANDING_CHAPTERS, SITE } from "@/content/site";
+import { BeginStoryButton } from "../ui/BeginStoryButton";
 
 export function SectionSunriseCta() {
   const { aria } = LANDING_CHAPTERS.cta;
@@ -58,13 +59,7 @@ export function SectionSunriseCta() {
           viewport={{ once: true, amount: 0.5 }}
           transition={{ duration: 0.8, delay: 0.25 }}
         >
-          <Link
-            href="/register"
-            className="btn-cta-primary w-full sm:w-auto"
-          >
-            <span>Begin Our Story</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
+          <BeginStoryButton className="btn-cta-primary w-full sm:w-auto" />
 
           <Link
             href="/login"

@@ -1,8 +1,10 @@
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { AUTH_COOKIE_NAME, verifyAuthToken } from "@/lib/session";
 
 const PUBLIC_PATHS = new Set([
   "/",
+  "/begin",
   "/login",
   "/register",
   "/invite",
@@ -30,25 +32,82 @@ function isPublic(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  const { pathname, searchParams } = request.nextUrl;
+  let response = NextResponse.next({ request });
 
+  // 1. Supabase SSR session refresh & cookie synchronization
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (url && anonKey) {
+    try {
+      const supabase = createServerClient(url, anonKey, {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll();
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+            response = NextResponse.next({ request });
+            cookiesToSet.forEach(({ name, value, options }) => {
+              const safeOptions = { ...options };
+              if (!safeOptions.domain) delete safeOptions.domain;
+              response.cookies.set(name, value, safeOptions);
+            });
+          },
+        },
+      });
+
+      // Refreshes session tokens if expired/near expiry
+      await supabase.auth.getUser();
+    } catch {
+      // Ignore network errors during background refresh
+    }
+  }
+
+  // 2. Validate custom HMAC JWT session token
+  const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
   const session = token ? await verifyAuthToken(token) : null;
 
-  if (session && (pathname === "/login" || pathname === "/register")) {
+  // Stale or invalid session token detected: purge cookie
+  if (token && !session) {
+    response.cookies.set(AUTH_COOKIE_NAME, "", {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 0,
+    });
+  }
+
+  // 3. Authenticated user visiting /login or /register (unless explicitly logging out or overriding)
+  const isAuthOverride = searchParams.has("logout") || searchParams.has("force");
+  if (session && (pathname === "/login" || pathname === "/register") && !isAuthOverride) {
     const redirect = request.nextUrl.clone();
-    redirect.pathname = "/dashboard";
+    redirect.pathname = "/begin";
+    redirect.search = "";
     return NextResponse.redirect(redirect);
   }
 
+  // 4. Unauthenticated user accessing protected route
   if (!session && !isPublic(pathname)) {
     const redirect = request.nextUrl.clone();
     redirect.pathname = "/login";
     redirect.searchParams.set("next", pathname);
-    return NextResponse.redirect(redirect);
+    const redirectResponse = NextResponse.redirect(redirect);
+    if (token && !session) {
+      redirectResponse.cookies.set(AUTH_COOKIE_NAME, "", {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 0,
+      });
+    }
+    return redirectResponse;
   }
 
-  return NextResponse.next();
+  return response;
 }
 
 export const config = {

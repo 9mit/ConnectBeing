@@ -45,14 +45,16 @@ async function clearSupabaseSession(
 
 /** Form posts from AppShell — redirect to login after clearing sessions. */
 export async function POST(request: NextRequest) {
-  const response = NextResponse.redirect(new URL("/login", request.url), 303);
+  const response = NextResponse.redirect(new URL("/login?logout=1", request.url), 303);
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   clearAppSession(response);
   await clearSupabaseSession(request, response);
   return response;
 }
 
 export async function GET(request: NextRequest) {
-  const response = NextResponse.redirect(new URL("/login", request.url));
+  const response = NextResponse.redirect(new URL("/login?logout=1", request.url));
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
   clearAppSession(response);
   await clearSupabaseSession(request, response);
   return response;

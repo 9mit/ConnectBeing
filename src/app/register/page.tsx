@@ -1,19 +1,35 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth-form";
 import { InvitePreviewBanner } from "@/components/invite-preview-banner";
+import { getAppUser } from "@/lib/auth";
 
 export const metadata = {
   title: "Create Account — MadLove",
   description: "Create your private space together on MadLove.",
 };
 
-export default function RegisterPage({
+export const dynamic = "force-dynamic";
+
+export default async function RegisterPage({
   searchParams,
 }: {
   searchParams?: { token?: string };
 }) {
   const token = searchParams?.token;
+
+  // If user is already authenticated, route them to their proper destination
+  const appUser = await getAppUser();
+  if (appUser) {
+    if (!appUser.isOnboarded) {
+      redirect("/onboarding");
+    }
+    if (!appUser.coupleId) {
+      redirect("/onboarding/decision");
+    }
+    redirect("/dashboard");
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#050409] text-slate-100 px-4 py-12 relative overflow-hidden">
@@ -56,4 +72,3 @@ export default function RegisterPage({
     </div>
   );
 }
-

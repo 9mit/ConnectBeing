@@ -7,6 +7,7 @@ import Image from "next/image";
 import { ArrowRight } from "lucide-react";
 
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import { BeginStoryButton } from "../ui/BeginStoryButton";
 
 export function HeroCopy() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -103,13 +104,7 @@ export function HeroCopy() {
           transition={{ duration: 0.85, delay: 0.28, ease: [0.16, 1, 0.3, 1] }}
           className="mt-5 flex items-center justify-center w-full sm:w-auto"
         >
-          <Link
-            href="/register"
-            className="btn-cta-primary"
-          >
-            <span>Begin Our Story</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
+          <BeginStoryButton className="btn-cta-primary" />
         </motion.div>
 
         <motion.div

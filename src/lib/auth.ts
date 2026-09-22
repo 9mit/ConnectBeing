@@ -3,13 +3,14 @@ import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 
 import { db } from "@/db";
-import { couples, users, type Couple, type User } from "@/db/schema";
+import { couples, users, onboardingProfiles, type Couple, type User, type OnboardingProfile } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
 import { AUTH_COOKIE_NAME, verifyAuthToken } from "@/lib/session";
 
 export type SessionUser = User & {
   couple: Couple | null;
+  onboardingProfile?: OnboardingProfile | null;
 };
 
 export const getAuthUser = cache(async function getAuthUser() {
@@ -50,6 +51,7 @@ export const getAppUser = cache(async function getAppUser(): Promise<SessionUser
       where: eq(users.id, targetUserId),
       with: {
         couple: true,
+        onboardingProfile: true,
       },
     });
 
@@ -58,6 +60,7 @@ export const getAppUser = cache(async function getAppUser(): Promise<SessionUser
         where: eq(users.supabaseAuthId, authUser.id),
         with: {
           couple: true,
+          onboardingProfile: true,
         },
       });
     }
@@ -72,7 +75,7 @@ export const getAppUser = cache(async function getAppUser(): Promise<SessionUser
         });
         row = await db.query.users.findFirst({
           where: eq(users.supabaseAuthId, authUser.id),
-          with: { couple: true },
+          with: { couple: true, onboardingProfile: true },
         });
       } catch (insertErr) {
         console.error("[getAppUser] Insert profile fallback error:", insertErr);
@@ -84,6 +87,7 @@ export const getAppUser = cache(async function getAppUser(): Promise<SessionUser
     return {
       ...row,
       couple: row.couple ?? null,
+      onboardingProfile: row.onboardingProfile ?? null,
     };
   } catch (err) {
     console.error("[getAppUser] DB error:", err);
@@ -99,12 +103,12 @@ export const requireAppUser = cache(async function requireAppUser(): Promise<Ses
   try {
     row = await db.query.users.findFirst({
       where: eq(users.id, targetUserId),
-      with: { couple: true },
+      with: { couple: true, onboardingProfile: true },
     });
     if (!row) {
       row = await db.query.users.findFirst({
         where: eq(users.supabaseAuthId, authUser.id),
-        with: { couple: true },
+        with: { couple: true, onboardingProfile: true },
       });
     }
   } catch (err) {
@@ -122,7 +126,7 @@ export const requireAppUser = cache(async function requireAppUser(): Promise<Ses
       });
       row = await db.query.users.findFirst({
         where: eq(users.supabaseAuthId, authUser.id),
-        with: { couple: true },
+        with: { couple: true, onboardingProfile: true },
       });
     } catch (insertErr) {
       console.error("[requireAppUser] Insert profile fallback error:", insertErr);
@@ -137,12 +141,12 @@ export const requireAppUser = cache(async function requireAppUser(): Promise<Ses
     );
   }
 
-  return { ...row, couple: row.couple ?? null };
+  return { ...row, couple: row.couple ?? null, onboardingProfile: row.onboardingProfile ?? null };
 });
 
 export const requireOnboardedUser = cache(async function requireOnboardedUser(): Promise<SessionUser> {
   const user = await requireAppUser();
-  if (!user.isOnboarded) {
+  if (!user.isOnboarded || !user.onboardingProfile) {
     throw new AppError(
       "FORBIDDEN",
       "Complete onboarding before accessing this feature.",
