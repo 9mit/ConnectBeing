@@ -4,7 +4,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
-import { calendarEvents } from "@/db/schema";
+import { calendarEvents, onboardingProfiles } from "@/db/schema";
+import { createPartnerNotification } from "@/actions/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { requireCoupleVerified } from "@/lib/couple-verification";
@@ -101,6 +102,24 @@ export async function createCalendarEventAction(
       eventType: "memory_added",
       payload: { eventTitle: parsed.title, eventCategory: parsed.category },
     });
+
+    const partnerId =
+      couple.userAId === user.id ? couple.userBId : couple.userAId;
+
+    const profile = await db.query.onboardingProfiles.findFirst({
+      where: eq(onboardingProfiles.userId, user.id),
+    });
+    const senderName = profile?.name?.trim() || "Your partner";
+
+    void createPartnerNotification({
+      coupleId: couple.id,
+      senderUserId: user.id,
+      partnerUserId: partnerId,
+      title: "📅 Date Added to Calendar",
+      body: `${senderName} scheduled: "${parsed.title}"`,
+      kind: "general",
+      link: "/calendar",
+    }).catch(() => {});
 
     return ok({ id });
   } catch (e) {

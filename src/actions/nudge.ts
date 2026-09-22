@@ -3,7 +3,8 @@
 import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { inAppNotifications, onboardingProfiles } from "@/db/schema";
+import { onboardingProfiles } from "@/db/schema";
+import { createPartnerNotification } from "@/actions/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { createId } from "@/lib/ids";
@@ -33,16 +34,15 @@ export async function sendNudgeNotificationAction(): Promise<
     const senderName = profile?.name?.trim() || "Your partner";
     const timestamp = new Date().toISOString();
 
-    // 1. Insert In-App Notification in database so it shows on /notifications and in the bell hub
-    await db.insert(inAppNotifications).values({
-      id: createId(),
+    // 1. Insert In-App Notification & broadcast in real-time
+    await createPartnerNotification({
       coupleId: couple.id,
-      userId: partnerId,
+      senderUserId: user.id,
+      partnerUserId: partnerId,
       title: "🔔 Partner Nudge",
       body: `${senderName} pinged you to connect! Thinking of you ❤️`,
       kind: "nudge",
       link: "/dashboard",
-      read: false,
     });
 
     // 2. Set Redis key for immediate reactive polling fallback

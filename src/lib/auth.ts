@@ -8,12 +8,14 @@ import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
 import { AUTH_COOKIE_NAME, verifyAuthToken } from "@/lib/session";
 
+const safeCache = typeof cache === "function" ? cache : <T extends (...args: any[]) => any>(fn: T): T => fn;
+
 export type SessionUser = User & {
   couple: Couple | null;
   onboardingProfile?: OnboardingProfile | null;
 };
 
-export const getAuthUser = cache(async function getAuthUser() {
+export const getAuthUser = safeCache(async function getAuthUser() {
   try {
     const cookieStore = cookies();
     const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
@@ -32,7 +34,7 @@ export const getAuthUser = cache(async function getAuthUser() {
   }
 });
 
-export const requireAuthUser = cache(async function requireAuthUser() {
+export const requireAuthUser = safeCache(async function requireAuthUser() {
   const authUser = await getAuthUser();
   if (!authUser) {
     throw new AppError("UNAUTHORIZED", "You must be signed in.", 401);
@@ -40,7 +42,7 @@ export const requireAuthUser = cache(async function requireAuthUser() {
   return authUser;
 });
 
-export const getAppUser = cache(async function getAppUser(): Promise<SessionUser | null> {
+export const getAppUser = safeCache(async function getAppUser(): Promise<SessionUser | null> {
   const authUser = await getAuthUser();
   if (!authUser) return null;
 
@@ -124,7 +126,7 @@ export const getAppUser = cache(async function getAppUser(): Promise<SessionUser
   }
 });
 
-export const requireAppUser = cache(async function requireAppUser(): Promise<SessionUser> {
+export const requireAppUser = safeCache(async function requireAppUser(): Promise<SessionUser> {
   const authUser = await requireAuthUser();
   const targetUserId = authUser.userId;
 
@@ -201,7 +203,7 @@ export const requireAppUser = cache(async function requireAppUser(): Promise<Ses
   return { ...row, couple: row.couple ?? null, onboardingProfile: row.onboardingProfile ?? null };
 });
 
-export const requireOnboardedUser = cache(async function requireOnboardedUser(): Promise<SessionUser> {
+export const requireOnboardedUser = safeCache(async function requireOnboardedUser(): Promise<SessionUser> {
   const user = await requireAppUser();
   if (!user.isOnboarded || !user.onboardingProfile) {
     throw new AppError(
@@ -213,7 +215,7 @@ export const requireOnboardedUser = cache(async function requireOnboardedUser():
   return user;
 });
 
-export const requireActiveCouple = cache(async function requireActiveCouple(): Promise<{
+export const requireActiveCouple = safeCache(async function requireActiveCouple(): Promise<{
   user: SessionUser;
   couple: Couple;
 }> {
@@ -286,7 +288,7 @@ export async function requireActiveCoupleOrRedirect(): Promise<{
   }
 }
 
-export const requireVerifiedCouple = cache(async function requireVerifiedCouple(): Promise<{
+export const requireVerifiedCouple = safeCache(async function requireVerifiedCouple(): Promise<{
   user: SessionUser;
   couple: Couple;
 }> {

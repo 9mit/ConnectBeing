@@ -10,6 +10,8 @@ import { requireActiveCouple } from "@/lib/auth";
 import { createId } from "@/lib/ids";
 import { rateLimitOrThrow } from "@/lib/security";
 
+import { redis } from "@/lib/redis";
+
 const createNotificationSchema = z.object({
   title: z.string().trim().min(1).max(100),
   body: z.string().trim().min(1).max(300),
@@ -28,6 +30,90 @@ export type InAppNotificationDTO = {
   read: boolean;
   createdAt: string;
 };
+
+/**
+ * Universal server helper to create a partner notification, persist in DB,
+ * queue in Redis for polling, and broadcast in real-time over Supabase channel.
+ */
+export async function createPartnerNotification({
+  coupleId,
+  senderUserId,
+  partnerUserId,
+  title,
+  body,
+  kind = "general",
+  link,
+}: {
+  coupleId: string;
+  senderUserId: string;
+  partnerUserId: string;
+  title: string;
+  body: string;
+  kind?: string;
+  link?: string | null;
+}): Promise<string> {
+  const id = createId();
+
+  // 1. Insert into database
+  await db.insert(inAppNotifications).values({
+    id,
+    coupleId,
+    userId: partnerUserId,
+    title,
+    body,
+    kind,
+    link: link ?? null,
+    read: false,
+  });
+
+  const payload = {
+    id,
+    recipientId: partnerUserId,
+    senderId: senderUserId,
+    title,
+    body,
+    kind,
+    link: link ?? null,
+    timestamp: new Date().toISOString(),
+  };
+
+  // 2. Queue in Redis for immediate polling fallback
+  try {
+    await redis.lpush(`pending-notifs:${partnerUserId}`, JSON.stringify(payload));
+    await redis.expire(`pending-notifs:${partnerUserId}`, 3600);
+  } catch {
+    /* Redis fallback error ignored */
+  }
+
+  // 3. Send Supabase Realtime HTTP broadcast
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (url && serviceRoleKey) {
+      void fetch(`${url}/realtime/v1/api/broadcast`, {
+        method: "POST",
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [
+            {
+              topic: `couple:${coupleId}:presence`,
+              event: "notification",
+              payload,
+            },
+          ],
+        }),
+      }).catch(() => {});
+    }
+  } catch {
+    /* Non-blocking broadcast error */
+  }
+
+  return id;
+}
 
 export async function listNotificationsAction(): Promise<
   ActionResult<{ notifications: InAppNotificationDTO[]; unreadCount: number }>
@@ -58,6 +144,60 @@ export async function listNotificationsAction(): Promise<
       })),
       unreadCount,
     });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function getUnreadNotificationsCountAction(): Promise<
+  ActionResult<{ unreadCount: number }>
+> {
+  try {
+    const { user, couple } = await requireActiveCouple();
+    const rows = await db.query.inAppNotifications.findMany({
+      where: and(
+        eq(inAppNotifications.coupleId, couple.id),
+        eq(inAppNotifications.userId, user.id),
+        eq(inAppNotifications.read, false),
+      ),
+      columns: { id: true },
+    });
+    return ok({ unreadCount: rows.length });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function pollPendingNotificationsAction(): Promise<
+  ActionResult<{
+    notifications: Array<{
+      id: string;
+      title: string;
+      body: string;
+      kind?: string;
+      link?: string | null;
+      timestamp: string;
+    }>;
+  }>
+> {
+  try {
+    const { user } = await requireActiveCouple();
+    const key = `pending-notifs:${user.id}`;
+    const raw = await redis.lrange(key, 0, -1);
+    if (raw && raw.length > 0) {
+      await redis.del(key);
+      const parsed = raw
+        .map((item) => {
+          try {
+            return typeof item === "string" ? JSON.parse(item) : item;
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      return ok({ notifications: parsed });
+    }
+    return ok({ notifications: [] });
   } catch (e) {
     return fail(e);
   }
@@ -117,16 +257,14 @@ export async function sendNotificationToPartnerAction(
     const partnerId =
       couple.userAId === user.id ? couple.userBId : couple.userAId;
 
-    const id = createId();
-    await db.insert(inAppNotifications).values({
-      id,
+    const id = await createPartnerNotification({
       coupleId: couple.id,
-      userId: partnerId,
+      senderUserId: user.id,
+      partnerUserId: partnerId,
       title: parsed.title,
       body: parsed.body,
       kind: parsed.kind,
       link: parsed.link ?? null,
-      read: false,
     });
 
     return ok({ id });

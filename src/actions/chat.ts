@@ -3,7 +3,8 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or } from "drizzle-orm";
 
 import { db } from "@/db";
-import { messages } from "@/db/schema";
+import { messages, onboardingProfiles } from "@/db/schema";
+import { createPartnerNotification } from "@/actions/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { requireCoupleVerified } from "@/lib/couple-verification";
@@ -107,6 +108,29 @@ export async function sendMessageAction(
       payload: { messageId: id },
     });
     await tryUnlockAchievement(couple.id, user.id, "first_message");
+
+    const partnerId =
+      couple.userAId === user.id ? couple.userBId : couple.userAId;
+
+    const profile = await db.query.onboardingProfiles.findFirst({
+      where: eq(onboardingProfiles.userId, user.id),
+    });
+    const senderName = profile?.name?.trim() || "Your partner";
+    const preview = parsed.content
+      ? parsed.content.length > 50
+        ? parsed.content.slice(0, 47) + "..."
+        : parsed.content
+      : "Sent a message";
+
+    void createPartnerNotification({
+      coupleId: couple.id,
+      senderUserId: user.id,
+      partnerUserId: partnerId,
+      title: "💬 New Message",
+      body: `${senderName}: "${preview}"`,
+      kind: "general",
+      link: "/chat",
+    }).catch(() => {});
 
     return ok({ id, clientMsgId: parsed.clientMsgId ?? null });
   } catch (e) {

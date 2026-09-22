@@ -146,6 +146,96 @@ function HeaderPresenceControl() {
   );
 }
 
+function HeaderBellButton() {
+  const { unreadNotificationsCount } = usePresence();
+
+  return (
+    <Link
+      href="/notifications"
+      prefetch={true}
+      aria-label="Alerts"
+      className="relative p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+    >
+      <Bell className="w-4 h-4" />
+      {unreadNotificationsCount > 0 && (
+        <span className="absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow-[0_0_8px_rgba(244,63,94,0.6)] animate-pulse">
+          {unreadNotificationsCount > 9 ? "9+" : unreadNotificationsCount}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+function MobileMenuTrigger({
+  menuOpen,
+  onClick,
+}: {
+  menuOpen: boolean;
+  onClick: () => void;
+}) {
+  const { unreadNotificationsCount } = usePresence();
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={menuOpen}
+      aria-label="Open sanctuary menu"
+      className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition-all relative min-h-[44px] justify-center ${
+        menuOpen ? "text-amber-200" : "text-zinc-400 hover:text-zinc-200"
+      }`}
+    >
+      {menuOpen && (
+        <div className="absolute inset-0 bg-white/[0.08] rounded-2xl border border-white/[0.12]" />
+      )}
+      <div className="relative">
+        <LayoutGrid className="w-4 h-4 relative z-10" />
+        {unreadNotificationsCount > 0 && (
+          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#07080b] animate-pulse" />
+        )}
+      </div>
+      <span className="text-[10px] font-medium tracking-wide relative z-10">Menu</span>
+    </button>
+  );
+}
+
+function DrawerItemLink({
+  item,
+  isActive,
+  onClose,
+}: {
+  item: { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
+  isActive: boolean;
+  onClose: () => void;
+}) {
+  const { unreadNotificationsCount } = usePresence();
+  const Icon = item.icon;
+  const isNotifications = item.href === "/notifications";
+
+  return (
+    <Link
+      href={item.href}
+      prefetch={true}
+      onClick={onClose}
+      className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+        isActive
+          ? "border-amber-400/40 bg-amber-400/[0.08] text-amber-100"
+          : "border-white/[0.05] bg-white/[0.02] text-zinc-300 hover:bg-white/[0.05] hover:text-white"
+      }`}
+    >
+      <div className="flex items-center gap-2.5 min-w-0">
+        <Icon className="w-4 h-4 opacity-75 shrink-0" />
+        <span className="text-xs font-medium truncate">{item.label}</span>
+      </div>
+      {isNotifications && unreadNotificationsCount > 0 && (
+        <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow-[0_0_8px_rgba(244,63,94,0.6)] animate-pulse shrink-0">
+          {unreadNotificationsCount > 9 ? "9+" : unreadNotificationsCount}
+        </span>
+      )}
+    </Link>
+  );
+}
+
 export function AppShell({
   coupleId,
   userId,
@@ -247,14 +337,7 @@ export function AppShell({
                     >
                       <Search className="w-4 h-4" />
                     </Link>
-                    <Link
-                      href="/notifications"
-                      prefetch={true}
-                      aria-label="Alerts"
-                      className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
-                    >
-                      <Bell className="w-4 h-4" />
-                    </Link>
+                    <HeaderBellButton />
                     <Link
                       href="/profile"
                       prefetch={true}
@@ -324,22 +407,11 @@ export function AppShell({
             );
           })}
           
-          {/* Mobile Drawer Trigger */}
-          <button
-            type="button"
+          {/* Mobile Drawer Trigger with Real-time Notification Badge */}
+          <MobileMenuTrigger
+            menuOpen={menuOpen}
             onClick={() => setMenuOpen(!menuOpen)}
-            aria-expanded={menuOpen}
-            aria-label="Open sanctuary menu"
-            className={`flex flex-col items-center gap-1 py-1 px-3 rounded-2xl transition-all relative min-h-[44px] justify-center ${
-              menuOpen ? "text-amber-200" : "text-zinc-400 hover:text-zinc-200"
-            }`}
-          >
-            {menuOpen && (
-              <div className="absolute inset-0 bg-white/[0.08] rounded-2xl border border-white/[0.12]" />
-            )}
-            <LayoutGrid className="w-4 h-4 relative z-10" />
-            <span className="text-[10px] font-medium tracking-wide relative z-10">Menu</span>
-          </button>
+          />
         </nav>
 
         {/* Sanctuary Universe Drawer */}
@@ -388,25 +460,14 @@ export function AppShell({
                       </p>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {group.links.map((item) => {
-                          const Icon = item.icon;
                           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
                           return (
-                            <Link
+                            <DrawerItemLink
                               key={item.href}
-                              href={item.href}
-                              prefetch={true}
-                              onClick={() => setMenuOpen(false)}
-                              className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-all ${
-                                isActive
-                                  ? "border-amber-400/40 bg-amber-400/[0.08] text-amber-100"
-                                  : "border-white/[0.05] bg-white/[0.02] text-zinc-300 hover:bg-white/[0.05] hover:text-white"
-                              }`}
-                            >
-                              <Icon className="w-4 h-4 opacity-75 shrink-0" />
-                              <span className="text-xs font-medium truncate">
-                                {item.label}
-                              </span>
-                            </Link>
+                              item={item}
+                              isActive={isActive}
+                              onClose={() => setMenuOpen(false)}
+                            />
                           );
                         })}
                       </div>

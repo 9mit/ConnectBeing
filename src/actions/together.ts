@@ -3,11 +3,13 @@
 import { db } from "@/db";
 import {
   movieMemories,
+  onboardingProfiles,
   watchEvents,
   watchMessages,
   watchParticipants,
   watchSessions,
 } from "@/db/schema";
+import { createPartnerNotification } from "@/actions/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireVerifiedCouple } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
@@ -95,6 +97,24 @@ export async function createWatchSessionAction(
       playbackState: "idle",
       currentPosition: 0,
     });
+
+    const partnerId =
+      couple.userAId === user.id ? couple.userBId : couple.userAId;
+
+    const profile = await db.query.onboardingProfiles.findFirst({
+      where: eq(onboardingProfiles.userId, user.id),
+    });
+    const senderName = profile?.name?.trim() || "Your partner";
+
+    void createPartnerNotification({
+      coupleId: couple.id,
+      senderUserId: user.id,
+      partnerUserId: partnerId,
+      title: "🍿 Movie Night Planned",
+      body: `${senderName} planned a movie date: "${parsed.title}"`,
+      kind: "watch",
+      link: `/together/${sessionId}`,
+    }).catch(() => {});
 
     try {
       revalidatePath("/together");
@@ -256,54 +276,83 @@ export async function endWatchSessionAction(
       throw new AppError("NOT_FOUND", "Watch session not found.", 404);
     }
 
-    if (session.status === "completed") return ok();
-
     const endedAt = new Date();
-    await db
-      .update(watchSessions)
-      .set({ status: "completed", endedAt })
-      .where(eq(watchSessions.id, sessionId));
+    if (session.status !== "completed") {
+      await db
+        .update(watchSessions)
+        .set({ status: "completed", endedAt })
+        .where(eq(watchSessions.id, sessionId));
+    }
 
     const watchDuration = session.startedAt 
-      ? Math.round((endedAt.getTime() - session.startedAt.getTime()) / 60000)
-      : 0;
+      ? Math.max(1, Math.round((endedAt.getTime() - session.startedAt.getTime()) / 60000))
+      : 1;
 
-    // Generate RIE Summary locally
-    const msgsList = session.messages
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-      .map((m) => m.content);
-
-    const rie = getLocalAIProvider();
-    const aiSummary = await rie.generateSummary(msgsList, session.title, watchDuration);
-
-    await db.insert(movieMemories).values({
-      id: createId(),
-      coupleId: couple.id,
-      sessionId: session.id,
-      title: session.title,
-      posterUrl: session.posterUrl,
-      watchDuration,
-      date: endedAt,
-      aiSummary,
+    // Check if memory recap was already recorded to avoid duplicate key conflicts
+    const existingMemory = await db.query.movieMemories.findFirst({
+      where: and(
+        eq(movieMemories.sessionId, session.id),
+        eq(movieMemories.coupleId, couple.id),
+      ),
     });
 
-    await appendRelationshipEvent({
-      coupleId: couple.id,
-      actorUserId: user.id,
-      eventType: "watch_ended",
-      payload: { sessionId, watchDuration },
-    });
-    await incrementEngagement(couple.id, "watch");
-    await bumpChallengeProgress({
-      coupleId: couple.id,
-      actorUserId: user.id,
-      code: "movie_night",
-    });
-    await tryUnlockAchievement(couple.id, user.id, "first_watch");
+    if (!existingMemory) {
+      // Generate RIE Summary locally with robust fallback
+      const msgsList = (session.messages || [])
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map((m) => m.content);
+
+      let aiSummary = null;
+      try {
+        const rie = getLocalAIProvider();
+        aiSummary = await rie.generateSummary(msgsList, session.title, watchDuration);
+      } catch (aiErr) {
+        console.warn("[endWatchSessionAction] AI summary fallback:", aiErr);
+        aiSummary = {
+          recap: `You shared a cinematic watch of "${session.title}" (${watchDuration} mins) together in your private theater.`,
+          bestMoments: ["Movie night together in private theater"],
+          questions: [],
+        };
+      }
+
+      try {
+        await db.insert(movieMemories).values({
+          id: createId(),
+          coupleId: couple.id,
+          sessionId: session.id,
+          title: session.title,
+          posterUrl: session.posterUrl,
+          watchDuration,
+          date: endedAt,
+          aiSummary,
+        });
+      } catch (insertMemErr) {
+        console.warn("[endWatchSessionAction] Memory insert warning:", insertMemErr);
+      }
+    }
+
+    try {
+      await appendRelationshipEvent({
+        coupleId: couple.id,
+        actorUserId: user.id,
+        eventType: "watch_ended",
+        payload: { sessionId, watchDuration },
+      });
+      await incrementEngagement(couple.id, "watch");
+      await bumpChallengeProgress({
+        coupleId: couple.id,
+        actorUserId: user.id,
+        code: "movie_night",
+      });
+      await tryUnlockAchievement(couple.id, user.id, "first_watch");
+    } catch (metricErr) {
+      console.warn("[endWatchSessionAction] Metrics update warning:", metricErr);
+    }
 
     revalidatePath("/together");
     return ok();
   } catch (e) {
+    console.error("[endWatchSessionAction] Error:", e);
     return fail(e);
   }
 }

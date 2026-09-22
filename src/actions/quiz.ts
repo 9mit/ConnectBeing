@@ -3,7 +3,8 @@
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { quizQuestions, quizResponses } from "@/db/schema";
+import { onboardingProfiles, quizQuestions, quizResponses } from "@/db/schema";
+import { createPartnerNotification } from "@/actions/notifications";
 import { tryUnlockAchievement } from "@/lib/achievements";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
@@ -192,6 +193,24 @@ export async function submitQuizAction(
     const streak = await redis.incr(streakKey);
     await redis.expire(streakKey, 60 * 60 * 24 * 40);
     await redis.set(lastDateKey, today, { ex: 60 * 60 * 24 * 40 });
+
+    const partnerId =
+      couple.userAId === user.id ? couple.userBId : couple.userAId;
+
+    const profile = await db.query.onboardingProfiles.findFirst({
+      where: eq(onboardingProfiles.userId, user.id),
+    });
+    const senderName = profile?.name?.trim() || "Your partner";
+
+    void createPartnerNotification({
+      coupleId: couple.id,
+      senderUserId: user.id,
+      partnerUserId: partnerId,
+      title: "❓ Daily Quiz Completed",
+      body: `${senderName} submitted today's quiz answers! See if you match.`,
+      kind: "quiz",
+      link: "/quiz",
+    }).catch(() => {});
 
     return ok({ score, maxScore: graded.length, streak });
   } catch (e) {

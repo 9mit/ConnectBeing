@@ -23,12 +23,14 @@ import {
   Film,
   AlertCircle,
   RefreshCw,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 
 import {
   endWatchSessionAction,
+  leaveWatchSessionAction,
   getWatchMessagesAction,
   joinWatchSessionAction,
   sendWatchMessageAction,
@@ -113,6 +115,7 @@ export function VirtualRoom({
     stopVoiceCall,
     toggleMic,
     remoteVoiceAudioRef,
+    notifyPartnerLeaving,
   } = useTheaterWebRTC({
     sessionId,
     userId,
@@ -125,6 +128,7 @@ export function VirtualRoom({
   const [stampTimestamp, setStampTimestamp] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [chatOpenMobile, setChatOpenMobile] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
 
   // Chat & Reactions
   const [messages, setMessages] = useState<WatchMsg[]>([]);
@@ -360,6 +364,73 @@ export function VirtualRoom({
     return `${mins}:${String(secs).padStart(2, "0")}`;
   };
 
+  const handleLeaveSession = async () => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+
+    // 1. Immediately notify partner in-room that we are leaving
+    try {
+      await notifyPartnerLeaving();
+    } catch {
+      /* ignore */
+    }
+    try {
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "theater:partner_leave",
+        payload: { senderUserId: userId },
+      });
+    } catch {
+      /* ignore */
+    }
+
+    // 2. Exit fullscreen mode if active
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // 2. Stop WebRTC screen share & voice call streams immediately
+    try {
+      stopScreenShare();
+      stopVoiceCall();
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+      }
+      if (remoteStream) {
+        remoteStream.getTracks().forEach((t) => t.stop());
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 3. Perform server session teardown
+    let destination = "/together";
+    try {
+      if (isHost) {
+        const res = await endWatchSessionAction(sessionId);
+        if (res.ok) {
+          destination = `/together/memory/${sessionId}`;
+        }
+      } else {
+        await leaveWatchSessionAction(sessionId);
+      }
+    } catch (err) {
+      console.error("[VirtualRoom] Leave error:", err);
+    }
+
+    // 4. Force clean navigation to release all hardware decoders and sockets
+    window.location.assign(destination);
+  };
+
   // Determine if active video stream is present
   const hasActiveStream =
     roomState === "LIVE" && (isHost ? !!localStream : !!remoteStream);
@@ -419,14 +490,30 @@ export function VirtualRoom({
         {/* Right Controls in Header */}
         <div className="flex items-center gap-2">
           {/* Partner Presence Badge */}
-          <div className="hidden sm:flex items-center gap-1.5 text-xs text-zinc-400 font-medium px-2 py-1 rounded-full bg-white/[0.03] border border-white/[0.06]">
+          <div className="flex items-center gap-1.5 text-xs text-zinc-300 font-medium px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/[0.08]">
             <span
-              className={`w-2 h-2 rounded-full ${
-                partnerPresence !== "offline" ? "bg-emerald-400" : "bg-zinc-600"
+              className={`w-2 h-2 rounded-full transition-colors ${
+                partnerPresence === "watching" || partnerPresence === "online"
+                  ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                  : partnerPresence === "left"
+                    ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)] animate-pulse"
+                    : "bg-zinc-600"
               }`}
             />
-            <span className="text-[11px]">
-              {partnerPresence !== "offline" ? "Partner watching" : "Partner offline"}
+            <span
+              className={`text-[11px] ${
+                partnerPresence === "left"
+                  ? "text-rose-300 font-semibold"
+                  : partnerPresence === "watching" || partnerPresence === "online"
+                    ? "text-emerald-300"
+                    : "text-zinc-400"
+              }`}
+            >
+              {partnerPresence === "watching" || partnerPresence === "online"
+                ? "Partner watching"
+                : partnerPresence === "left"
+                  ? "Partner left"
+                  : "Partner offline"}
             </span>
           </div>
 
@@ -496,14 +583,19 @@ export function VirtualRoom({
           {/* Leave Session */}
           <button
             type="button"
-            onClick={() =>
-              void endWatchSessionAction(sessionId).then(() =>
-                router.push(`/together/memory/${sessionId}`),
-              )
-            }
-            className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1 text-xs font-medium text-rose-300 hover:bg-rose-500/20 transition-colors"
+            disabled={isLeaving}
+            onClick={() => void handleLeaveSession()}
+            aria-label="Leave watch session"
+            className="rounded-full border border-rose-500/20 bg-rose-500/10 px-3.5 py-1 text-xs font-medium text-rose-300 hover:bg-rose-500/20 transition-colors disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-1.5"
           >
-            Leave
+            {isLeaving ? (
+              <>
+                <Loader2 size={12} className="animate-spin" />
+                <span>Leaving...</span>
+              </>
+            ) : (
+              <span>Leave</span>
+            )}
           </button>
         </div>
       </header>

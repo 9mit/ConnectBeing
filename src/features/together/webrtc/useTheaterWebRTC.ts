@@ -42,8 +42,9 @@ export function useTheaterWebRTC({
   const [micMuted, setMicMuted] = useState(false);
   const [partnerVoiceActive, setPartnerVoiceActive] = useState(false);
   const [partnerPresence, setPartnerPresence] = useState<
-    "online" | "watching" | "paused" | "reconnecting" | "offline"
+    "online" | "watching" | "paused" | "reconnecting" | "offline" | "left"
   >("offline");
+  const hadPartnerEverRef = useRef(false);
   const [streamSourceType, setStreamSourceType] = useState<"tab" | "window" | "screen" | "none">("none");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -431,7 +432,30 @@ export function useTheaterWebRTC({
         const state = channel.presenceState();
         const keys = Object.keys(state);
         const hasPartner = keys.some((k) => k !== userId);
-        setPartnerPresence(hasPartner ? "watching" : "offline");
+        if (hasPartner) {
+          hadPartnerEverRef.current = true;
+          setPartnerPresence("watching");
+        } else {
+          setPartnerPresence(hadPartnerEverRef.current ? "left" : "offline");
+        }
+      })
+      .on("presence", { event: "join" }, ({ newPresences }: { newPresences: any[] }) => {
+        const partnerJoined = (newPresences || []).some((p: any) => p.userId !== userId);
+        if (partnerJoined) {
+          hadPartnerEverRef.current = true;
+          setPartnerPresence("watching");
+        }
+      })
+      .on("presence", { event: "leave" }, ({ leftPresences }: { leftPresences: any[] }) => {
+        const partnerLeft = (leftPresences || []).some((p: any) => p.userId !== userId);
+        if (partnerLeft) {
+          setPartnerPresence("left");
+        }
+      })
+      .on("broadcast", { event: "theater:partner_leave" }, ({ payload }: { payload: any }) => {
+        if (payload.senderUserId !== userId) {
+          setPartnerPresence("left");
+        }
       });
 
     channelRef.current = channel;
@@ -481,6 +505,17 @@ export function useTheaterWebRTC({
     userId,
   ]);
 
+  const notifyPartnerLeaving = useCallback(async () => {
+    try {
+      sendSignal("theater:partner_leave", {});
+      if (channelRef.current) {
+        await channelRef.current.untrack();
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [sendSignal]);
+
   return {
     roomState,
     localStream,
@@ -499,5 +534,6 @@ export function useTheaterWebRTC({
     stopVoiceCall,
     toggleMic,
     remoteVoiceAudioRef,
+    notifyPartnerLeaving,
   };
 }

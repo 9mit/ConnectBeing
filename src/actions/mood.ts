@@ -3,7 +3,8 @@
 import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { moods } from "@/db/schema";
+import { moods, onboardingProfiles } from "@/db/schema";
+import { createPartnerNotification } from "@/actions/notifications";
 import { tryUnlockAchievement } from "@/lib/achievements";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple, requireVerifiedCouple } from "@/lib/auth";
@@ -42,6 +43,24 @@ export async function setMoodAction(
       code: "daily_checkin",
     });
     await tryUnlockAchievement(couple.id, user.id, "mood_logger");
+
+    const partnerId =
+      couple.userAId === user.id ? couple.userBId : couple.userAId;
+
+    const profile = await db.query.onboardingProfiles.findFirst({
+      where: eq(onboardingProfiles.userId, user.id),
+    });
+    const senderName = profile?.name?.trim() || "Your partner";
+
+    void createPartnerNotification({
+      coupleId: couple.id,
+      senderUserId: user.id,
+      partnerUserId: partnerId,
+      title: "✨ Partner Vibe Shared",
+      body: `${senderName} shared their vibe: ${parsed.mood.toUpperCase()}`,
+      kind: "general",
+      link: "/mood",
+    }).catch(() => {});
 
     return ok({ id });
   } catch (e) {

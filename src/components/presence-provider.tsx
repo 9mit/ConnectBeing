@@ -12,13 +12,27 @@ import {
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { motion, AnimatePresence } from "framer-motion";
 
+import Link from "next/link";
 import { authorizeRealtimeTopicAction } from "@/actions/realtime-auth";
 import { sendNudgeNotificationAction, checkPendingNudgeAction } from "@/actions/nudge";
 import { recordHeartbeatAction, getPartnerPresenceAction } from "@/actions/presence";
+import {
+  getUnreadNotificationsCountAction,
+  pollPendingNotificationsAction,
+} from "@/actions/notifications";
 import { createClient } from "@/lib/supabase/client";
 
 type ConnHealth = "connected" | "reconnecting" | "offline";
 type PresenceStatus = "online" | "offline";
+
+export type InAppNotificationItem = {
+  id: string;
+  title: string;
+  body: string;
+  kind?: string;
+  link?: string | null;
+  timestamp: string;
+};
 
 type PresenceContextType = {
   partnerOnline: boolean;
@@ -29,6 +43,10 @@ type PresenceContextType = {
   nudgePending: boolean;
   activeNudge: { senderName: string; timestamp: string } | null;
   dismissNudge: () => void;
+  unreadNotificationsCount: number;
+  activeNotification: InAppNotificationItem | null;
+  dismissNotification: () => void;
+  refreshNotifications: () => Promise<void>;
 };
 
 const PresenceContext = createContext<PresenceContextType>({
@@ -40,6 +58,10 @@ const PresenceContext = createContext<PresenceContextType>({
   nudgePending: false,
   activeNudge: null,
   dismissNudge: () => {},
+  unreadNotificationsCount: 0,
+  activeNotification: null,
+  dismissNotification: () => {},
+  refreshNotifications: async () => {},
 });
 
 export function usePresence() {
@@ -100,16 +122,33 @@ export function PresenceProvider({
     senderName: string;
     timestamp: string;
   } | null>(null);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [activeNotification, setActiveNotification] = useState<InAppNotificationItem | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const myStatusRef = useRef<PresenceStatus>("online");
   myStatusRef.current = myStatus;
 
-  const triggerNudgeDisplay = useCallback((senderName: string, timestamp: string) => {
-    setActiveNudge({
-      senderName: senderName || "Your partner",
-      timestamp: timestamp || new Date().toISOString(),
-    });
+  const refreshNotifications = useCallback(async () => {
+    try {
+      const res = await getUnreadNotificationsCountAction();
+      if (res.ok) {
+        setUnreadNotificationsCount(res.data.unreadCount);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (coupleId && userId) {
+      void refreshNotifications();
+    }
+  }, [coupleId, userId, refreshNotifications]);
+
+  const triggerNotificationDisplay = useCallback((notif: InAppNotificationItem) => {
+    setActiveNotification(notif);
+    setUnreadNotificationsCount((c) => c + 1);
     playGentleNudgeSound();
 
     if (
@@ -118,14 +157,29 @@ export function PresenceProvider({
       Notification.permission === "granted"
     ) {
       try {
-        new Notification(`🔔 ${senderName} pinged you!`, {
-          body: "Thinking of you ❤️ Tap to open MadLove.",
+        new Notification(notif.title, {
+          body: notif.body,
         });
       } catch {
         /* ignore */
       }
     }
   }, []);
+
+  const triggerNudgeDisplay = useCallback((senderName: string, timestamp: string) => {
+    setActiveNudge({
+      senderName: senderName || "Your partner",
+      timestamp: timestamp || new Date().toISOString(),
+    });
+    triggerNotificationDisplay({
+      id: Math.random().toString(),
+      title: "🔔 Partner Nudge",
+      body: `${senderName || "Your partner"} pinged you to connect! Thinking of you ❤️`,
+      kind: "nudge",
+      link: "/dashboard",
+      timestamp: timestamp || new Date().toISOString(),
+    });
+  }, [triggerNotificationDisplay]);
 
   // Main Realtime Connection
   useEffect(() => {
@@ -183,6 +237,18 @@ export function PresenceProvider({
         if (payload && payload.senderId !== userId) {
           triggerNudgeDisplay(payload.senderName, payload.timestamp);
         }
+      })
+      .on("broadcast", { event: "notification" }, ({ payload }: { payload: any }) => {
+        if (payload && payload.recipientId === userId) {
+          triggerNotificationDisplay({
+            id: payload.id || Math.random().toString(),
+            title: payload.title || "Notification",
+            body: payload.body || "",
+            kind: payload.kind || "general",
+            link: payload.link || null,
+            timestamp: payload.timestamp || new Date().toISOString(),
+          });
+        }
       });
 
     channel.subscribe(async (status: string) => {
@@ -214,7 +280,7 @@ export function PresenceProvider({
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [coupleId, userId, triggerNudgeDisplay]);
+  }, [coupleId, userId, triggerNudgeDisplay, triggerNotificationDisplay]);
 
   // Periodic heartbeat & presence sync fallback (every 25s)
   useEffect(() => {
@@ -258,6 +324,26 @@ export function PresenceProvider({
     return () => clearInterval(interval);
   }, [coupleId, userId, triggerNudgeDisplay]);
 
+  // Periodic Notifications Check Fallback (every 5s) for instant delivery
+  useEffect(() => {
+    if (!coupleId || !userId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await pollPendingNotificationsAction();
+        if (res.ok && res.data.notifications.length > 0) {
+          for (const notif of res.data.notifications) {
+            triggerNotificationDisplay(notif);
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [coupleId, userId, triggerNotificationDisplay]);
+
   // Auto-dismiss nudge after 7s
   useEffect(() => {
     if (!activeNudge) return;
@@ -266,6 +352,15 @@ export function PresenceProvider({
     }, 7000);
     return () => clearTimeout(timer);
   }, [activeNudge]);
+
+  // Auto-dismiss activeNotification after 7s
+  useEffect(() => {
+    if (!activeNotification) return;
+    const timer = setTimeout(() => {
+      setActiveNotification(null);
+    }, 7000);
+    return () => clearTimeout(timer);
+  }, [activeNotification]);
 
   // Manual On/Off Switch
   const toggleMyStatus = useCallback(() => {
@@ -324,6 +419,10 @@ export function PresenceProvider({
     setActiveNudge(null);
   }, []);
 
+  const dismissNotification = useCallback(() => {
+    setActiveNotification(null);
+  }, []);
+
   return (
     <PresenceContext.Provider
       value={{
@@ -335,13 +434,17 @@ export function PresenceProvider({
         nudgePending,
         activeNudge,
         dismissNudge,
+        unreadNotificationsCount,
+        activeNotification,
+        dismissNotification,
+        refreshNotifications,
       }}
     >
       {children}
 
-      {/* Floating Nudge Toast Alert */}
+      {/* Floating Real-time Notification Banner Toast */}
       <AnimatePresence>
-        {activeNudge && (
+        {activeNotification && (
           <motion.div
             initial={{ opacity: 0, y: -60, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -349,25 +452,54 @@ export function PresenceProvider({
             transition={{ type: "spring", stiffness: 400, damping: 28 }}
             className="fixed top-5 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4 pointer-events-auto"
           >
-            <div className="relative overflow-hidden rounded-3xl border border-amber-500/50 bg-[#0d0216]/95 p-5 backdrop-blur-3xl shadow-[0_15px_50px_rgba(212,175,55,0.35)] flex items-center gap-4">
+            <div className="relative overflow-hidden rounded-3xl border border-amber-500/50 bg-[#0d0216]/95 p-4 sm:p-5 backdrop-blur-3xl shadow-[0_15px_50px_rgba(212,175,55,0.35)] flex items-center gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-rose-500 to-amber-500 text-2xl border border-amber-300 shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-bounce">
-                🔔
+                {activeNotification.kind === "watch"
+                  ? "🍿"
+                  : activeNotification.kind === "nudge"
+                    ? "🔔"
+                    : activeNotification.kind === "quiz"
+                      ? "❓"
+                      : activeNotification.kind === "achievement"
+                        ? "🏆"
+                        : activeNotification.kind === "verification"
+                          ? "💍"
+                          : "💬"}
               </div>
-              <div className="flex-1 space-y-1">
+              <div className="flex-1 space-y-1 min-w-0">
                 <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-300">
-                  <span>Heartbeat Ping</span>
+                  <span>
+                    {activeNotification.kind === "watch"
+                      ? "Movie Night Date"
+                      : activeNotification.kind === "nudge"
+                        ? "Heartbeat Ping"
+                        : activeNotification.kind === "quiz"
+                          ? "Couple Quiz"
+                          : "Partner Activity"}
+                  </span>
                 </div>
-                <h4 className="text-sm font-extrabold text-white font-display">
-                  {activeNudge.senderName} pinged you!
+                <h4 className="text-sm font-extrabold text-white font-display truncate">
+                  {activeNotification.title}
                 </h4>
-                <p className="text-xs text-slate-300 font-medium">
-                  Thinking of you right now ❤️
+                <p className="text-xs text-slate-300 font-medium line-clamp-2">
+                  {activeNotification.body}
                 </p>
+                {activeNotification.link && (
+                  <div className="pt-1">
+                    <Link
+                      href={activeNotification.link}
+                      onClick={() => setActiveNotification(null)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-300 hover:text-white transition-colors"
+                    >
+                      <span>Open Sanctuary Space →</span>
+                    </Link>
+                  </div>
+                )}
               </div>
               <button
                 type="button"
-                onClick={dismissNudge}
-                className="rounded-full bg-white/10 p-2 text-xs font-bold text-slate-300 hover:bg-white/20 hover:text-white transition-colors"
+                onClick={dismissNotification}
+                className="rounded-full bg-white/10 p-2 text-xs font-bold text-slate-300 hover:bg-white/20 hover:text-white transition-colors shrink-0"
                 aria-label="Dismiss notification"
               >
                 ✕
