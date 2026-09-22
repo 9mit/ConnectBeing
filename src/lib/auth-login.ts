@@ -17,25 +17,95 @@ export async function syncAppUserFromSupabase(input: {
   supabaseAuthId: string;
   email: string;
 }): Promise<AppUserRow | null> {
+  const normalizedEmail = (input.email || "").trim().toLowerCase();
+  if (!normalizedEmail && !input.supabaseAuthId) return null;
+
+  // 1. Try to find by supabaseAuthId first
   let appUser = await db.query.users.findFirst({
     where: eq(users.supabaseAuthId, input.supabaseAuthId),
   });
 
-  if (!appUser) {
-    const userId = createId();
-    try {
-      await db.insert(users).values({
-        id: userId,
-        supabaseAuthId: input.supabaseAuthId,
-        email: input.email,
-      });
-    } catch {
-      // Concurrent insert — re-read below
+  if (appUser) {
+    if (normalizedEmail && appUser.email !== normalizedEmail) {
+      try {
+        await db
+          .update(users)
+          .set({ email: normalizedEmail, updatedAt: new Date() })
+          .where(eq(users.id, appUser.id));
+        appUser.email = normalizedEmail;
+      } catch (err) {
+        console.warn("[syncAppUserFromSupabase] Email update warning:", err);
+      }
     }
-    appUser = await db.query.users.findFirst({
-      where: eq(users.supabaseAuthId, input.supabaseAuthId),
-    });
+    return appUser;
   }
+
+  // 2. Not found by supabaseAuthId — check if user row already exists by email
+  // (e.g., account re-registered in auth provider, or auth ID refreshed)
+  if (normalizedEmail) {
+    const existingByEmail = await db.query.users.findFirst({
+      where: eq(users.email, normalizedEmail),
+    });
+
+    if (existingByEmail) {
+      try {
+        await db
+          .update(users)
+          .set({
+            supabaseAuthId: input.supabaseAuthId,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, existingByEmail.id));
+
+        const updated = await db.query.users.findFirst({
+          where: eq(users.id, existingByEmail.id),
+        });
+        if (updated) return updated;
+      } catch (updateErr) {
+        console.error(
+          "[syncAppUserFromSupabase] Failed to update supabaseAuthId on existing email:",
+          updateErr,
+        );
+      }
+    }
+  }
+
+  // 3. User does not exist by supabaseAuthId or email — insert new user
+  const userId = createId();
+  try {
+    await db.insert(users).values({
+      id: userId,
+      supabaseAuthId: input.supabaseAuthId,
+      email: normalizedEmail,
+    });
+  } catch (insertErr) {
+    console.warn("[syncAppUserFromSupabase] Insert collision or constraint warning:", insertErr);
+    // On collision, attempt re-linking by email or re-fetching
+    if (normalizedEmail) {
+      const retryByEmail = await db.query.users.findFirst({
+        where: eq(users.email, normalizedEmail),
+      });
+      if (retryByEmail) {
+        if (retryByEmail.supabaseAuthId !== input.supabaseAuthId) {
+          try {
+            await db
+              .update(users)
+              .set({
+                supabaseAuthId: input.supabaseAuthId,
+                updatedAt: new Date(),
+              })
+              .where(eq(users.id, retryByEmail.id));
+          } catch {}
+        }
+        return retryByEmail;
+      }
+    }
+  }
+
+  // 4. Final resolution by supabaseAuthId
+  appUser = await db.query.users.findFirst({
+    where: eq(users.supabaseAuthId, input.supabaseAuthId),
+  });
 
   return appUser ?? null;
 }

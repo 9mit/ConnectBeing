@@ -65,20 +65,49 @@ export const getAppUser = cache(async function getAppUser(): Promise<SessionUser
       });
     }
 
+    if (!row && authUser.email) {
+      const normalizedEmail = authUser.email.trim().toLowerCase();
+      const existingByEmail = await db.query.users.findFirst({
+        where: eq(users.email, normalizedEmail),
+        with: { couple: true, onboardingProfile: true },
+      });
+      if (existingByEmail) {
+        if (existingByEmail.supabaseAuthId !== authUser.id) {
+          try {
+            await db
+              .update(users)
+              .set({ supabaseAuthId: authUser.id, updatedAt: new Date() })
+              .where(eq(users.id, existingByEmail.id));
+            existingByEmail.supabaseAuthId = authUser.id;
+          } catch (e) {
+            console.warn("[getAppUser] Link supabaseAuthId warning:", e);
+          }
+        }
+        row = existingByEmail;
+      }
+    }
+
     if (!row) {
       const userId = createId();
+      const normalizedEmail = authUser.email ? authUser.email.trim().toLowerCase() : "";
       try {
         await db.insert(users).values({
           id: userId,
           supabaseAuthId: authUser.id,
-          email: authUser.email ?? "",
+          email: normalizedEmail,
         });
         row = await db.query.users.findFirst({
           where: eq(users.supabaseAuthId, authUser.id),
           with: { couple: true, onboardingProfile: true },
         });
       } catch (insertErr) {
-        console.error("[getAppUser] Insert profile fallback error:", insertErr);
+        console.warn("[getAppUser] Insert fallback collision:", insertErr);
+        if (normalizedEmail) {
+          row = await db.query.users.findFirst({
+            where: eq(users.email, normalizedEmail),
+            with: { couple: true, onboardingProfile: true },
+          });
+        }
       }
     }
 
@@ -111,6 +140,27 @@ export const requireAppUser = cache(async function requireAppUser(): Promise<Ses
         with: { couple: true, onboardingProfile: true },
       });
     }
+    if (!row && authUser.email) {
+      const normalizedEmail = authUser.email.trim().toLowerCase();
+      const existingByEmail = await db.query.users.findFirst({
+        where: eq(users.email, normalizedEmail),
+        with: { couple: true, onboardingProfile: true },
+      });
+      if (existingByEmail) {
+        if (existingByEmail.supabaseAuthId !== authUser.id) {
+          try {
+            await db
+              .update(users)
+              .set({ supabaseAuthId: authUser.id, updatedAt: new Date() })
+              .where(eq(users.id, existingByEmail.id));
+            existingByEmail.supabaseAuthId = authUser.id;
+          } catch (e) {
+            console.warn("[requireAppUser] Link supabaseAuthId warning:", e);
+          }
+        }
+        row = existingByEmail;
+      }
+    }
   } catch (err) {
     console.error("[requireAppUser] DB error:", err);
     throw new AppError("INTERNAL_ERROR", "Database connection issue. Please try again.", 500);
@@ -118,18 +168,25 @@ export const requireAppUser = cache(async function requireAppUser(): Promise<Ses
 
   if (!row) {
     const userId = createId();
+    const normalizedEmail = authUser.email ? authUser.email.trim().toLowerCase() : "";
     try {
       await db.insert(users).values({
         id: userId,
         supabaseAuthId: authUser.id,
-        email: authUser.email ?? "",
+        email: normalizedEmail,
       });
       row = await db.query.users.findFirst({
         where: eq(users.supabaseAuthId, authUser.id),
         with: { couple: true, onboardingProfile: true },
       });
     } catch (insertErr) {
-      console.error("[requireAppUser] Insert profile fallback error:", insertErr);
+      console.warn("[requireAppUser] Insert profile fallback collision:", insertErr);
+      if (normalizedEmail) {
+        row = await db.query.users.findFirst({
+          where: eq(users.email, normalizedEmail),
+          with: { couple: true, onboardingProfile: true },
+        });
+      }
     }
   }
 

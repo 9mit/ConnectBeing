@@ -124,6 +124,11 @@ export async function POST(request: NextRequest) {
           targetUser = authData?.user;
         }
 
+        if (!targetUser) {
+          const { data: authList } = await admin.auth.admin.listUsers();
+          targetUser = authList?.users?.find((u) => u.email?.toLowerCase() === email) ?? null;
+        }
+
         if (targetUser && !targetUser.email_confirmed_at) {
           await admin.auth.admin.updateUserById(targetUser.id, {
             email_confirm: true,
