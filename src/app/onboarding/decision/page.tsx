@@ -13,8 +13,8 @@ export default async function OnboardingDecisionPage() {
     redirect(redirectPathForAuthError(error));
   }
 
-  // If already in a couple, go straight to dashboard
-  if (user.coupleId) {
+  // If already in an active couple, go straight to dashboard
+  if (user.couple && user.couple.status === "active") {
     redirect("/dashboard");
   }
 

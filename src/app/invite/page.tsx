@@ -15,7 +15,7 @@ export default async function InvitePage() {
     redirect(redirectPathForAuthError(error));
   }
 
-  if (user.coupleId) redirect("/dashboard");
+  if (user.couple && user.couple.status === "active") redirect("/dashboard");
 
   return (
     <AppShell>

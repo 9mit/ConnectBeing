@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
@@ -211,13 +211,18 @@ export const inviteTokens = pgTable(
   {
     id: text("id").primaryKey(),
     tokenHash: text("token_hash").notNull(),
+    coupleId: text("couple_id").references((): AnyPgColumn => couples.id, {
+      onDelete: "cascade",
+    }),
     inviterId: text("inviter_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
     used: boolean("used").notNull().default(false),
     usedById: text("used_by_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -226,6 +231,8 @@ export const inviteTokens = pgTable(
   (table) => [
     uniqueIndex("invite_tokens_token_hash_uidx").on(table.tokenHash),
     index("invite_tokens_inviter_id_idx").on(table.inviterId),
+    index("invite_tokens_couple_id_idx").on(table.coupleId),
+    index("invite_tokens_status_idx").on(table.status),
   ],
 );
 
@@ -239,12 +246,10 @@ export const couples = pgTable(
     id: text("id").primaryKey(),
     userAId: text("user_a_id")
       .notNull()
-      .unique()
       .references(() => users.id, { onDelete: "restrict" }),
-    userBId: text("user_b_id")
-      .notNull()
-      .unique()
-      .references(() => users.id, { onDelete: "restrict" }),
+    userBId: text("user_b_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     status: coupleStatusEnum("status").notNull().default("pending"),
     anniversaryDate: timestamp("anniversary_date", { withTimezone: true }),
     petName: text("pet_name").notNull().default("Buddy"),
@@ -257,7 +262,44 @@ export const couples = pgTable(
       .defaultNow(),
     dissolvedAt: timestamp("dissolved_at", { withTimezone: true }),
   },
-  (table) => [index("couples_status_idx").on(table.status)],
+  (table) => [
+    index("couples_status_idx").on(table.status),
+    index("couples_user_a_id_idx").on(table.userAId),
+    index("couples_user_b_id_idx").on(table.userBId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// couple_members — dedicated membership table; strictly 1 active couple per user
+// ---------------------------------------------------------------------------
+
+export const coupleMembers = pgTable(
+  "couple_members",
+  {
+    id: text("id").primaryKey(),
+    coupleId: text("couple_id")
+      .notNull()
+      .references(() => couples.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("creator"),
+    status: text("status").notNull().default("active"),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("couple_members_active_user_uidx")
+      .on(table.userId)
+      .where(sql`status = 'active'`),
+    uniqueIndex("couple_members_couple_user_uidx").on(
+      table.coupleId,
+      table.userId,
+    ),
+    index("couple_members_couple_id_idx").on(table.coupleId),
+    index("couple_members_user_id_idx").on(table.userId),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -1076,6 +1118,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     fields: [users.id],
     references: [onboardingProfiles.userId],
   }),
+  coupleMemberships: many(coupleMembers),
   inviteTokens: many(inviteTokens),
   moods: many(moods),
   messages: many(messages),
@@ -1096,12 +1139,27 @@ export const onboardingProfilesRelations = relations(
 );
 
 export const inviteTokensRelations = relations(inviteTokens, ({ one }) => ({
+  couple: one(couples, {
+    fields: [inviteTokens.coupleId],
+    references: [couples.id],
+  }),
   inviter: one(users, {
     fields: [inviteTokens.inviterId],
     references: [users.id],
   }),
   usedBy: one(users, {
     fields: [inviteTokens.usedById],
+    references: [users.id],
+  }),
+}));
+
+export const coupleMembersRelations = relations(coupleMembers, ({ one }) => ({
+  couple: one(couples, {
+    fields: [coupleMembers.coupleId],
+    references: [couples.id],
+  }),
+  user: one(users, {
+    fields: [coupleMembers.userId],
     references: [users.id],
   }),
 }));
@@ -1117,6 +1175,7 @@ export const couplesRelations = relations(couples, ({ one, many }) => ({
     references: [users.id],
     relationName: "coupleUserB",
   }),
+  members: many(coupleMembers),
   messages: many(messages),
   ephemeralMedia: many(ephemeralMedia),
   memories: many(memories),
@@ -1430,4 +1489,8 @@ export type NewMatchmakingMessage = typeof matchmakingMessages.$inferInsert;
 
 export type MatchmakingReport = typeof matchmakingReports.$inferSelect;
 export type NewMatchmakingReport = typeof matchmakingReports.$inferInsert;
+
+export type CoupleMember = typeof coupleMembers.$inferSelect;
+export type NewCoupleMember = typeof coupleMembers.$inferInsert;
+
 

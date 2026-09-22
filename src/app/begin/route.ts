@@ -1,10 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { coupleMembers, couples, users } from "@/db/schema";
 import { syncAppUserFromSupabase } from "@/lib/auth-login";
+import { INVITE_COOKIE_NAME } from "@/lib/invite-cookie";
 import { applyCookies } from "@/lib/response-cookies";
 import { AUTH_COOKIE_NAME, verifyAuthToken } from "@/lib/session";
 
@@ -13,14 +14,15 @@ export const dynamic = "force-dynamic";
 /**
  * Server-authoritative route handler for "Begin Our Story".
  *
- * Routing Matrix:
+ * Deterministic Routing State Machine:
  * 1. Anonymous / Expired / Invalid / Logged Out:
  *    -> Redirect to /register (clear any stale cookie)
  * 2. Authenticated + No Profile / Incomplete Onboarding:
  *    -> Redirect to /onboarding (Name / Details page)
  * 3. Authenticated + Completed Onboarding:
- *    -> If couple exists: Redirect to /dashboard (Main application)
- *    -> If no couple: Redirect to /onboarding/decision (Pairing / Matchmaking step)
+ *    -> If active couple membership exists: Redirect to /dashboard
+ *    -> If pending invite cookie exists: Redirect to /invite/[token]
+ *    -> If no couple & no invite: Redirect to /onboarding/decision
  */
 export async function GET(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -30,7 +32,6 @@ export async function GET(request: NextRequest) {
     const redirectUrl = new URL("/register", request.url);
     const response = NextResponse.redirect(redirectUrl, 307);
     response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-    // Purge stale or invalid session cookie if present
     if (request.cookies.has(AUTH_COOKIE_NAME)) {
       response.cookies.set(AUTH_COOKIE_NAME, "", {
         path: "/",
@@ -70,7 +71,6 @@ export async function GET(request: NextRequest) {
         supabaseAuthId = sbUser.id;
         userEmail = sbUser.email || userEmail;
       } else if (!session) {
-        // Neither Supabase nor JWT session is valid
         return unauthenticatedResponse();
       }
     } catch {
@@ -80,7 +80,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // If no authenticated identity could be resolved
   if (!supabaseAuthId) {
     return unauthenticatedResponse();
   }
@@ -105,7 +104,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Auto-sync user if record doesn't exist yet in users table
     if (!dbUser && userEmail) {
       const synced = await syncAppUserFromSupabase({
         supabaseAuthId,
@@ -123,8 +121,6 @@ export async function GET(request: NextRequest) {
     }
 
     if (!dbUser) {
-      // User is authenticated in auth provider but has no DB record yet
-      // Route to onboarding to initialize profile
       const response = NextResponse.redirect(new URL("/onboarding", request.url), 307);
       response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
       applyCookies(response, pendingCookies);
@@ -143,9 +139,29 @@ export async function GET(request: NextRequest) {
     }
 
     // STATE C: Authenticated account + completed profile & onboarding
-    // If active couple is already formed, go straight to main application
-    if (dbUser.coupleId) {
+    // Authoritatively check active couple membership in couple_members
+    const activeMembership = await db.query.coupleMembers.findFirst({
+      where: and(
+        eq(coupleMembers.userId, dbUser.id),
+        eq(coupleMembers.status, "active"),
+      ),
+      with: { couple: true },
+    });
+
+    if (activeMembership?.couple && activeMembership.couple.status === "active" && activeMembership.couple.userBId) {
       const response = NextResponse.redirect(new URL("/dashboard", request.url), 307);
+      response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      applyCookies(response, pendingCookies);
+      return response;
+    }
+
+    // Check if user has a pending invite cookie to accept
+    const pendingInviteToken = request.cookies.get(INVITE_COOKIE_NAME)?.value;
+    if (pendingInviteToken && /^[a-f0-9]{64}$/i.test(pendingInviteToken)) {
+      const response = NextResponse.redirect(
+        new URL(`/invite/${encodeURIComponent(pendingInviteToken)}`, request.url),
+        307,
+      );
       response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
       applyCookies(response, pendingCookies);
       return response;
@@ -158,7 +174,6 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (dbError) {
     console.error("[begin route] Database check error:", dbError);
-    // On unexpected error, do not expose internal error or fake registered state
     return unauthenticatedResponse();
   }
 }

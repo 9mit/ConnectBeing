@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 
-import { redeemInviteToken } from "@/actions/invite";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { createId } from "@/lib/ids";
@@ -110,38 +109,19 @@ export async function syncAppUserFromSupabase(input: {
   return appUser ?? null;
 }
 
-/** Redeem pending invite tokens after successful auth (best-effort). */
+/** Preserve pending invite context for authenticated user without auto-redeeming. */
 export async function redeemPendingInvites(
   appUser: AppUserRow,
   email: string,
 ): Promise<AppUserRow> {
-  const pendingByUser = await redis.get<string>(`pending-invite:${appUser.id}`);
   const pendingByEmail = await redis.get<string>(
     `pending-invite-email:${email}`,
   );
-  const inviteToken = pendingByUser ?? pendingByEmail;
 
-  if (!inviteToken || appUser.coupleId) {
-    if (pendingByEmail && !pendingByUser && !appUser.isOnboarded) {
-      await redis.set(`pending-invite:${appUser.id}`, pendingByEmail, {
-        ex: 60 * 60 * 24 * 3,
-      });
-    }
-    return appUser;
-  }
-
-  try {
-    const redeemed = await redeemInviteToken(inviteToken);
-    if (redeemed.ok) {
-      await redis.del(`pending-invite:${appUser.id}`);
-      await redis.del(`pending-invite-email:${email}`);
-      const refreshed = await db.query.users.findFirst({
-        where: eq(users.id, appUser.id),
-      });
-      if (refreshed) return refreshed;
-    }
-  } catch {
-    /* invite redeem can wait */
+  if (pendingByEmail && !appUser.coupleId) {
+    await redis.set(`pending-invite:${appUser.id}`, pendingByEmail, {
+      ex: 60 * 60 * 24 * 3,
+    });
   }
 
   return appUser;
@@ -158,6 +138,14 @@ export function resolvePostLoginDestination(
     if (safeNext && safeNext.startsWith("/onboarding")) return safeNext;
     return "/onboarding";
   }
-  if (!appUser.coupleId) return "/invite";
+
+  if (safeNext && safeNext.startsWith("/invite/")) {
+    return safeNext;
+  }
+
+  if (!appUser.coupleId) {
+    return "/onboarding/decision";
+  }
+
   return safeNext || "/dashboard";
 }

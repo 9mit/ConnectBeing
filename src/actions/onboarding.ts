@@ -10,7 +10,7 @@ import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
 import { redis } from "@/lib/redis";
 import { onboardingSchema } from "@/lib/validations";
-import { redeemInviteToken } from "@/actions/invite";
+import { getPendingInviteCookie } from "@/lib/invite-cookie";
 
 export async function completeOnboardingAction(
   input: unknown,
@@ -50,18 +50,13 @@ export async function completeOnboardingAction(
       .set({ isOnboarded: true, updatedAt: new Date() })
       .where(eq(users.id, user.id));
 
-    const pendingByUser = await redis.get<string>(`pending-invite:${user.id}`);
-    const pendingByEmail = await redis.get<string>(
-      `pending-invite-email:${user.email}`,
-    );
-    const pending = pendingByUser ?? pendingByEmail;
-    if (pending && !user.coupleId) {
-      const redeemed = await redeemInviteToken(pending);
-      if (redeemed.ok) {
-        await redis.del(`pending-invite:${user.id}`);
-        await redis.del(`pending-invite-email:${user.email}`);
-        return ok({ redirectTo: "/dashboard" });
-      }
+    // Check for pending invite context
+    const cookieInvite = getPendingInviteCookie();
+    const redisByUser = await redis.get<string>(`pending-invite:${user.id}`);
+    const pendingToken = cookieInvite || redisByUser;
+
+    if (pendingToken && !user.coupleId) {
+      return ok({ redirectTo: `/invite/${encodeURIComponent(pendingToken)}` });
     }
 
     const refreshedUser = await db.query.users.findFirst({
