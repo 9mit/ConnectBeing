@@ -1,11 +1,12 @@
 import { AppShell } from "@/components/app-shell";
 import { TimelinePanel } from "@/components/timeline-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Timeline & Time Capsules — MadLove",
+  title: BRAND.formatTitle("Timeline & Time Capsules"),
   description: "Chronicles of your love story and sealed future time capsules.",
 };
 

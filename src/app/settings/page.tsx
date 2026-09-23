@@ -2,11 +2,12 @@ import { getCoupleSettingsAction } from "@/actions/settings";
 import { AppShell } from "@/components/app-shell";
 import { SettingsPanel } from "@/components/settings-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Settings — MadLove",
+  title: BRAND.formatTitle("Settings"),
   description: "Customize your theme, digital companion, ambiance, and couple preferences.",
 };
 

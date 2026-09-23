@@ -20,6 +20,7 @@ import {
   toggleCalendarEventAction,
   type CalendarEventDTO,
 } from "@/actions/calendar";
+import { formatDateShort, formatTime } from "@/lib/date";
 
 const CATEGORIES = [
   { value: "date_night", label: "Date Night" },
@@ -160,7 +161,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
               </button>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3.5 sm:gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <label className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
                   Event Title
@@ -171,7 +172,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                   placeholder="e.g. Rooftop Stargazing & Wine"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
+                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
                 />
               </div>
 
@@ -184,7 +185,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                   required
                   value={eventDate}
                   onChange={(e) => setEventDate(e.target.value)}
-                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] focus:outline-none focus:border-white/20 transition-colors"
+                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
                 />
               </div>
             </div>
@@ -199,7 +200,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                     key={cat.value}
                     type="button"
                     onClick={() => setCategory(cat.value)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
+                    className={`py-2.5 px-3 min-h-[42px] rounded-xl border text-xs font-medium transition-all touch-manipulation active:scale-95 flex items-center justify-center ${
                       category === cat.value
                         ? "border-white/25 bg-white/15 text-white shadow-sm"
                         : "border-white/[0.06] bg-white/[0.02] text-zinc-400 hover:text-white"
@@ -220,7 +221,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                 placeholder="What to prepare, locations, or reminders…"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors resize-none"
+                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors resize-none"
               />
             </div>
 
@@ -228,7 +229,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
               <button
                 type="submit"
                 disabled={pending}
-                className="px-5 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all"
+                className="w-full sm:w-auto px-6 py-2.5 min-h-[44px] rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all flex items-center justify-center active:scale-95"
               >
                 {pending ? "Saving…" : "Save Date"}
               </button>
@@ -283,8 +284,8 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                           {event.title}
                         </h3>
                       </div>
-                      <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/[0.04] text-zinc-300 border border-white/[0.06] whitespace-nowrap" suppressHydrationWarning>
-                        {isToday ? "Today" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/[0.04] text-zinc-300 border border-white/[0.06] whitespace-nowrap">
+                        {isToday ? "Today" : formatDateShort(d)}
                       </span>
                     </div>
 
@@ -298,12 +299,12 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                   <div className="pt-2 border-t border-white/[0.05] flex items-center justify-between pl-6.5 text-[11px] text-zinc-400">
                     <span className="flex items-center gap-1 font-mono">
                       <Clock className="w-3 h-3 text-zinc-500" />
-                      {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {formatTime(d)}
                     </span>
                     <button
                       type="button"
                       onClick={() => handleDelete(event.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-rose-400 p-1"
+                      className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-rose-400 p-1.5 touch-manipulation min-h-[32px] min-w-[32px] flex items-center justify-center"
                       title="Delete event"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -335,7 +336,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                 <button
                   type="button"
                   onClick={() => handleDelete(event.id)}
-                  className="text-zinc-500 hover:text-rose-400"
+                  className="text-zinc-500 hover:text-rose-400 p-1.5 touch-manipulation min-h-[32px] min-w-[32px] flex items-center justify-center"
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>

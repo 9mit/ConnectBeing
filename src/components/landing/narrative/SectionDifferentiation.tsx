@@ -1,13 +1,14 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { BRAND } from "@/lib/brand";
 
 export function SectionDifferentiation() {
   return (
     <section
-      id="why-madlove"
+      id="why-sanctuary"
       className="landing-section relative py-20 md:py-28 px-5 text-center overflow-hidden"
-      aria-label="Why MadLove is different"
+      aria-label={`Why ${BRAND.name} is different`}
     >
       <div className="relative z-10 mx-auto max-w-5xl">
         {/* Narrative Chapter Header */}
@@ -28,7 +29,7 @@ export function SectionDifferentiation() {
             </span>
           </h2>
           <p className="mt-4 text-base md:text-lg text-zinc-300/80 font-sans font-light leading-relaxed">
-            Every other platform seeks collective attention. MadLove is dedicated entirely to the one person who matters most.
+            Every other platform seeks collective attention. {BRAND.name} is dedicated entirely to the one person who matters most.
           </p>
         </motion.div>
 
@@ -88,7 +89,7 @@ export function SectionDifferentiation() {
             <div>
               <div className="flex items-center justify-between pb-3.5 border-b border-white/[0.06]">
                 <span className="text-[11px] font-mono tracking-[0.2em] uppercase text-[#fbf9f4] font-medium">
-                  MadLove Sanctuary
+                  {BRAND.name} Sanctuary
                 </span>
                 <span className="text-[11px] font-mono text-zinc-400">Strictly Pairwise</span>
               </div>
@@ -99,7 +100,7 @@ export function SectionDifferentiation() {
                     A single quiet room
                   </div>
                   <p className="text-xs text-zinc-300/90 leading-relaxed">
-                    When your device illuminates with MadLove, you know instantly who it is. No other contact exists in this world.
+                    When your device illuminates with {BRAND.name}, you know instantly who it is. No other contact exists in this world.
                   </p>
                 </div>
                 <div className="space-y-1">

@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { EyeOff, ServerOff, KeyRound, Smartphone } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
 export function SectionTrust() {
   return (
@@ -29,7 +30,7 @@ export function SectionTrust() {
             </span>
           </h2>
           <p className="mt-4 text-base md:text-lg text-zinc-300/80 font-sans font-light leading-relaxed">
-            Your most intimate thoughts, whispers, and memories deserve absolute confidentiality. MadLove is engineered so that no third party can read what you send.
+            Your most intimate thoughts, whispers, and memories deserve absolute confidentiality. {BRAND.name} is engineered so that no third party can read what you send.
           </p>
         </motion.div>
 

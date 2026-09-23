@@ -115,7 +115,7 @@ export function AuthForm({
           name="email"
           type="email"
           autoComplete="email"
-          placeholder="two-souls@madlove.app"
+          placeholder="two-souls@soulnest.app"
           aria-invalid={!!fieldErrors.email}
           aria-describedby={fieldErrors.email ? "auth-email-error" : undefined}
           className={`${inputBase} ${

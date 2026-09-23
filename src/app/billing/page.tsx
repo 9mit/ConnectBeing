@@ -3,12 +3,13 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { BillingPanel } from "@/components/billing-panel";
 import { redirectPathForAuthError, requireActiveCouple } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Sanctuary & Support — MadLove",
-  description: "MadLove is 100% free for all couples. Support the open-source infrastructure.",
+  title: BRAND.formatTitle("Sanctuary & Support"),
+  description: `${BRAND.name} is 100% free for all couples. Support the open-source infrastructure.`,
 };
 
 export default async function BillingPage() {
@@ -32,7 +33,7 @@ export default async function BillingPage() {
             Zero Paywalls. Full Access.
           </h1>
           <p className="mt-2 text-sm text-zinc-300 font-sans">
-            Every capability in MadLove is completely unlocked for you and your partner.
+            Every capability in {BRAND.name} is completely unlocked for you and your partner.
           </p>
         </header>
         <BillingPanel />

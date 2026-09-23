@@ -8,11 +8,12 @@ import { getRoomCustomizationAction } from "@/actions/room";
 import { AppShell } from "@/components/app-shell";
 import { redirectPathForAuthError, requireActiveCouple } from "@/lib/auth";
 import { getProvider } from "@/features/together/providers";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Virtual Theater Room — MadLove Together",
+  title: BRAND.formatTitle("Virtual Theater Room"),
   description: "Synchronized playback, shared reactions, and voice connection for two.",
 };
 
@@ -55,8 +56,8 @@ export default async function RoomPage({
   const decor = room.ok ? room.data.decor : {};
 
   return (
-    <AppShell coupleId={couple.id} userId={user.id}>
-      <div className="-mx-4 -my-8 h-[calc(100dvh-7.5rem)] md:h-[calc(100dvh-4rem)]">
+    <AppShell coupleId={couple.id} userId={user.id} isTheater={true}>
+      <div className="h-full w-full overflow-hidden">
         <VirtualRoom
           sessionId={session.id}
           userId={user.id}

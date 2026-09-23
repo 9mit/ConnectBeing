@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { OnboardingForm } from "@/components/onboarding-form";
 import { getAppUser, redirectPathForAuthError } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function OnboardingPage() {
       <div className="mx-auto max-w-2xl relative z-10 space-y-8">
         <div className="text-center">
           <h1 className="text-4xl font-extrabold tracking-tight text-white font-display select-none">
-            Welcome to MadLove
+            Welcome to {BRAND.name}
           </h1>
           <p className="mt-3 text-sm text-slate-400 font-medium max-w-md mx-auto">
             Tell us about yourself to tailor your shared dashboard and connection suggestions.

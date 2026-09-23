@@ -2,11 +2,12 @@ import nextDynamic from "next/dynamic";
 
 import { AppShell } from "@/components/app-shell";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Voice & Video Call — MadLove",
+  title: BRAND.formatTitle("Voice & Video Call"),
   description: "Private, encrypted real-time calling with adaptive media quality.",
 };
 

@@ -458,8 +458,8 @@ export function CallPanel({
   }
 
   return (
-    <div className="space-y-6 rounded-3xl glass-panel border border-amber-500/30 bg-purple-950/50 p-6 md:p-8 shadow-[0_0_35px_rgba(212,175,55,0.12)]">
-      <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-amber-300/80 border-b border-amber-500/20 pb-4 font-medium">
+    <div className="space-y-5 sm:space-y-6 rounded-3xl glass-panel border border-amber-500/30 bg-purple-950/50 p-4 sm:p-6 md:p-8 shadow-[0_0_35px_rgba(212,175,55,0.12)]">
+      <div className="flex flex-wrap gap-x-4 sm:gap-x-6 gap-y-2 text-xs sm:text-sm text-amber-300/80 border-b border-amber-500/20 pb-3 sm:pb-4 font-medium">
         <div>
           Status: <strong className="text-amber-200 capitalize">{status}</strong>
         </div>
@@ -470,11 +470,12 @@ export function CallPanel({
           Network: <strong className="text-amber-200 capitalize">{quality}</strong>
         </div>
         <div className="flex items-center gap-1.5">
-          Hold <kbd className="rounded bg-purple-900 text-amber-200 px-1.5 py-0.5 border border-amber-500/30 text-[10px] font-bold">Space</kbd> to talk
+          <span className="hidden sm:inline">Hold <kbd className="rounded bg-purple-900 text-amber-200 px-1.5 py-0.5 border border-amber-500/30 text-[10px] font-bold">Space</kbd> or </span>
+          <span>PTT:</span>
           <span className="text-amber-400/80 font-bold">{pttHeld ? " (live)" : " (muted)"}</span>
         </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
         <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-purple-950/80 border border-amber-500/30 shadow-inner">
           <video
             ref={localVideoRef}
@@ -483,7 +484,7 @@ export function CallPanel({
             playsInline
             className="w-full h-full object-cover"
           />
-          <div className="absolute top-3 left-3 bg-purple-950/80 backdrop-blur-md px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest text-amber-300 border border-amber-500/30 shadow-md">
+          <div className="absolute top-3 left-3 bg-purple-950/80 backdrop-blur-md px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest text-amber-300 border border-amber-500/30 shadow-md">
             You
           </div>
         </div>
@@ -494,20 +495,20 @@ export function CallPanel({
             playsInline
             className="w-full h-full object-cover"
           />
-          <div className="absolute top-3 left-3 bg-purple-950/80 backdrop-blur-md px-3 py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest text-amber-300 border border-amber-500/30 shadow-md">
+          <div className="absolute top-3 left-3 bg-purple-950/80 backdrop-blur-md px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-lg text-[9px] font-bold uppercase tracking-widest text-amber-300 border border-amber-500/30 shadow-md">
             Partner
           </div>
         </div>
       </div>
       <audio ref={remoteAudioRef} autoPlay />
       
-      <div className="flex flex-wrap gap-3 pt-2">
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2.5 sm:gap-3 pt-2">
         <button
           type="button"
           onClick={() => void startCall()}
           disabled={!subscribed}
           aria-label="Start video call"
-          className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3.5 text-xs font-extrabold uppercase tracking-wider text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,175,55,0.35)] active:scale-[0.98]"
+          className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-4 sm:px-6 py-3.5 min-h-[46px] text-xs font-extrabold uppercase tracking-wider text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,175,55,0.35)] active:scale-[0.98] flex items-center justify-center gap-1.5"
         >
           📞 Start Call
         </button>
@@ -534,7 +535,7 @@ export function CallPanel({
             setPttHeld(false);
             setMicEnabled(false);
           }}
-          className={`rounded-xl px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all active:scale-[0.98] ${
+          className={`rounded-xl px-4 sm:px-5 py-3.5 min-h-[46px] text-xs font-bold uppercase tracking-wider transition-all select-none touch-none touch-manipulation active:scale-[0.98] flex items-center justify-center gap-1.5 ${
             pttHeld
               ? "bg-amber-400 text-purple-950 shadow-[0_0_15px_#fbbf24]"
               : "border border-amber-500/30 bg-purple-950/40 text-amber-300 hover:bg-purple-900/60"
@@ -546,15 +547,15 @@ export function CallPanel({
           type="button"
           onClick={toggleCamera}
           aria-label={cameraOn ? "Turn camera off" : "Turn camera on"}
-          className="rounded-xl border border-amber-500/30 bg-purple-950/40 text-amber-200 hover:bg-purple-900/60 px-5 py-3 text-xs font-bold uppercase tracking-wider transition-all active:scale-[0.98]"
+          className="rounded-xl border border-amber-500/30 bg-purple-950/40 text-amber-200 hover:bg-purple-900/60 px-4 sm:px-5 py-3.5 min-h-[46px] text-xs font-bold uppercase tracking-wider transition-all active:scale-[0.98] flex items-center justify-center gap-1.5"
         >
-          📷 {cameraOn ? "Camera off" : "Camera on"}
+          📷 {cameraOn ? "Cam off" : "Cam on"}
         </button>
         <button
           type="button"
           onClick={endCall}
           aria-label="End call"
-          className="rounded-xl border border-red-500/40 bg-red-950/50 px-5 py-3 text-xs font-bold uppercase tracking-wider text-red-300 hover:bg-red-900 transition-all active:scale-[0.98]"
+          className="rounded-xl border border-red-500/40 bg-red-950/50 px-4 sm:px-5 py-3.5 min-h-[46px] text-xs font-bold uppercase tracking-wider text-red-300 hover:bg-red-900 transition-all active:scale-[0.98] flex items-center justify-center gap-1.5"
         >
           🛑 End call
         </button>

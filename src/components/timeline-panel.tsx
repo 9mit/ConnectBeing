@@ -25,6 +25,7 @@ import {
   type TimeCapsuleDTO,
   type TimelineEventDTO,
 } from "@/actions/timeline";
+import { formatDateLong, formatDateMedium } from "@/lib/date";
 
 const FILTER_TAGS = [
   { value: "all", label: "All Story" },
@@ -181,7 +182,7 @@ export function TimelinePanel() {
               Write a message, promise, or prediction. It remains locked and encrypted until the chosen date.
             </p>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3.5 sm:gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <label className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
                   Capsule Title
@@ -192,7 +193,7 @@ export function TimelinePanel() {
                   placeholder="e.g. Open on Our 1-Year Anniversary"
                   value={capsuleTitle}
                   onChange={(e) => setCapsuleTitle(e.target.value)}
-                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
+                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
                 />
               </div>
 
@@ -205,7 +206,7 @@ export function TimelinePanel() {
                   required
                   value={capsuleUnlockDate}
                   onChange={(e) => setCapsuleUnlockDate(e.target.value)}
-                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] focus:outline-none focus:border-white/20 transition-colors"
+                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
                 />
               </div>
             </div>
@@ -220,7 +221,7 @@ export function TimelinePanel() {
                 placeholder="What I want to remember about us right now is…"
                 value={capsuleMessage}
                 onChange={(e) => setCapsuleMessage(e.target.value)}
-                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors resize-none"
+                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors resize-none"
               />
             </div>
 
@@ -228,7 +229,7 @@ export function TimelinePanel() {
               <button
                 type="submit"
                 disabled={pending}
-                className="px-5 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all flex items-center gap-1.5"
+                className="w-full sm:w-auto px-6 py-2.5 min-h-[44px] rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all flex items-center justify-center gap-1.5 active:scale-95"
               >
                 <span>{pending ? "Sealing…" : "Seal Capsule"}</span>
               </button>
@@ -278,7 +279,7 @@ export function TimelinePanel() {
                       </p>
                     ) : (
                       <p className="text-xs text-zinc-400 font-light">
-                        Locked until {unlockDate.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}.
+                        Locked until {formatDateLong(unlockDate)}.
                       </p>
                     )}
                   </div>
@@ -303,13 +304,13 @@ export function TimelinePanel() {
       )}
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none border-b border-white/[0.06]">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none border-b border-white/[0.06] -mx-4 px-4 sm:mx-0 sm:px-0">
         {FILTER_TAGS.map((t) => (
           <button
             key={t.value}
             type="button"
             onClick={() => setFilter(t.value)}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium tracking-wide transition-colors whitespace-nowrap ${
+            className={`px-3.5 py-1.5 min-h-[38px] rounded-full text-xs font-medium tracking-wide transition-colors whitespace-nowrap touch-manipulation active:scale-95 ${
               filter === t.value
                 ? "bg-white/15 text-white border border-white/20"
                 : "text-zinc-400 hover:text-white hover:bg-white/[0.03]"
@@ -321,7 +322,7 @@ export function TimelinePanel() {
       </div>
 
       {/* Chronological Stream */}
-      <section className="relative pl-6 sm:pl-8 space-y-6 before:absolute before:left-2.5 sm:before:left-3.5 before:top-2 before:bottom-2 before:w-[1px] before:bg-white/[0.08]">
+      <section className="relative pl-7 sm:pl-8 space-y-6 before:absolute before:left-3 sm:before:left-3.5 before:top-2 before:bottom-2 before:w-[1px] before:bg-white/[0.08]">
         {loading ? (
           <p className="text-xs text-zinc-400 italic py-8">Loading storyline…</p>
         ) : filteredEvents.length === 0 ? (
@@ -342,7 +343,7 @@ export function TimelinePanel() {
                 className="relative group"
               >
                 {/* Node */}
-                <div className="absolute -left-[30px] sm:-left-[38px] top-2 w-5 h-5 rounded-full bg-[#07080b] border border-white/20 flex items-center justify-center">
+                <div className="absolute -left-[26px] sm:-left-[34px] top-2 w-5 h-5 rounded-full bg-[#07080b] border border-white/20 flex items-center justify-center">
                   {kindIcon(evt.kind)}
                 </div>
 
@@ -352,7 +353,7 @@ export function TimelinePanel() {
                       {evt.title}
                     </h3>
                     <time className="text-[11px] text-zinc-400 font-mono">
-                      {d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                      {formatDateMedium(d)}
                     </time>
                   </div>
 

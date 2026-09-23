@@ -29,6 +29,7 @@ import {
   reportAndBlockCandidateAction,
 } from "@/actions/matchmaking";
 import { PrivacySafeMatchCard } from "@/features/matchmaking";
+import { BRAND } from "@/lib/brand";
 
 interface Props {
   initialStatus: {
@@ -124,7 +125,7 @@ export function MatchmakingHub({ initialStatus }: Props) {
       const res = await setMatchmakingConsentAction(optIn);
       if (res.ok) {
         setEnabled(optIn);
-        setFeedback(optIn ? "Welcome to MadLove Compatibility Discovery." : "Matchmaking disabled.");
+        setFeedback(optIn ? `Welcome to ${BRAND.name} Compatibility Discovery.` : "Matchmaking disabled.");
       }
     });
   };

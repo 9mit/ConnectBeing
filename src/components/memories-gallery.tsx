@@ -19,6 +19,7 @@ import {
   createPresignedUploadAction,
   listTimelineAction,
 } from "@/actions/media";
+import { formatDateLong, formatDateShort } from "@/lib/date";
 
 type TimelineItem = {
   id: string;
@@ -173,7 +174,7 @@ export function MemoriesGallery() {
               </button>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3.5 sm:gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <label htmlFor="memory-file" className="text-[11px] font-medium tracking-wide uppercase text-zinc-400">
                   Select Photograph
@@ -184,7 +185,7 @@ export function MemoriesGallery() {
                   type="file" 
                   accept="image/jpeg,image/png,image/webp" 
                   required 
-                  className="w-full text-xs text-zinc-300 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-white/[0.06] file:text-zinc-200 hover:file:bg-white/[0.12] transition-colors cursor-pointer"
+                  className="w-full text-xs text-zinc-300 file:mr-3 file:py-2.5 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-white/[0.06] file:text-zinc-200 hover:file:bg-white/[0.12] transition-colors cursor-pointer"
                 />
               </div>
 
@@ -198,23 +199,23 @@ export function MemoriesGallery() {
                   type="datetime-local"
                   required
                   defaultValue={new Date().toISOString().slice(0, 16)}
-                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] focus:outline-none focus:border-white/20 transition-colors"
+                  className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] focus:outline-none focus:border-white/20 transition-colors [color-scheme:dark]"
                 />
               </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3 sm:gap-4 sm:grid-cols-2">
               <input
                 id="memory-caption"
                 name="caption"
                 placeholder="Caption (e.g. Afternoon walk in the quiet gardens)"
-                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
+                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
               />
               <input
                 id="memory-event-label"
                 name="eventLabel"
                 placeholder="Milestone tag (e.g. Anniversary, Road trip)"
-                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
+                className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-base sm:text-xs text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-colors"
               />
             </div>
 
@@ -222,7 +223,7 @@ export function MemoriesGallery() {
               <button
                 type="submit"
                 disabled={pending}
-                className="px-5 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all flex items-center gap-2"
+                className="w-full sm:w-auto px-6 py-2.5 min-h-[44px] rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all flex items-center justify-center gap-2 active:scale-95"
               >
                 <UploadCloud className="w-3.5 h-3.5" />
                 <span>{pending ? "Saving Memory…" : "Save to Vault"}</span>
@@ -276,7 +277,7 @@ export function MemoriesGallery() {
                 <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-amber-200/90 font-medium">
                   <span>{kindLabel(featuredItem.kind)}</span>
                   <span>·</span>
-                  <time>{new Date(featuredItem.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</time>
+                  <time>{formatDateLong(featuredItem.at)}</time>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-serif text-[#f7f6f2] font-light">
                   {featuredItem.title}
@@ -321,7 +322,7 @@ export function MemoriesGallery() {
                     <div className="p-4 sm:p-5 space-y-1.5">
                       <div className="flex items-center justify-between text-[10px] text-zinc-400 uppercase tracking-wider">
                         <span>{kindLabel(item.kind)}</span>
-                        <time>{new Date(item.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>
+                        <time>{formatDateShort(item.at)}</time>
                       </div>
                       <h4 className="text-sm font-serif font-light text-[#f7f6f2] group-hover:text-amber-100 transition-colors">
                         {item.title}
@@ -348,16 +349,16 @@ export function MemoriesGallery() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setSelectedPhoto(null)}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-3 sm:p-4 backdrop-blur-md pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]"
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className="relative max-w-4xl w-full rounded-2xl overflow-hidden border border-white/10 bg-[#0c0d12]"
+              className="relative max-w-4xl w-full rounded-2xl overflow-hidden border border-white/10 bg-[#0c0d12] max-h-[90dvh] flex flex-col shadow-2xl"
             >
               <button
                 type="button"
                 onClick={() => setSelectedPhoto(null)}
-                className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/60 text-white/80 hover:text-white backdrop-blur-sm"
+                className="absolute top-3 right-3 sm:top-4 sm:right-4 z-10 p-2.5 rounded-full bg-black/70 text-white/90 hover:text-white backdrop-blur-md min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation"
                 aria-label="Close photo preview"
               >
                 <X className="w-5 h-5" />
@@ -367,15 +368,15 @@ export function MemoriesGallery() {
               <img
                 src={selectedPhoto.url!}
                 alt={selectedPhoto.title}
-                className="max-h-[75vh] w-full object-contain bg-black/60"
+                className="max-h-[55dvh] sm:max-h-[72vh] w-full object-contain bg-black/60 flex-1"
               />
 
-              <div className="p-6 bg-[#0c0d12] border-t border-white/[0.06] space-y-1">
+              <div className="p-4 sm:p-6 bg-[#0c0d12] border-t border-white/[0.06] space-y-1 shrink-0">
                 <div className="flex items-center justify-between text-xs text-zinc-400">
                   <span className="uppercase tracking-wider font-medium">{kindLabel(selectedPhoto.kind)}</span>
-                  <time>{new Date(selectedPhoto.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</time>
+                  <time>{formatDateLong(selectedPhoto.at)}</time>
                 </div>
-                <h3 className="text-lg font-serif font-light text-[#f7f6f2]">
+                <h3 className="text-base sm:text-lg font-serif font-light text-[#f7f6f2]">
                   {selectedPhoto.title}
                 </h3>
                 {selectedPhoto.subtitle && (

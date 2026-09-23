@@ -95,7 +95,7 @@ export function QuizPanel({
                 </h3>
               </div>
 
-              <div className="grid gap-2 pl-6">
+              <div className="grid gap-2.5 pl-0 sm:pl-6">
                 {q.options.map((opt) => {
                   const isSelected = answers[qi] === opt;
                   return (
@@ -107,15 +107,15 @@ export function QuizPanel({
                         next[qi] = opt;
                         setAnswers(next);
                       }}
-                      className={`w-full px-4 py-3 rounded-xl border text-left text-xs font-medium transition-all flex items-center justify-between ${
+                      className={`w-full px-4 py-3.5 min-h-[46px] rounded-xl border text-left text-xs sm:text-sm font-medium transition-all flex items-center justify-between touch-manipulation active:scale-[0.99] ${
                         isSelected
                           ? "border-white/25 bg-white/15 text-white shadow-sm"
                           : "border-white/[0.06] bg-white/[0.02] text-zinc-300 hover:border-white/15 hover:bg-white/[0.05] hover:text-white"
                       }`}
                     >
-                      <span>{opt}</span>
+                      <span className="leading-snug">{opt}</span>
                       {isSelected && (
-                        <Check className="w-4 h-4 text-white shrink-0" />
+                        <Check className="w-4 h-4 text-white shrink-0 ml-2" />
                       )}
                     </button>
                   );
@@ -151,7 +151,7 @@ export function QuizPanel({
                   });
                 });
               }}
-              className="px-6 py-2.5 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white disabled:opacity-40 transition-all shadow-sm"
+              className="w-full sm:w-auto px-6 py-3 min-h-[46px] rounded-full bg-[#f7f6f2] text-[#07080b] text-xs sm:text-sm font-semibold hover:bg-white disabled:opacity-40 transition-all shadow-sm active:scale-95"
             >
               {pending ? "Saving Answers…" : "Submit Today’s Quiz"}
             </button>

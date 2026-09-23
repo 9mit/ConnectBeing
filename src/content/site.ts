@@ -1,8 +1,9 @@
-/** Brand + product copy — intentionally hardcoded (stable product voice). */
+import { BRAND } from "@/lib/brand";
 
+/** Brand + product copy — connected to centralized BRAND system. */
 export const SITE = {
-  brand: "MadLove",
-  brandMark: "MADLOVE",
+  brand: BRAND.name,
+  brandMark: BRAND.mark,
   tagline: "Some people become your universe",
   privacyLine: "Private space · end-to-end encrypted",
   defaultPetName: "Buddy",

@@ -1,11 +1,12 @@
 import { AppShell } from "@/components/app-shell";
 import { LocationShare } from "@/components/location-share";
 import { requireActiveCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Distance & Location — MadLove",
+  title: BRAND.formatTitle("Distance & Location"),
   description: "Privacy-preserved distance calculation and live presence.",
 };
 

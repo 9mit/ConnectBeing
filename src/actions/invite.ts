@@ -22,6 +22,7 @@ import {
 import { clearPendingInviteCookie } from "@/lib/invite-cookie";
 import { redis } from "@/lib/redis";
 import { rateLimitOrThrow } from "@/lib/security";
+import { BRAND } from "@/lib/brand";
 
 export async function generateInviteLinkAction(): Promise<
   ActionResult<{ url: string; expiresAt: string }>
@@ -326,7 +327,7 @@ export async function getInvitePreviewAction(
     return ok({
       displayName,
       avatarUrl: null,
-      brandMessage: `You have been invited by ${displayName} to join MadLove.`,
+      brandMessage: `You have been invited by ${displayName} to join ${BRAND.name}.`,
     });
   } catch (e) {
     return fail(e);

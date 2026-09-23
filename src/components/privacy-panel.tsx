@@ -9,6 +9,7 @@ import {
   requestCoupleDataDeletionAction,
   type PrivacyStatusDTO,
 } from "@/actions/privacy";
+import { BRAND } from "@/lib/brand";
 
 export function PrivacyPanel() {
   const [status, setStatus] = useState<PrivacyStatusDTO | null>(null);
@@ -43,7 +44,7 @@ export function PrivacyPanel() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `madlove-export-${new Date().toISOString().slice(0, 10)}.json`;
+        a.download = `${BRAND.name.toLowerCase()}-export-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
         URL.revokeObjectURL(url);
       } else {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Search, Camera, Film, Calendar, Clock, ArrowRight, Sparkles } from "lucide-react";
 
 import { searchCoupleDataAction, type SearchResultItemDTO } from "@/actions/search";
+import { formatDateMedium } from "@/lib/date";
 
 const CATEGORIES = [
   { value: "all", label: "All Vault" },
@@ -166,7 +167,7 @@ export function SearchPanel() {
                           </span>
                         </div>
                         <span className="text-[10px] text-slate-400 font-semibold">
-                          {d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                          {formatDateMedium(d)}
                         </span>
                       </div>
 

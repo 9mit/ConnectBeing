@@ -10,9 +10,15 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { redirectPathForAuthError, requireOnboardedUser } from "@/lib/auth";
 import { daysBetween, formatDaysTogether } from "@/lib/format";
+import { BRAND } from "@/lib/brand";
 import { DashboardClient } from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
+
+export const metadata = {
+  title: BRAND.formatTitle("Home Sanctuary"),
+  description: "Your shared relationship dashboard, partner presence, and daily connection rituals.",
+};
 
 export default async function DashboardPage() {
   let user;

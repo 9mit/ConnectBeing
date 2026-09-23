@@ -7,6 +7,7 @@ import {
   createPremiumSubscriptionAction,
   getBillingStatusAction,
 } from "@/actions/billing";
+import { BRAND } from "@/lib/brand";
 
 declare global {
   interface Window {
@@ -58,7 +59,7 @@ export function BillingPanel() {
         const rzp = new window.Razorpay!({
           key: result.data.keyId,
           subscription_id: result.data.subscriptionId,
-          name: "MadLove Support",
+          name: `${BRAND.name} Support`,
           description: "Optional tip — all features stay free",
           prefill: {
             email: result.data.email,
@@ -98,7 +99,7 @@ export function BillingPanel() {
           Community Infrastructure Support
         </h2>
         <p className="mt-2 text-sm text-zinc-300 font-sans leading-relaxed">
-          MadLove is engineered to run at near-$0 initial operating cost using local intelligence,
+          {BRAND.name} is engineered to run at near-$0 initial operating cost using local intelligence,
           peer-to-peer WebRTC, and open-source models. Every couple gets unlimited encrypted chat,
           calling, movie sync, and memories for free.
         </p>

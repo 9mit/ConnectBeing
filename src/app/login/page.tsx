@@ -3,9 +3,10 @@ import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth-form";
 import { getAppUser } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const metadata = {
-  title: "Sign In — MadLove",
+  title: BRAND.formatTitle("Sign In"),
   description: "Sign in to your private space for two.",
 };
 
@@ -42,9 +43,9 @@ export default async function LoginPage({
 
       <div className="relative z-10 flex flex-col items-center w-full max-w-md">
         {/* Brand */}
-        <Link href="/" className="group flex flex-col items-center mb-6" aria-label="MadLove home">
+        <Link href="/" className="group flex flex-col items-center mb-6" aria-label={`${BRAND.name} home`}>
           <span className="font-serif text-4xl md:text-5xl font-light tracking-[0.04em] text-[#fbf9f4] group-hover:text-white transition-colors">
-            MadLove
+            {BRAND.name}
           </span>
           <span className="text-[10px] font-mono uppercase tracking-[0.25em] text-zinc-400 font-light mt-1.5">
             Sanctuary for Two

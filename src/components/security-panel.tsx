@@ -8,6 +8,8 @@ import {
   updatePasswordAction,
   type SecurityStatusDTO,
 } from "@/actions/security";
+import { BRAND } from "@/lib/brand";
+import { formatDateMedium } from "@/lib/date";
 
 export function SecurityPanel() {
   const [status, setStatus] = useState<SecurityStatusDTO | null>(null);
@@ -106,7 +108,7 @@ export function SecurityPanel() {
             <span>Active & Protected</span>
           </span>
           <p className="text-[11px] text-slate-300">
-            Registered: {status?.createdAt ? new Date(status.createdAt).toLocaleDateString() : "Active"}
+            Registered: {status?.createdAt ? formatDateMedium(status.createdAt) : "Active"}
           </p>
         </div>
 
@@ -142,7 +144,7 @@ export function SecurityPanel() {
           <Key className="w-5 h-5 text-amber-400" />
           <div>
             <h2 className="text-lg font-bold text-white font-display">Update Password</h2>
-            <p className="text-xs text-slate-300">Choose a strong, unique password for your MadLove account.</p>
+            <p className="text-xs text-slate-300">Choose a strong, unique password for your {BRAND.name} account.</p>
           </div>
         </div>
 

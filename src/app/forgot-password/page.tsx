@@ -1,8 +1,9 @@
 import { ForgotPasswordForm } from "@/components/forgot-password-form";
+import { BRAND } from "@/lib/brand";
 
 export const metadata = {
-  title: "Forgot Password — MadLove",
-  description: "Reset your MadLove password.",
+  title: BRAND.formatTitle("Forgot Password"),
+  description: `Reset your ${BRAND.name} password.`,
 };
 
 export default function ForgotPasswordPage() {

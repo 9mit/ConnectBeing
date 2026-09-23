@@ -9,6 +9,7 @@ import { requireOnboardedUser } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { createId } from "@/lib/ids";
 import { getRazorpay, getRazorpayPlanId, isPremiumTier } from "@/lib/razorpay";
+import { BRAND } from "@/lib/brand";
 
 export async function getBillingStatusAction(): Promise<
   ActionResult<{
@@ -122,7 +123,7 @@ export async function createPremiumSubscriptionAction(): Promise<
       planId,
       customerId,
       email: user.email,
-      name: user.email.split("@")[0] ?? "MadLove",
+      name: user.email.split("@")[0] ?? BRAND.name,
     });
   } catch (e) {
     return fail(e);

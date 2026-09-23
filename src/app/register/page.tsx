@@ -4,10 +4,11 @@ import { redirect } from "next/navigation";
 import { AuthForm } from "@/components/auth-form";
 import { InvitePreviewBanner } from "@/components/invite-preview-banner";
 import { getAppUser } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const metadata = {
-  title: "Create Account — MadLove",
-  description: "Create your private space together on MadLove.",
+  title: BRAND.formatTitle("Create Account"),
+  description: `Create your private space together on ${BRAND.name}.`,
 };
 
 export const dynamic = "force-dynamic";
@@ -38,9 +39,9 @@ export default async function RegisterPage({
       <div className="absolute bottom-10 left-10 w-[400px] h-[400px] rounded-full blur-[130px] opacity-[0.08] bg-sky-500 pointer-events-none" />
 
       <div className="relative z-10 flex flex-col items-center w-full max-w-md">
-        <Link href="/" className="group flex flex-col items-center mb-6" aria-label="MadLove home">
+        <Link href="/" className="group flex flex-col items-center mb-6" aria-label={`${BRAND.name} home`}>
           <span className="font-serif text-4xl md:text-5xl font-light tracking-[0.04em] text-[#fbf9f4] group-hover:text-white transition-colors">
-            MadLove
+            {BRAND.name}
           </span>
           <span className="text-[10px] font-mono uppercase tracking-[0.25em] text-zinc-400 font-light mt-1.5">
             Sanctuary for Two

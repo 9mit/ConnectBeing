@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Heart, Sparkles, AlertCircle, ArrowRight, ShieldCheck } from "lucide-react";
 
 import { acceptCoupleInviteAction } from "@/actions/invite";
+import { BRAND } from "@/lib/brand";
 
 interface InviteAcceptCardProps {
   token: string;
@@ -68,7 +69,7 @@ export function InviteAcceptCard({ token, partnerName }: InviteAcceptCardProps) 
           Join {partnerName}
         </h2>
         <p className="text-sm text-slate-300 leading-relaxed max-w-xs mx-auto">
-          You are invited to join <strong className="text-amber-300">{partnerName}</strong>&apos;s private, end-to-end encrypted MadLove sanctuary.
+          You are invited to join <strong className="text-amber-300">{partnerName}</strong>&apos;s private, end-to-end encrypted {BRAND.name} sanctuary.
         </p>
       </div>
 

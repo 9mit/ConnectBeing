@@ -10,6 +10,7 @@ import {
   updateProfileAction,
   type CoupleProfileDataDTO,
 } from "@/actions/profile";
+import { formatDateLong } from "@/lib/date";
 
 export function ProfilePanel({
   initialData,
@@ -142,9 +143,9 @@ export function ProfilePanel({
             <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 block">
               Anniversary Date
             </span>
-            <span className="text-sm font-bold text-amber-200" suppressHydrationWarning>
+            <span className="text-sm font-bold text-amber-200">
               {data.anniversaryDate
-                ? new Date(data.anniversaryDate).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
+                ? formatDateLong(data.anniversaryDate)
                 : "Not set yet"}
             </span>
           </div>

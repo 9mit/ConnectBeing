@@ -12,6 +12,7 @@ import {
 } from "@/actions/together";
 import { UnifiedContentItem } from "@/features/together/discovery/catalog";
 import { getAllProviders } from "@/features/together/providers";
+import { BRAND } from "@/lib/brand";
 
 export default function NewWatchSessionPage() {
   const router = useRouter();
@@ -110,18 +111,18 @@ export default function NewWatchSessionPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-2xl py-6 space-y-6">
+      <div className="mx-auto max-w-2xl px-4 sm:px-6 py-4 sm:py-6 space-y-5">
         <Link
           href="/together"
-          className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors"
+          className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors py-1"
         >
           ← Back to Theater
         </Link>
 
         {/* Unified Search & Discovery Card */}
-        <div className="relative rounded-3xl glass-panel p-6 border border-sky-500/30 bg-[#0f0a1c]/80 shadow-2xl backdrop-blur-2xl space-y-4">
+        <div className="relative rounded-3xl glass-panel p-4 sm:p-6 border border-sky-500/30 bg-[#0f0a1c]/80 shadow-2xl backdrop-blur-2xl space-y-4">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-sky-400" />
+            <Sparkles className="w-4 h-4 text-sky-400 shrink-0" />
             <span className="text-xs font-bold uppercase tracking-wider text-sky-400">
               Universal Entertainment Discovery
             </span>
@@ -137,8 +138,8 @@ export default function NewWatchSessionPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => void handleSearch(e.target.value)}
-              placeholder="Search title e.g. Interstellar, Brahmāstra, Loki, Stranger Things…"
-              className="w-full pl-10 pr-4 py-3 rounded-2xl border border-white/15 bg-black/40 text-sm text-white placeholder-zinc-500 outline-none focus:border-sky-400 transition-colors"
+              placeholder="Search title e.g. Interstellar, Brahmāstra, Loki…"
+              className="w-full pl-10 pr-4 py-3 rounded-2xl border border-white/15 bg-black/40 text-sm sm:text-base text-white placeholder-zinc-500 outline-none focus:border-sky-400 transition-colors"
             />
             {isSearching && (
               <span className="absolute right-3.5 top-3.5 text-xs text-sky-400 animate-pulse">
@@ -178,13 +179,13 @@ export default function NewWatchSessionPage() {
                   </div>
 
                   {/* Provider Pills */}
-                  <div className="flex items-center flex-wrap gap-1.5 self-end sm:self-center">
+                  <div className="w-full sm:w-auto flex items-center flex-wrap gap-1.5 pt-2 sm:pt-0 border-t border-white/5 sm:border-0">
                     {item.availableOn.map((p) => (
                       <button
                         key={p.providerId}
                         type="button"
                         onClick={() => handleSelectTitle(item, p.providerId)}
-                        className="px-2.5 py-1 rounded-full text-[11px] font-semibold text-white transition-transform hover:scale-105"
+                        className="px-3 py-1.5 rounded-full text-xs font-semibold text-white transition-transform active:scale-95 hover:scale-105"
                         style={{
                           backgroundColor: `${p.brandColor}44`,
                           border: `1px solid ${p.brandColor}88`,
@@ -201,9 +202,9 @@ export default function NewWatchSessionPage() {
         </div>
 
         {/* Main Session Configuration Form */}
-        <div className="relative rounded-3xl glass-panel p-6 md:p-8 border border-amber-500/30 bg-purple-950/50 shadow-2xl overflow-hidden backdrop-blur-2xl">
+        <div className="relative rounded-3xl glass-panel p-5 sm:p-8 border border-amber-500/30 bg-purple-950/50 shadow-2xl overflow-hidden backdrop-blur-2xl">
           <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-amber-400">
-            MadLove Theater
+            {BRAND.name} Theater
           </span>
           <h1 className="text-3xl font-extrabold text-white font-display tracking-tight mt-1 text-glow-gold">
             Plan Movie Night
@@ -296,7 +297,7 @@ export default function NewWatchSessionPage() {
             <button
               type="submit"
               disabled={pending}
-              className="mt-6 w-full btn-madlove-gold py-3.5 text-xs font-bold disabled:opacity-50"
+              className="mt-6 w-full btn-madlove-gold py-4 min-h-[48px] text-sm font-bold disabled:opacity-50 active:scale-[0.98] transition-transform"
             >
               {pending ? "Creating Session..." : "Send Invitation 🍿"}
             </button>

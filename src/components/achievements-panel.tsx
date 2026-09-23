@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Sparkles, Lock } from "lucide-react";
 
 import { listAchievementsAction } from "@/actions/achievements";
+import { formatDateMedium } from "@/lib/date";
 
 type AchievementItem = {
   code: string;
@@ -173,9 +174,9 @@ export function AchievementsPanel({
                   </p>
 
                   {isUnlocked && item.unlockedAt && (
-                    <p className="text-[10px] text-amber-400/80 pt-1 font-semibold flex items-center gap-1" suppressHydrationWarning>
+                    <p className="text-[10px] text-amber-400/80 pt-1 font-semibold flex items-center gap-1">
                       <Sparkles className="w-3 h-3" />
-                      Unlocked on {new Date(item.unlockedAt).toLocaleDateString()}
+                      Unlocked on {formatDateMedium(item.unlockedAt)}
                     </p>
                   )}
                 </div>

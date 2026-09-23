@@ -10,6 +10,7 @@ import {
   type InAppNotificationDTO,
 } from "@/actions/notifications";
 import { usePresence } from "@/components/presence-provider";
+import { formatTime, formatDateMedium } from "@/lib/date";
 
 const FILTER_TAGS = [
   { value: "all", label: "All Activity" },
@@ -228,7 +229,7 @@ export function NotificationsPanel({
                     </p>
 
                     <div className="flex items-center gap-3 pt-1 text-[10px] text-slate-400">
-                      <span suppressHydrationWarning>{d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {d.toLocaleDateString()}</span>
+                      <span>{formatTime(d)} · {formatDateMedium(d)}</span>
                       {item.link && (
                         <Link
                           href={item.link}

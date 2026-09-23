@@ -7,6 +7,7 @@ import type {
   WatchSessionSummary,
 } from "./types";
 import { LocalProvider as CoreLocal } from "./local-provider";
+import { BRAND } from "@/lib/brand";
 
 export const LocalProvider: AIProvider = CoreLocal;
 
@@ -37,7 +38,7 @@ export const NullProvider: AIProvider = {
 function disabledProvider(name: string): AIProvider {
   const err = () => {
     throw new Error(
-      `${name} is optional and disabled. MadLove core uses LocalProvider only.`,
+      `${name} is optional and disabled. ${BRAND.name} core uses LocalProvider only.`,
     );
   };
   return {

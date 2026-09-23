@@ -43,8 +43,8 @@ export function LandingHeader() {
 
           {/* Minimal Editorial Nav Links */}
           <div className="hidden md:flex items-center gap-8 font-sans text-[11px] uppercase tracking-[0.18em] text-zinc-400">
-            <a href="#why-madlove" className="hover:text-[#fbf9f4] transition-colors duration-200">
-              Why MadLove
+            <a href="#why-sanctuary" className="hover:text-[#fbf9f4] transition-colors duration-200">
+              Why {SITE.brand}
             </a>
             <a href="#experience" className="hover:text-[#fbf9f4] transition-colors duration-200">
               Experience

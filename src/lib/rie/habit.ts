@@ -1,4 +1,5 @@
 import type { BehavioralMetrics } from "./behavior";
+import { BRAND } from "@/lib/brand";
 
 export interface HabitProfile {
   checkInHabit: number;
@@ -30,7 +31,7 @@ export function analyzeHabits(metrics: BehavioralMetrics): HabitProfile {
     suggestions.push("Set a two-message daily check-in habit.");
   }
   if (movieHabit < 40) {
-    suggestions.push("Schedule one MadLove Together night this week.");
+    suggestions.push(`Schedule one ${BRAND.name} Together night this week.`);
   }
   if (voiceHabit < 40) {
     suggestions.push("Try a short push-to-talk call tonight.");

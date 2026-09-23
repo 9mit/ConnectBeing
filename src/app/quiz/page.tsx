@@ -2,11 +2,12 @@ import { getDailyQuizAction } from "@/actions/quiz";
 import { AppShell } from "@/components/app-shell";
 import { QuizPanel } from "@/components/quiz-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Daily Quiz — MadLove",
+  title: BRAND.formatTitle("Daily Quiz"),
   description: "Daily couple connection questions and answer reveals.",
 };
 

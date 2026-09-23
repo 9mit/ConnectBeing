@@ -7,6 +7,7 @@ import {
   revealVerificationCodeAction,
   submitVerificationCodeAction,
 } from "@/actions/verification";
+import { formatSessionDateTime } from "@/lib/date";
 
 export function VerifyPanel() {
   const [role, setRole] = useState<"revealer" | "submitter" | null>(null);
@@ -49,7 +50,7 @@ export function VerifyPanel() {
         return;
       }
       setCode(res.data.code);
-      setMessage(`Share this code with your partner before ${new Date(res.data.periodEnd).toLocaleString()}.`);
+      setMessage(`Share this code with your partner before ${formatSessionDateTime(res.data.periodEnd)}.`);
       refresh();
     });
   }
@@ -92,11 +93,11 @@ export function VerifyPanel() {
         ) : dueSoon ? (
           <p className="text-amber-300 font-bold">Verification due soon{countdown ? ` · ${countdown}` : ""}.</p>
         ) : (
-          <p suppressHydrationWarning>
+          <p>
             Status: active
             {countdown ? ` · ${countdown}` : ""}
             {verifiedUntil
-              ? ` · until ${new Date(verifiedUntil).toLocaleString()}`
+              ? ` · until ${formatSessionDateTime(verifiedUntil)}`
               : ""}
           </p>
         )}

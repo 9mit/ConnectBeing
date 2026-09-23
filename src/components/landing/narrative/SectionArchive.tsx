@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { Lock, Sparkles, Milestone } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 
 export function SectionArchive() {
   return (
@@ -29,7 +30,7 @@ export function SectionArchive() {
             </span>
           </h2>
           <p className="mt-4 text-base md:text-lg text-zinc-300/80 font-sans font-light leading-relaxed">
-            Relationships are not ephemeral chat logs. MadLove gathers your milestones, sealed voice notes, and rituals into a timeless digital tapestry.
+            Relationships are not ephemeral chat logs. {BRAND.name} gathers your milestones, sealed voice notes, and rituals into a timeless digital tapestry.
           </p>
         </motion.div>
 

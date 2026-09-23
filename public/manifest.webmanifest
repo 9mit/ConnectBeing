@@ -1,6 +1,6 @@
 {
-  "name": "MadLove — A Sanctuary for Two",
-  "short_name": "MadLove",
+  "name": "SoulNest — A Sanctuary for Two",
+  "short_name": "SoulNest",
   "description": "A cinematic, privacy-first digital sanctuary for two.",
   "start_url": "/dashboard",
   "display": "standalone",

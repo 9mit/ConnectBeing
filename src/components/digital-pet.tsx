@@ -105,7 +105,7 @@ export function DigitalPet({
               ease: "easeInOut",
             }}
             onClick={handlePetInteraction}
-            className="cursor-pointer flex h-40 w-40 sm:h-44 sm:w-44 items-center justify-center rounded-full bg-[#141620] border border-white/10 shadow-lg relative mx-auto group hover:border-white/25 transition-all"
+            className="cursor-pointer flex h-40 w-40 sm:h-44 sm:w-44 items-center justify-center rounded-full bg-[#141620] border border-white/10 shadow-lg relative mx-auto group hover:border-white/25 transition-all touch-manipulation select-none active:scale-95"
             title="Tap to comfort Buddy"
           >
             <span className="text-2xl font-serif font-medium text-amber-100 select-none drop-shadow-sm transition-transform group-hover:scale-105">
@@ -117,7 +117,7 @@ export function DigitalPet({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: -24 }}
                 exit={{ opacity: 0 }}
-                className="absolute text-xl pointer-events-none"
+                className="absolute text-xl pointer-events-none select-none"
               >
                 ❤️
               </motion.span>
@@ -147,12 +147,12 @@ export function DigitalPet({
                 value={nameInput}
                 onChange={(e) => setNameInput(e.target.value)}
                 placeholder="New name…"
-                className="rounded-full border border-white/[0.12] bg-white/[0.04] px-4 py-1.5 text-xs text-[#f7f6f2] outline-none focus:border-white/30 text-center"
+                className="rounded-full border border-white/[0.12] bg-white/[0.04] px-4 py-2 text-base sm:text-xs text-[#f7f6f2] outline-none focus:border-white/30 text-center"
               />
               <button
                 type="submit"
                 disabled={pending}
-                className="p-1.5 rounded-full bg-[#f7f6f2] text-[#07080b] hover:bg-white"
+                className="p-2.5 min-h-[38px] min-w-[38px] rounded-full bg-[#f7f6f2] text-[#07080b] hover:bg-white flex items-center justify-center touch-manipulation"
               >
                 <Check className="w-3.5 h-3.5" />
               </button>
@@ -168,7 +168,7 @@ export function DigitalPet({
                   setNameInput(petName);
                   setIsEditingName(true);
                 }}
-                className="text-zinc-500 hover:text-zinc-300 p-1"
+                className="text-zinc-500 hover:text-zinc-300 p-1.5 touch-manipulation min-h-[32px] min-w-[32px] flex items-center justify-center"
                 aria-label="Rename companion"
               >
                 <Edit2 className="w-3.5 h-3.5" />
@@ -209,7 +209,7 @@ export function DigitalPet({
           <button
             type="button"
             onClick={handlePetInteraction}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-full border border-white/[0.08] bg-white/[0.03] text-xs font-medium text-zinc-200 hover:text-white hover:bg-white/[0.06] transition-all active:scale-95"
+            className="inline-flex items-center gap-2 px-6 py-2.5 min-h-[44px] rounded-full border border-white/[0.08] bg-white/[0.03] text-xs sm:text-sm font-medium text-zinc-200 hover:text-white hover:bg-white/[0.06] transition-all touch-manipulation active:scale-95"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
             <span>Comfort {petName}</span>

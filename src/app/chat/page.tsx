@@ -1,11 +1,12 @@
 import { AppShell } from "@/components/app-shell";
 import { ChatPanel } from "@/components/chat-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Chat & Ephemeral Media — MadLove",
+  title: BRAND.formatTitle("Chat & Ephemeral Media"),
   description: "End-to-end encrypted private messaging and self-destructing media.",
 };
 

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
+import { BRAND } from "@/lib/brand";
 
 export default function GlobalError({
   error,
@@ -20,7 +21,7 @@ export default function GlobalError({
 
       <div className="relative z-10 flex flex-col items-center w-full max-w-md text-center space-y-6">
         <h1 className="text-4xl font-extrabold tracking-tight text-white font-display select-none">
-          MadLove
+          {BRAND.name}
         </h1>
         <div className="rounded-3xl bg-white/[0.02] border border-white/[0.06] p-8 backdrop-blur-xl shadow-2xl space-y-4">
           <h2 className="text-lg font-bold text-rose-300">

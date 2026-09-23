@@ -559,7 +559,7 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex h-[calc(100dvh-12rem)] md:h-[75vh] flex-col rounded-2xl border border-white/[0.08] bg-[#0c0d12] overflow-hidden shadow-2xl">
+    <div className="flex h-[calc(100dvh-10.5rem)] md:h-[75vh] flex-col rounded-2xl border border-white/[0.08] bg-[#0c0d12] overflow-hidden shadow-2xl">
       {/* Header Bar */}
       <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] bg-[#0f1017]/80 backdrop-blur-md px-5 py-3 text-xs">
         <div className="flex items-center gap-2.5">
@@ -757,7 +757,7 @@ export function ChatPanel({
           }}
           placeholder="Message your partner privately…"
           aria-label="Private message"
-          className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-sm text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 focus:bg-white/[0.05] transition-all"
+          className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 sm:px-4 py-2.5 text-base sm:text-sm text-[#f7f6f2] placeholder-zinc-500 focus:outline-none focus:border-white/20 focus:bg-white/[0.05] transition-all"
         />
 
         <button

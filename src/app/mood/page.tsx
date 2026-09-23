@@ -2,11 +2,12 @@ import { getCurrentMoodsAction } from "@/actions/mood";
 import { AppShell } from "@/components/app-shell";
 import { MoodSelector } from "@/components/mood-selector";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Vibe & Mood Sync — MadLove",
+  title: BRAND.formatTitle("Vibe & Mood Sync"),
   description: "Real-time emotional check-in, cuddle requests, and mood radar.",
 };
 

@@ -6,11 +6,13 @@ import { db } from "@/db";
 import { movieMemories } from "@/db/schema";
 import { AppShell } from "@/components/app-shell";
 import { redirectPathForAuthError, requireActiveCouple } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
+import { formatDateMedium } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Movie Memory & Recap — MadLove Together",
+  title: BRAND.formatTitle("Movie Memory & Recap"),
   description: "Watch party memories, best moments, and conversation starters.",
 };
 
@@ -61,8 +63,8 @@ export default async function MovieMemoryPage({
             <h1 className="mt-4 text-3xl sm:text-4xl font-extrabold text-white font-display tracking-tight text-glow-gold">
               {memory.title}
             </h1>
-            <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-slate-400" suppressHydrationWarning>
-              Watched Together on {new Date(memory.date).toLocaleDateString()}
+            <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
+              Watched Together on {formatDateMedium(memory.date)}
             </p>
             <div className="mt-6 flex justify-center gap-4">
               <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-bold text-amber-200">

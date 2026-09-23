@@ -9,8 +9,10 @@ const landingDisplay = Cormorant_Garamond({
   display: "swap",
 });
 
+import { BRAND } from "@/lib/brand";
+
 export const metadata = {
-  title: "MadLove — Some people become your universe",
+  title: `${BRAND.name} — Some people become your universe`,
   description:
     "A cinematic, privacy-first space for two. Enter the universe. Build your story.",
 };

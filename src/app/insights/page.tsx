@@ -2,11 +2,12 @@ import { getInsightsAction } from "@/actions/insights";
 import { AppShell } from "@/components/app-shell";
 import { InsightsPanel } from "@/components/insights-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Insights & Synergy — MadLove",
+  title: BRAND.formatTitle("Insights & Synergy"),
   description: "Relationship insights, compatibility radar, and intimate conversation sparks.",
 };
 

@@ -298,3 +298,176 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* ==========================================================================
+   MOBILE & OTT PLAYER ADAPTIVE STYLES
+   ========================================================================== */
+
+/* Prevent iOS Safari automatic zoom-in on input focus */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="url"],
+  input[type="search"],
+  input[type="datetime-local"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Touch manipulation & hardware acceleration */
+button, a, [role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Smooth momentum scrolling on iOS */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Safe Area Insets Helpers */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* OTT Video Scrubber Slider */
+.ott-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+}
+
+.ott-slider:focus {
+  outline: none;
+}
+
+.ott-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.25);
+  transition: height 0.15s ease;
+}
+
+.ott-slider:hover::-webkit-slider-runnable-track,
+.ott-slider:active::-webkit-slider-runnable-track {
+  height: 6px;
+}
+
+.ott-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: #f43f5e;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.8);
+  margin-top: -5px;
+  transition: transform 0.15s ease;
+}
+
+.ott-slider:hover::-webkit-slider-thumb,
+.ott-slider:active::-webkit-slider-thumb {
+  transform: scale(1.3);
+}
+
+.ott-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.ott-slider::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: #f43f5e;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.8);
+}
+
+/* Keyframe animations for OTT double-tap skip ripples */
+@keyframes ott-ripple-left {
+  0% {
+    opacity: 0;
+    transform: scale(0.6) translateX(10px);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.1) translateX(-5px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3) translateX(-18px);
+  }
+}
+
+@keyframes ott-ripple-right {
+  0% {
+    opacity: 0;
+    transform: scale(0.6) translateX(-10px);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.1) translateX(5px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3) translateX(18px);
+  }
+}
+
+.animate-ott-ripple-left {
+  animation: ott-ripple-left 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-ott-ripple-right {
+  animation: ott-ripple-right 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* OTT Frosted Controls Overlay */
+.ott-frosted-glass {
+  background: rgba(10, 12, 18, 0.75);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.ott-frosted-glass-subtle {
+  background: rgba(15, 17, 24, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Standalone dynamic viewport height utilities for older browsers */
+.h-screen-dvh {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.min-h-screen-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.max-h-screen-dvh {
+  max-height: 100vh;
+  max-height: 100dvh;
+}
+

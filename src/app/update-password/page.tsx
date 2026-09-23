@@ -1,8 +1,9 @@
 import { UpdatePasswordForm } from "@/components/update-password-form";
+import { BRAND } from "@/lib/brand";
 
 export const metadata = {
-  title: "Update Password — MadLove",
-  description: "Set your new MadLove password.",
+  title: BRAND.formatTitle("Update Password"),
+  description: `Set your new ${BRAND.name} password.`,
 };
 
 export default function UpdatePasswordPage() {

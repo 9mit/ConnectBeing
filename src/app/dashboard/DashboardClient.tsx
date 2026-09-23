@@ -19,6 +19,7 @@ import { SITE } from "@/content/site";
 import { capitalizeMood } from "@/lib/format";
 import { usePresence } from "@/components/presence-provider";
 import { setMoodAction } from "@/actions/mood";
+import { formatWeekdayDate, formatDateShort } from "@/lib/date";
 
 type ActionBag<T> =
   | { ok: true; data: T }
@@ -177,7 +178,7 @@ export function DashboardClient({ data }: DashboardProps) {
           </div>
 
           {/* Intimate Partner Presence Indicator */}
-          <div className="flex items-center gap-3 self-start sm:self-auto pt-1 sm:pt-0">
+          <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto pt-1 sm:pt-0">
             <div className="flex items-center gap-2 text-xs text-zinc-300">
               <span
                 className={`w-2 h-2 rounded-full transition-all duration-300 ${
@@ -200,7 +201,7 @@ export function DashboardClient({ data }: DashboardProps) {
               type="button"
               disabled={nudgePending}
               onClick={handleNudge}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:text-white hover:border-white/[0.18] transition-all"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[34px] rounded-full text-xs font-medium border border-white/[0.08] bg-white/[0.03] text-zinc-300 hover:text-white hover:border-white/[0.18] transition-all touch-manipulation active:scale-95"
               title="Ping your partner"
             >
               <Radio className="w-3 h-3 text-amber-300/80" />
@@ -240,7 +241,7 @@ export function DashboardClient({ data }: DashboardProps) {
             Today
           </h2>
           <span className="text-xs text-zinc-400">
-            {new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+            {formatWeekdayDate(new Date())}
           </span>
         </div>
 
@@ -272,7 +273,7 @@ export function DashboardClient({ data }: DashboardProps) {
                     type="button"
                     disabled={isSettingMood}
                     onClick={() => handleQuickMood(opt.value)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                    className={`inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-full text-xs font-medium transition-all touch-manipulation active:scale-95 ${
                       isSelected
                         ? "bg-white/15 text-white border border-white/25 shadow-sm"
                         : "bg-white/[0.03] text-zinc-300 border border-white/[0.06] hover:bg-white/[0.08] hover:text-white"
@@ -341,17 +342,17 @@ export function DashboardClient({ data }: DashboardProps) {
           <p className="text-xs sm:text-sm text-zinc-300 font-light leading-relaxed">
             {featuredActivity.description}
           </p>
-          <div className="pt-2 flex items-center gap-3">
+          <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <Link
               href="/together"
-              className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-medium hover:bg-white hover:shadow-md transition-all active:scale-98"
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] rounded-full bg-[#f7f6f2] text-[#07080b] text-xs font-semibold hover:bg-white hover:shadow-md transition-all active:scale-[0.98]"
             >
               <span>Start in Together Room</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </Link>
             <Link
               href="/calendar"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-white/[0.08] text-xs text-zinc-300 hover:text-white hover:bg-white/[0.04] transition-colors"
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-3 min-h-[44px] rounded-full border border-white/[0.08] text-xs text-zinc-300 hover:text-white hover:bg-white/[0.04] transition-colors"
             >
               <Calendar className="w-3.5 h-3.5" />
               <span>Schedule Night</span>
@@ -464,10 +465,7 @@ export function DashboardClient({ data }: DashboardProps) {
                     </p>
                   )}
                   <time className="text-[10px] text-zinc-500 block mt-1">
-                    {new Date(e.at).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    })}
+                    {formatDateShort(e.at)}
                   </time>
                 </div>
               </div>

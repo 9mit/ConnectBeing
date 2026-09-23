@@ -1,11 +1,12 @@
 import { AppShell } from "@/components/app-shell";
 import { MemoriesGallery } from "@/components/memories-gallery";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Memories & Moments — MadLove",
+  title: BRAND.formatTitle("Memories & Moments"),
   description: "Preserve your relationship milestones and favorite photo moments.",
 };
 

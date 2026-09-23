@@ -12,6 +12,7 @@ import { getAuthenticatedUserContext } from "@/lib/auth";
 import { hashInviteToken } from "@/lib/crypto/invite-token";
 import { setPendingInviteCookie } from "@/lib/invite-cookie";
 import { redis } from "@/lib/redis";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -129,7 +130,7 @@ export default async function InviteTokenPage({
         <div className="w-full max-w-md text-center space-y-8 relative z-10">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/30 bg-purple-950/60 text-[11px] font-bold uppercase tracking-widest text-amber-300 mb-3">
-              <span>✨</span> MadLove Sanctuary
+              <span>✨</span> {BRAND.name} Sanctuary
             </div>
             <h1 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-100 via-amber-300 to-amber-500 font-display text-glow-gold">
               Your Partner Invited You
@@ -197,7 +198,7 @@ export default async function InviteTokenPage({
               Already Connected
             </h1>
             <p className="text-sm text-slate-300 leading-relaxed">
-              You are currently connected to <strong className="text-amber-300">{currentPartnerName}</strong> in MadLove.
+              You are currently connected to <strong className="text-amber-300">{currentPartnerName}</strong> in {BRAND.name}.
             </p>
             <p className="text-xs text-slate-400 leading-relaxed">
               To protect the integrity of your sanctuary, you cannot join another couple while in an active relationship.

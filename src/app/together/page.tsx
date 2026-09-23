@@ -5,9 +5,15 @@ import { db } from "@/db";
 import { watchSessions } from "@/db/schema";
 import { AppShell } from "@/components/app-shell";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 import { TogetherClient } from "./TogetherClient";
 
 export const dynamic = "force-dynamic";
+
+export const metadata = {
+  title: BRAND.formatTitle("Together"),
+  description: "Virtual theater, synchronized playback, and shared cinematic memories.",
+};
 
 export default async function TogetherDashboardPage() {
   const auth = await requireVerifiedCoupleOrRedirect();

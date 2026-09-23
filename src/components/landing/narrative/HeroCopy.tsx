@@ -8,6 +8,7 @@ import { ArrowRight } from "lucide-react";
 
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { BeginStoryButton } from "../ui/BeginStoryButton";
+import { BRAND } from "@/lib/brand";
 
 export function HeroCopy() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -34,7 +35,7 @@ export function HeroCopy() {
   return (
     <section
       className="landing-section landing-hero relative min-h-screen min-h-[100dvh] w-full overflow-hidden flex flex-col justify-between items-center text-center px-5 pt-28 pb-10 md:pt-36 md:pb-12"
-      aria-label="MadLove sanctuary hero"
+      aria-label={`${BRAND.name} sanctuary hero`}
     >
       {/* Full-Screen Video Background (Covers 100% of Entire Screen) */}
       <div className="hero-fullscreen-video-container" aria-hidden="true">
@@ -113,7 +114,7 @@ export function HeroCopy() {
           transition={{ duration: 0.9, delay: 0.45 }}
           className="mt-6 md:mt-8"
         >
-          <a href="#why-madlove" className="hero-scroll-hint" aria-label="Explore the sanctuary">
+          <a href="#why-sanctuary" className="hero-scroll-hint" aria-label="Explore the sanctuary">
             <span>Scroll</span>
             <div className="hero-scroll-line" />
           </a>

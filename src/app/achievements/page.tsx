@@ -2,11 +2,12 @@ import { listAchievementsAction } from "@/actions/achievements";
 import { AppShell } from "@/components/app-shell";
 import { AchievementsPanel } from "@/components/achievements-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Achievements & Trophies — MadLove",
+  title: BRAND.formatTitle("Achievements & Trophies"),
   description: "Your relationship milestone trophies, secret badges, and unlocked achievements.",
 };
 

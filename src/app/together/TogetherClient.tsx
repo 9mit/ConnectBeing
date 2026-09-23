@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Trash2, Loader2 } from "lucide-react";
 import { deleteWatchSessionAction } from "@/actions/together";
+import { BRAND } from "@/lib/brand";
+import { formatSessionDateTime, formatDateMedium } from "@/lib/date";
 
 type TogetherProps = {
   activeSessions: {
@@ -80,7 +82,7 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
       animate="show"
       className="mx-auto max-w-5xl space-y-12"
     >
-      <motion.header variants={itemVariants} className="relative rounded-[32px] glass-panel p-12 text-center border-t border-white/[0.08] overflow-hidden group">
+      <motion.header variants={itemVariants} className="relative rounded-[28px] sm:rounded-[32px] glass-panel p-6 sm:p-12 text-center border-t border-white/[0.08] overflow-hidden group">
         {/* Cinematic Backdrop */}
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-10 mix-blend-screen group-hover:scale-105 transition-transform duration-[2s] ease-out" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#020104] via-black/40 to-transparent" />
@@ -89,19 +91,19 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
         <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-64 h-64 rounded-full blur-[100px] opacity-30 bg-amber-500/50 ambient-pulse" />
         
         <div className="relative z-10 flex flex-col items-center">
-          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-amber-400/80 mb-4 bg-amber-500/10 px-4 py-1.5 rounded-full border border-amber-500/20 shadow-[0_0_20px_rgba(251,191,36,0.15)]">
+          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-amber-400/80 mb-3 sm:mb-4 bg-amber-500/10 px-3.5 py-1.5 rounded-full border border-amber-500/20 shadow-[0_0_20px_rgba(251,191,36,0.15)]">
             Virtual Theater
           </span>
-          <h1 className="text-5xl md:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60 font-display tracking-tight text-glow">
-            MadLove Together
+          <h1 className="text-3xl sm:text-5xl md:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60 font-display tracking-tight text-glow">
+            {BRAND.name} Together
           </h1>
-          <p className="mt-4 text-sm md:text-base text-slate-300 font-medium max-w-lg mx-auto leading-relaxed">
+          <p className="mt-3 sm:mt-4 text-xs sm:text-sm md:text-base text-slate-300 font-medium max-w-lg mx-auto leading-relaxed">
             Your private cinematic space. Sync movies, share reactions, and build a digital film library of your memories together.
           </p>
-          <div className="mt-8 flex justify-center gap-6">
+          <div className="mt-6 sm:mt-8 flex justify-center gap-6">
             <Link
               href="/together/new"
-              className="group relative inline-flex items-center gap-2 rounded-full bg-white text-black px-8 py-3.5 font-extrabold text-[11px] uppercase tracking-widest shadow-[0_0_40px_rgba(255,255,255,0.2)] hover:shadow-[0_0_60px_rgba(255,255,255,0.4)] hover:scale-105 transition-all duration-300"
+              className="group relative inline-flex items-center gap-2 rounded-full bg-white text-black px-6 sm:px-8 py-3 sm:py-3.5 font-extrabold text-[11px] uppercase tracking-widest shadow-[0_0_40px_rgba(255,255,255,0.2)] hover:shadow-[0_0_60px_rgba(255,255,255,0.4)] hover:scale-105 transition-all duration-300"
             >
               <span>Plan Movie Night</span>
               <span className="group-hover:translate-x-1 transition-transform">→</span>
@@ -118,7 +120,7 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
         </motion.h2>
 
         {sessions.length === 0 ? (
-          <motion.div variants={itemVariants} className="rounded-3xl glass-panel border border-white/[0.04] bg-white/[0.01] p-12 text-center flex flex-col items-center gap-4">
+          <motion.div variants={itemVariants} className="rounded-3xl glass-panel border border-white/[0.04] bg-white/[0.01] p-8 sm:p-12 text-center flex flex-col items-center gap-4">
             <div className="w-16 h-16 rounded-full bg-white/[0.02] border border-white/[0.05] flex items-center justify-center text-2xl text-slate-600">
               🍿
             </div>
@@ -130,7 +132,7 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
         ) : (
           <div className="grid gap-6 sm:grid-cols-2">
             {sessions.map((session) => (
-              <motion.div variants={itemVariants} key={session.id} className="group relative overflow-hidden rounded-3xl glass-panel border border-white/[0.06] bg-[#0c0a14]/80 p-8 shadow-2xl interactive">
+              <motion.div variants={itemVariants} key={session.id} className="group relative overflow-hidden rounded-3xl glass-panel border border-white/[0.06] bg-[#0c0a14]/80 p-5 sm:p-8 shadow-2xl interactive">
                 {/* Poster Backdrop */}
                 {session.posterUrl ? (
                   <div
@@ -173,7 +175,7 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
                       {session.title}
                     </h3>
                     <p className="text-[11px] font-semibold text-slate-400 mt-2 uppercase tracking-widest">
-                      {new Date(session.scheduledFor).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      {formatSessionDateTime(session.scheduledFor)}
                     </p>
                     {session.invitationMessage && (
                       <p className="mt-4 text-xs italic text-slate-200 bg-black/40 border-l-2 border-amber-500/50 p-3 rounded-r-xl">
@@ -243,7 +245,7 @@ export function TogetherClient({ activeSessions, pastSessions }: TogetherProps) 
                 </div>
                 <h3 className="font-bold text-slate-100 font-display text-sm tracking-tight truncate">{session.title}</h3>
                 <p className="text-[10px] font-semibold text-slate-400 mt-1 uppercase tracking-widest">
-                  {new Date(session.scheduledFor).toLocaleDateString()}
+                  {formatDateMedium(session.scheduledFor)}
                 </p>
               </Link>
             ))}

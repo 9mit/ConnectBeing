@@ -4,11 +4,12 @@ import { listRemindersAction } from "@/actions/reminders";
 import { AppShell } from "@/components/app-shell";
 import { PlayPanel } from "@/components/play-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Quests & Challenges — MadLove",
+  title: BRAND.formatTitle("Quests & Challenges"),
   description: "Shared couple growth quests, rituals, and milestone achievements.",
 };
 

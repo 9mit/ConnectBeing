@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { getInvitePreviewAction } from "@/actions/invite";
+import { BRAND } from "@/lib/brand";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -67,7 +68,7 @@ export function InvitePreviewBanner({ token }: { token: string }) {
       <p className="text-sm text-slate-300 leading-relaxed max-w-xs">
         You have been invited by{" "}
         <span className="font-semibold text-amber-300 text-glow-gold">{preview.displayName}</span>{" "}
-        to join MadLove.
+        to join {BRAND.name}.
       </p>
     </div>
   );

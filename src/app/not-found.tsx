@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BRAND } from "@/lib/brand";
 
 export default function NotFound() {
   return (
@@ -8,7 +9,7 @@ export default function NotFound() {
       <div className="relative z-10 flex flex-col items-center w-full max-w-md text-center space-y-6">
         <Link href="/" className="group flex flex-col items-center mb-2">
           <h1 className="text-5xl font-extrabold tracking-tight text-white font-display select-none group-hover:text-rose-100 transition-colors">
-            MadLove
+            {BRAND.name}
           </h1>
           <span className="text-[10px] uppercase tracking-[0.3em] text-rose-400/80 font-bold mt-1">
             universe for two

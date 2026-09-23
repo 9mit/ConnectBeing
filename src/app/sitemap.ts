@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
+import { BRAND } from "@/lib/brand";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://madlove.app";
+  const baseUrl = BRAND.url;
   const now = new Date();
 
   return [

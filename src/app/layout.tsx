@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 
 import { PwaRegister } from "@/components/pwa-register";
+import { Analytics } from "@vercel/analytics/next";
 
 import "./globals.css";
 
@@ -17,16 +18,17 @@ const plusJakartaSans = Plus_Jakarta_Sans({
   display: "swap",
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://madlove.app";
+import { BRAND } from "@/lib/brand";
+
+const siteUrl = BRAND.url;
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "MadLove — Where two souls inhabit one quiet universe",
-    template: "%s | MadLove",
+    default: BRAND.taglineTitle,
+    template: BRAND.titleTemplate,
   },
-  description:
-    "A cinematic, privacy-first digital sanctuary for two. Synchronized 4K cinema, end-to-end encrypted whispers, date-locked memory vaults, and a universe built for an audience of exactly one.",
+  description: BRAND.description,
   keywords: [
     "couples app",
     "private couple sanctuary",
@@ -36,9 +38,9 @@ export const metadata: Metadata = {
     "relationship milestones",
     "private messaging for two",
   ],
-  authors: [{ name: "MadLove" }],
-  creator: "MadLove",
-  publisher: "MadLove",
+  authors: [{ name: BRAND.author }],
+  creator: BRAND.creator,
+  publisher: BRAND.publisher,
   manifest: "/manifest.webmanifest",
   alternates: {
     canonical: "/",
@@ -47,26 +49,24 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: siteUrl,
-    siteName: "MadLove",
-    title: "MadLove — Where two souls inhabit one quiet universe",
-    description:
-      "A cinematic, privacy-first digital sanctuary for two. Synchronized cinema, end-to-end encrypted whispers, and a private universe built for exactly one person.",
+    siteName: BRAND.name,
+    title: BRAND.taglineTitle,
+    description: BRAND.description,
     images: [
       {
         url: "/souls-poster.jpg",
         width: 1280,
         height: 720,
-        alt: "Two luminous souls uniting in cosmic harmony inside MadLove",
+        alt: `Two luminous souls uniting in cosmic harmony inside ${BRAND.name}`,
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "MadLove — Where two souls inhabit one quiet universe",
-    description:
-      "A cinematic, privacy-first space for two. Synchronized cinema, end-to-end encrypted intimacy, and date-locked memory vaults.",
+    title: BRAND.taglineTitle,
+    description: BRAND.description,
     images: ["/souls-poster.jpg"],
-    creator: "@madloveapp",
+    creator: BRAND.twitterHandle,
   },
   robots: {
     index: true,
@@ -106,10 +106,9 @@ export default function RootLayout({
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "WebApplication",
-    name: "MadLove",
+    name: BRAND.name,
     url: siteUrl,
-    description:
-      "A cinematic, privacy-first digital space for couples featuring synchronized cinema, end-to-end encrypted chat, and date-locked memory vaults.",
+    description: BRAND.description,
     applicationCategory: "LifestyleApplication",
     operatingSystem: "All (Web, iOS, Android, macOS, Windows, Linux)",
     offers: {
@@ -140,6 +139,7 @@ export default function RootLayout({
       >
         <PwaRegister />
         {children}
+        <Analytics />
       </body>
     </html>
   );

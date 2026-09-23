@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { requireOnboardedUser, redirectPathForAuthError } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +28,13 @@ export default async function OnboardingDecisionPage() {
       <div className="mx-auto max-w-2xl relative z-10 space-y-10 text-center w-full">
         <div className="space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/30 bg-purple-950/60 text-[11px] font-bold uppercase tracking-widest text-amber-300">
-            <span>✨</span> MadLove Sanctuary
+            <span>✨</span> {BRAND.name} Sanctuary
           </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-100 via-amber-300 to-amber-500 font-display text-glow-gold">
             Do you already have someone?
           </h1>
           <p className="text-sm sm:text-base text-slate-300 max-w-lg mx-auto leading-relaxed">
-            MadLove is crafted for authentic, private connection. Choose how you would like to begin.
+            {BRAND.name} is crafted for authentic, private connection. Choose how you would like to begin.
           </p>
         </div>
 

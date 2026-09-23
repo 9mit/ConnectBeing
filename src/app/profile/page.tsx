@@ -2,11 +2,12 @@ import { getCoupleProfilesAction } from "@/actions/profile";
 import { AppShell } from "@/components/app-shell";
 import { ProfilePanel } from "@/components/profile-panel";
 import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
+import { BRAND } from "@/lib/brand";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Couple Profile — MadLove",
+  title: BRAND.formatTitle("Couple Profile"),
   description: "View and edit your personal profile, partner profile, and relationship anniversary.",
 };
 
