@@ -208,10 +208,12 @@ export function VirtualRoom({
     });
   }, [sessionId]);
 
-  // Attach local media stream to local video element (Host)
+  // Attach local media stream to local video element (Host - visual preview only, permanently muted)
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.muted = true;
+      localVideoRef.current.defaultMuted = true;
       void localVideoRef.current.play().catch(() => {});
     }
   }, [localStream]);
@@ -730,19 +732,27 @@ export function VirtualRoom({
     window.location.assign(destination);
   };
 
-  // Determine active video stream presence
-  const hasActiveStream =
-    (roomState === "LIVE" || roomState === "STREAM_CONNECTING") &&
-    (isHost ? !!localStream : !!remoteStream);
+  // Authoritative host capture state: genuine presence of live, enabled video track
+  const isHostCapturing =
+    isHost &&
+    !!localStream &&
+    localStream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled);
+
+  // Authoritative active video stream presence for the cinema stage
+  const hasActiveStream = isHost
+    ? isHostCapturing
+    : (roomState === "LIVE" || roomState === "STREAM_CONNECTING" || roomState === "RECONNECTING") &&
+      !!remoteStream &&
+      remoteStream.getVideoTracks().some((t) => t.readyState === "live");
 
   // Companion Mode decision:
   // Automatically activate Companion Mode if:
   // 1. User explicitly requested it, OR
-  // 2. Room state is explicitly FALLBACK_MODE, OR
+  // 2. Room state is explicitly FALLBACK_MODE (and host is not actively capturing), OR
   // 3. Current user is Host on a device that CANNOT capture tab/screen (mobile host).
   const isCompanionMode =
     userSwitchedToCompanion ||
-    roomState === "FALLBACK_MODE" ||
+    (!isHostCapturing && roomState === "FALLBACK_MODE") ||
     (isHost && !canShareScreen && !hasActiveStream);
 
   const isCinemaFullscreen = isImmersiveTheater || isFullscreen || isLandscape;
@@ -1287,15 +1297,17 @@ export function VirtualRoom({
               </div>
             )}
 
-            {/* A. HOST VIEW: LOCAL SHARED TAB STREAM */}
+            {/* A. HOST VIEW: LOCAL SHARED TAB STREAM (VISUAL PREVIEW ONLY - PERMANENTLY MUTED TO PREVENT ECHO) */}
             {isHost && (
               <video
                 ref={localVideoRef}
-                muted={isVideoMuted}
+                muted={true}
                 autoPlay
                 playsInline
+                webkit-playsinline="true"
+                x5-playsinline="true"
                 className={`h-full w-full object-contain ${
-                  hasActiveStream ? "block" : "hidden"
+                  isHostCapturing ? "block" : "hidden"
                 }`}
               />
             )}
@@ -1304,15 +1316,17 @@ export function VirtualRoom({
             {!isHost && (
               <video
                 ref={remoteVideoRef}
-                muted={isVideoMuted}
+                muted={isAutoplayMuted || isVideoMuted}
                 autoPlay
                 playsInline
+                webkit-playsinline="true"
+                x5-playsinline="true"
                 className="h-full w-full object-contain"
               />
             )}
 
-            {/* C. HOST SETUP GUIDE (When no stream is live) */}
-            {isHost && !hasActiveStream && !isCompanionMode && (
+            {/* C. HOST SETUP GUIDE (When no screen capture is active) */}
+            {isHost && !isHostCapturing && !isCompanionMode && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-gradient-to-b from-[#090b11]/90 via-[#07080d]/95 to-black backdrop-blur-md overflow-y-auto">
                 <div className="max-w-lg w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15]/90 p-6 sm:p-8 shadow-2xl space-y-5 sm:space-y-6 my-auto">
                   <div

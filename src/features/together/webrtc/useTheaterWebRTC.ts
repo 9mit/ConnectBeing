@@ -79,6 +79,8 @@ export function useTheaterWebRTC({
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const localVoiceRef = useRef<MediaStream | null>(null);
   const remoteVoiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const remoteMovieStreamIdRef = useRef<string | null>(null);
+  const remoteVoiceStreamIdRef = useRef<string | null>(null);
   const streamSourceTypeRef = useRef<"tab" | "window" | "screen" | "none">(streamSourceType);
   streamSourceTypeRef.current = streamSourceType;
 
@@ -174,36 +176,60 @@ export function useTheaterWebRTC({
     };
 
     pc.ontrack = (ev) => {
-      if (ev.track.kind === "video") {
-        const stream = ev.streams[0] || new MediaStream([ev.track]);
-        remoteStreamRef.current = stream;
-        setRemoteStream(stream);
+      const track = ev.track;
+      const associatedStream = ev.streams[0];
+      const streamId = associatedStream?.id;
+
+      if (track.kind === "video") {
+        if (streamId) {
+          remoteMovieStreamIdRef.current = streamId;
+        }
+
+        // Return a fresh MediaStream instance so React state change triggers useEffect in VirtualRoom
+        setRemoteStream((prev) => {
+          const currentTracks = prev ? prev.getTracks().filter((t) => t.id !== track.id) : [];
+          const nextStream = new MediaStream([...currentTracks, track]);
+          remoteStreamRef.current = nextStream;
+          return nextStream;
+        });
         updateState("LIVE");
 
-        ev.track.onended = () => {
-          setRemoteStream(null);
-          remoteStreamRef.current = null;
-          updateState("STREAM_ENDED");
-        };
-      } else if (ev.track.kind === "audio") {
-        const isMic = ev.track.label.toLowerCase().includes("mic");
-        if (isMic) {
-          if (remoteVoiceAudioRef.current) {
-            remoteVoiceAudioRef.current.srcObject = new MediaStream([ev.track]);
-            void remoteVoiceAudioRef.current.play().catch(() => {});
-          }
-        } else {
-          // Tab movie audio
+        track.onended = () => {
           setRemoteStream((prev) => {
-            if (!prev) {
-              const s = ev.streams[0] || new MediaStream([ev.track]);
-              remoteStreamRef.current = s;
-              return s;
+            if (!prev) return null;
+            const remaining = prev.getTracks().filter((t) => t.id !== track.id);
+            if (remaining.length === 0 || !remaining.some((t) => t.kind === "video")) {
+              remoteStreamRef.current = null;
+              updateState("STREAM_ENDED");
+              return null;
             }
-            if (!prev.getAudioTracks().some((t) => t.id === ev.track.id)) {
-              prev.addTrack(ev.track);
-            }
-            return prev;
+            const nextStream = new MediaStream(remaining);
+            remoteStreamRef.current = nextStream;
+            return nextStream;
+          });
+        };
+      } else if (track.kind === "audio") {
+        // Disambiguate movie tab audio vs voice microphone audio
+        const isMovieAudio =
+          (remoteMovieStreamIdRef.current && streamId === remoteMovieStreamIdRef.current) ||
+          (associatedStream && associatedStream.getVideoTracks().length > 0) ||
+          (!remoteVoiceStreamIdRef.current && !track.label.toLowerCase().includes("mic"));
+
+        const isVoiceAudio =
+          (remoteVoiceStreamIdRef.current && streamId === remoteVoiceStreamIdRef.current) ||
+          track.label.toLowerCase().includes("mic") ||
+          !isMovieAudio;
+
+        if (isVoiceAudio && remoteVoiceAudioRef.current) {
+          remoteVoiceAudioRef.current.srcObject = new MediaStream([track]);
+          void remoteVoiceAudioRef.current.play().catch(() => {});
+        } else {
+          // Tab movie audio: add to remoteStream immutably
+          setRemoteStream((prev) => {
+            const currentTracks = prev ? prev.getTracks().filter((t) => t.id !== track.id) : [];
+            const nextStream = new MediaStream([...currentTracks, track]);
+            remoteStreamRef.current = nextStream;
+            return nextStream;
           });
         }
       }
@@ -218,6 +244,11 @@ export function useTheaterWebRTC({
           updateState("LIVE");
         }
       } else if (state === "disconnected" || state === "failed") {
+        // If host is actively capturing tab, do not demote host to RECONNECTING or FALLBACK_MODE
+        if (isHost && localStreamRef.current?.getVideoTracks().some((t) => t.readyState === "live")) {
+          return;
+        }
+
         if (roomStateRef.current === "LIVE") {
           updateState("RECONNECTING");
           if (isHost && restartAttemptsRef.current < 3) {
@@ -227,12 +258,17 @@ export function useTheaterWebRTC({
                 pc.restartIce();
                 const offer = await pc.createOffer({ iceRestart: true });
                 await pc.setLocalDescription(offer);
-                sendSignal("theater:offer", { sdp: offer });
+                sendSignal("theater:offer", {
+                  sdp: offer,
+                  offerId: activeOfferIdRef.current,
+                  movieStreamId: localStreamRef.current?.id,
+                  voiceStreamId: localVoiceRef.current?.id,
+                });
               } catch {
-                updateState("FALLBACK_MODE");
+                if (!isHost) updateState("FALLBACK_MODE");
               }
             })();
-          } else if (restartAttemptsRef.current >= 3) {
+          } else if (restartAttemptsRef.current >= 3 && !isHost) {
             updateState("FALLBACK_MODE");
           }
         }
@@ -250,8 +286,8 @@ export function useTheaterWebRTC({
     const videoTrack = localStreamRef.current.getVideoTracks()[0];
     if (!videoTrack || videoTrack.readyState !== "live") return;
 
-    // 1. If already connected, re-announce stream state so viewer can confirm
-    if (pcRef.current && pcRef.current.connectionState === "connected") {
+    // 1. If already connected AND not responding to a newly joined viewer, re-announce stream state
+    if (!targetViewerId && pcRef.current && pcRef.current.connectionState === "connected") {
       sendSignal("theater:stream-state", {
         state: "LIVE",
         surface: streamSourceTypeRef.current || "tab",
@@ -259,28 +295,9 @@ export function useTheaterWebRTC({
       return;
     }
 
-    // 2. If offer is already generated and pending viewer answer, re-send in-flight offer
-    if (
-      pcRef.current &&
-      pcRef.current.signalingState === "have-local-offer" &&
-      pcRef.current.localDescription
-    ) {
-      sendSignal("theater:offer", {
-        sdp: pcRef.current.localDescription,
-        surface: streamSourceTypeRef.current || "tab",
-        offerId: activeOfferIdRef.current,
-        targetViewerId,
-      });
-      sendSignal("theater:stream-state", {
-        state: "LIVE",
-        surface: streamSourceTypeRef.current || "tab",
-      });
-      return;
-    }
-
-    // 3. Debounce rapid renegotiations (at least 800ms between new offers)
+    // 2. Debounce rapid renegotiations (at least 600ms between new offers)
     const now = Date.now();
-    if (now - lastRenegotiateTimeRef.current < 800) {
+    if (now - lastRenegotiateTimeRef.current < 600) {
       return;
     }
     lastRenegotiateTimeRef.current = now;
@@ -325,10 +342,10 @@ export function useTheaterWebRTC({
         }
       }
 
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer({ iceRestart: true });
       await pc.setLocalDescription(offer);
 
-      // Wait up to 500ms for initial STUN candidates to gather into localDescription
+      // Wait up to 350ms for initial STUN candidates to gather into localDescription
       await new Promise<void>((resolve) => {
         if (pc.iceGatheringState === "complete") {
           resolve();
@@ -343,7 +360,7 @@ export function useTheaterWebRTC({
           setTimeout(() => {
             pc.removeEventListener("icegatheringstatechange", check);
             resolve();
-          }, 500);
+          }, 350);
         }
       });
 
@@ -355,6 +372,8 @@ export function useTheaterWebRTC({
         surface: streamSourceTypeRef.current || "tab",
         offerId,
         targetViewerId,
+        movieStreamId: localStreamRef.current?.id,
+        voiceStreamId: localVoiceRef.current?.id,
       });
 
       sendSignal("theater:stream-state", {
@@ -507,6 +526,8 @@ export function useTheaterWebRTC({
           sdp: pc.localDescription || offer,
           surface: detectedSurface,
           offerId,
+          movieStreamId: stream.id,
+          voiceStreamId: localVoiceRef.current?.id,
         });
       } finally {
         makingOfferRef.current = false;
@@ -534,7 +555,14 @@ export function useTheaterWebRTC({
   // Toggle voice call in-theater
   const startVoiceCall = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
       localVoiceRef.current = stream;
       setVoiceStream(stream);
       setVoiceActive(true);
@@ -596,6 +624,7 @@ export function useTheaterWebRTC({
       })
       .on("broadcast", { event: "theater:offer" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
+        if (payload.targetViewerId && payload.targetViewerId !== userId) return;
         try {
           // If already processing or connected with this offerId, avoid resetting
           if (
@@ -605,6 +634,13 @@ export function useTheaterWebRTC({
             return;
           }
           activeOfferIdRef.current = payload.offerId;
+
+          if (payload.movieStreamId) {
+            remoteMovieStreamIdRef.current = payload.movieStreamId;
+          }
+          if (payload.voiceStreamId) {
+            remoteVoiceStreamIdRef.current = payload.voiceStreamId;
+          }
 
           const needFresh =
             !pcRef.current ||
@@ -703,6 +739,10 @@ export function useTheaterWebRTC({
       .on("broadcast", { event: "theater:stream-state" }, ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
         if (payload.state) {
+          // If host is actively capturing, remote state updates must not overwrite host's own LIVE state
+          if (isHost && localStreamRef.current?.getVideoTracks().some((t) => t.readyState === "live")) {
+            return;
+          }
           updateState(payload.state);
           if (payload.surface) {
             setStreamSourceType(payload.surface);
