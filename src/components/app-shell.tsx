@@ -306,13 +306,12 @@ export function AppShell({
                   href="/dashboard" 
                   prefetch={true}
                   onClick={() => setPendingPath("/dashboard")}
-                  className="group relative flex items-center gap-2"
+                  className="group relative flex items-center"
                   aria-label={`${BRAND.name} Sanctuary`}
                 >
                   <span className="font-serif text-lg tracking-[0.22em] font-light text-[#f7f6f2] group-hover:text-amber-100/90 transition-colors">
                     {BRAND.mark}
                   </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80" aria-hidden />
                 </Link>
                 
                 {/* Primary Desktop Navigation */}
