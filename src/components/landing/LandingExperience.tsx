@@ -12,6 +12,7 @@ import { InteractivePreview } from "./narrative/InteractivePreview";
 import { SectionArchive } from "./narrative/SectionArchive";
 import { SectionTrust } from "./narrative/SectionTrust";
 import { SectionSunriseCta } from "./narrative/SectionSunriseCta";
+import { LandingFooter } from "./ui/LandingFooter";
 
 function GlobalCosmicAtmosphere() {
   return <div className="global-cosmic-atmosphere" aria-hidden="true" />;
@@ -56,6 +57,9 @@ export function LandingExperience() {
 
           {/* Chapter V: Your Sanctuary Awaits */}
           <SectionSunriseCta />
+
+          {/* Landing Page Footer · Ninegalaxies & CodeSamjho Ecosystem */}
+          <LandingFooter />
         </main>
       </LandingScrollProvider>
     </div>

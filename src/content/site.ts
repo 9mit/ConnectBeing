@@ -7,6 +7,21 @@ export const SITE = {
   tagline: "Some people become your universe",
   privacyLine: "Private space · end-to-end encrypted",
   defaultPetName: "Buddy",
+  parentCompany: {
+    name: "Ninegalaxies",
+    tagline: "A Product by Ninegalaxies",
+    logo: "/images/ninegalaxies.png",
+    description:
+      "Crafting intentional digital universes, sacred connection spaces, and high-craft software experiences.",
+  },
+  sisterProduct: {
+    name: "CodeSamjho",
+    url: "https://codesamjho.online/",
+    badge: "Sister Product",
+    tagline: "Interactive Code Execution & Algorithm Visualizer",
+    description:
+      "Step through complex algorithms line-by-line across Python, Java, C++, and JavaScript with real-time memory and call stack visualization.",
+  },
 } as const;
 
 export const LANDING_HERO = {

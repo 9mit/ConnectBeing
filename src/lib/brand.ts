@@ -48,6 +48,7 @@ export const BRAND = {
   author: RAW_BRAND_NAME,
   creator: RAW_BRAND_NAME,
   publisher: RAW_BRAND_NAME,
+  parentStudio: "Ninegalaxies",
 
   /**
    * Helper to format consistent, accessible page title strings.

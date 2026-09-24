@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { ArrowRight, ShieldCheck, Lock, Heart } from "lucide-react";
 
-import { LANDING_CHAPTERS, SITE } from "@/content/site";
+import { LANDING_CHAPTERS } from "@/content/site";
 import { BeginStoryButton } from "../ui/BeginStoryButton";
 
 export function SectionSunriseCta() {
@@ -96,23 +96,6 @@ export function SectionSunriseCta() {
             <span className="text-zinc-300">Strictly Two Devices</span>
           </span>
         </motion.div>
-
-        {/* Minimal Editorial Footer */}
-        <div className="pt-12 border-t border-white/[0.06] w-full flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-500">
-          <div className="flex items-center gap-2">
-            <span className="text-zinc-300 font-bold font-serif">{SITE.brandMark}</span>
-            <span>· A sanctuary for two</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <Link href="/privacy" className="hover:text-zinc-300 transition-colors">
-              Privacy Policy
-            </Link>
-            <Link href="/security" className="hover:text-zinc-300 transition-colors">
-              Security Overview
-            </Link>
-            <span>{LANDING_CHAPTERS.footer.whisper}</span>
-          </div>
-        </div>
       </div>
     </section>
   );
