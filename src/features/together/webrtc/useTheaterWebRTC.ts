@@ -210,17 +210,25 @@ export function useTheaterWebRTC({
           remoteMovieStreamIdRef.current = streamId;
         }
 
+        const nativeStream = associatedStream || new MediaStream([track]);
         if (!remoteStreamRef.current) {
-          remoteStreamRef.current = new MediaStream();
+          remoteStreamRef.current = nativeStream;
         }
         const rStream = remoteStreamRef.current;
         if (!rStream.getVideoTracks().some((t) => t.id === track.id)) {
           rStream.addTrack(track);
         }
 
-        // Return a fresh MediaStream clone so React state change triggers useEffect in VirtualRoom
         setRemoteStream(new MediaStream(rStream.getTracks()));
         updateState("LIVE");
+
+        track.onunmute = () => {
+          console.log("[WebRTC] Video track unmuted (media packets flowing):", track.id);
+          updateState("LIVE");
+          if (remoteStreamRef.current) {
+            setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+          }
+        };
 
         track.onended = () => {
           if (!remoteStreamRef.current) return;
@@ -252,7 +260,7 @@ export function useTheaterWebRTC({
         } else {
           // Tab movie audio: add to remoteStream
           if (!remoteStreamRef.current) {
-            remoteStreamRef.current = new MediaStream();
+            remoteStreamRef.current = associatedStream || new MediaStream([track]);
           }
           const rStream = remoteStreamRef.current;
           if (!rStream.getAudioTracks().some((t) => t.id === track.id)) {

@@ -35,6 +35,7 @@ import {
   Smile,
   Bookmark,
   CheckCircle2,
+  LogOut,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
@@ -260,39 +261,21 @@ export function VirtualRoom({
       }
 
       videoEl.playsInline = true;
+      videoEl.defaultMuted = true;
+      videoEl.muted = true;
       videoEl.setAttribute("playsinline", "true");
       videoEl.setAttribute("webkit-playsinline", "true");
       videoEl.setAttribute("x5-playsinline", "true");
 
       const startPlayback = async () => {
-        // If user already muted or autoplay was muted, keep muted
-        if (isAutoplayMutedRef.current) {
-          videoEl.muted = true;
-          try {
-            await videoEl.play();
-          } catch {
-            // Retry
-          }
-          return;
-        }
-
-        // Try unmuted first (desktop browsers)
+        // Prioritize immediate playback so video frames decode without delay.
+        // Mobile browsers always require muted autoplay initially.
+        videoEl.muted = true;
+        setIsAutoplayMuted(true);
         try {
-          videoEl.muted = false;
           await videoEl.play();
-          setIsAutoplayMuted(false);
-        } catch (unmutedErr) {
-          console.warn("[VirtualRoom] Unmuted autoplay blocked by browser policy, switching to muted video:", unmutedErr);
-          // Fallback: Mute video immediately so video frames render without delay
-          videoEl.muted = true;
-          // Always set isAutoplayMuted, regardless of whether audio tracks exist yet.
-          // Audio may arrive in a separate ontrack event after video.
-          setIsAutoplayMuted(true);
-          try {
-            await videoEl.play();
-          } catch (mutedErr) {
-            console.error("[VirtualRoom] Muted playback also failed:", mutedErr);
-          }
+        } catch (err) {
+          console.warn("[VirtualRoom] Autoplay play() attempt:", err);
         }
       };
 
@@ -558,8 +541,13 @@ export function VirtualRoom({
         }
       } else {
         lastTapRef.current = { time: now, x: clientX, y: clientY };
-        if (!isHost && isAutoplayMuted) {
-          handleUnmuteRemote();
+        if (!isHost) {
+          if (remoteVideoRef.current && remoteVideoRef.current.paused) {
+            void remoteVideoRef.current.play().catch(() => {});
+          }
+          if (isAutoplayMuted) {
+            handleUnmuteRemote();
+          }
         }
         setShowControls((prev) => !prev);
         resetControlsTimer();
@@ -845,7 +833,19 @@ export function VirtualRoom({
   };
 
   const handleLeaveSession = () => {
-    setShowCompletionPrompt(true);
+    // Immediate, reliable exit to /together for both mobile and desktop
+    cleanupMediaAndFullscreen();
+    try {
+      void notifyPartnerLeaving();
+    } catch {
+      /* ignore */
+    }
+    try {
+      void leaveWatchSessionAction(sessionId, positionSeconds);
+    } catch {
+      /* ignore */
+    }
+    window.location.assign("/together");
   };
 
   const handleResumeLater = async () => {
@@ -1264,6 +1264,19 @@ export function VirtualRoom({
                     >
                       <ChevronLeft size={20} />
                     </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleLeaveSession();
+                      }}
+                      className="min-h-[44px] px-3.5 rounded-full bg-rose-600/80 hover:bg-rose-600 text-white text-xs font-semibold flex items-center gap-1.5 active:scale-95 transition-all shadow-lg"
+                      title="Leave Theater"
+                      aria-label="Leave Theater"
+                    >
+                      <LogOut size={14} />
+                      <span>Leave</span>
+                    </button>
                     <div>
                       <h2 className="text-sm sm:text-base font-bold text-white tracking-wide">{title}</h2>
                       <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">{providerName}</span>
@@ -1532,7 +1545,7 @@ export function VirtualRoom({
             {!isHost && (
               <video
                 ref={remoteVideoRef}
-                muted={isAutoplayMuted || isVideoMuted}
+                muted={true}
                 autoPlay
                 playsInline
                 webkit-playsinline="true"
@@ -1583,6 +1596,12 @@ export function VirtualRoom({
                       <p className="text-xs font-medium text-white">Share Browser Tab</p>
                       <p className="text-[11px] text-zinc-400">
                         Select the tab where your movie is running.
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-1 col-span-1 sm:col-span-2 text-left">
+                      <span className="text-[10px] font-mono text-amber-400 font-bold">DRM TIP FOR HOTSTAR / NETFLIX</span>
+                      <p className="text-[11px] text-zinc-300 leading-relaxed">
+                        If sharing Hotstar or Netflix and your partner sees audio but black video, turn off Hardware Acceleration in Chrome (Settings &rarr; System &rarr; toggle off &ldquo;Use graphics acceleration when available&rdquo; and restart Chrome) or test with YouTube to verify.
                       </p>
                     </div>
                   </div>
