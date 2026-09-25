@@ -75,6 +75,7 @@ export function useTheaterWebRTC({
   const restartAttemptsRef = useRef(0);
   const makingOfferRef = useRef(false);
   const activeOfferIdRef = useRef<string | null>(null);
+  const pendingRenegotiateViewerIdRef = useRef<string | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const localVoiceRef = useRef<MediaStream | null>(null);
@@ -83,6 +84,9 @@ export function useTheaterWebRTC({
   const remoteVoiceStreamIdRef = useRef<string | null>(null);
   const streamSourceTypeRef = useRef<"tab" | "window" | "screen" | "none">(streamSourceType);
   streamSourceTypeRef.current = streamSourceType;
+
+  const renegotiateRef = useRef<(id?: string) => Promise<void>>();
+  const sendViewerReadyRef = useRef<() => void>();
 
   // Sync state ref for safe callbacks
   const roomStateRef = useRef<TheaterRoomState>(roomState);
@@ -185,28 +189,29 @@ export function useTheaterWebRTC({
           remoteMovieStreamIdRef.current = streamId;
         }
 
-        // Return a fresh MediaStream instance so React state change triggers useEffect in VirtualRoom
-        setRemoteStream((prev) => {
-          const currentTracks = prev ? prev.getTracks().filter((t) => t.id !== track.id) : [];
-          const nextStream = new MediaStream([...currentTracks, track]);
-          remoteStreamRef.current = nextStream;
-          return nextStream;
-        });
+        if (!remoteStreamRef.current) {
+          remoteStreamRef.current = new MediaStream();
+        }
+        const rStream = remoteStreamRef.current;
+        if (!rStream.getVideoTracks().some((t) => t.id === track.id)) {
+          rStream.addTrack(track);
+        }
+
+        // Return a fresh MediaStream clone so React state change triggers useEffect in VirtualRoom
+        setRemoteStream(new MediaStream(rStream.getTracks()));
         updateState("LIVE");
 
         track.onended = () => {
-          setRemoteStream((prev) => {
-            if (!prev) return null;
-            const remaining = prev.getTracks().filter((t) => t.id !== track.id);
-            if (remaining.length === 0 || !remaining.some((t) => t.kind === "video")) {
-              remoteStreamRef.current = null;
-              updateState("STREAM_ENDED");
-              return null;
-            }
-            const nextStream = new MediaStream(remaining);
-            remoteStreamRef.current = nextStream;
-            return nextStream;
-          });
+          if (!remoteStreamRef.current) return;
+          remoteStreamRef.current.removeTrack(track);
+          const remainingVideos = remoteStreamRef.current.getVideoTracks();
+          if (remainingVideos.length === 0) {
+            remoteStreamRef.current = null;
+            setRemoteStream(null);
+            updateState("STREAM_ENDED");
+          } else {
+            setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+          }
         };
       } else if (track.kind === "audio") {
         // Disambiguate movie tab audio vs voice microphone audio
@@ -224,13 +229,15 @@ export function useTheaterWebRTC({
           remoteVoiceAudioRef.current.srcObject = new MediaStream([track]);
           void remoteVoiceAudioRef.current.play().catch(() => {});
         } else {
-          // Tab movie audio: add to remoteStream immutably
-          setRemoteStream((prev) => {
-            const currentTracks = prev ? prev.getTracks().filter((t) => t.id !== track.id) : [];
-            const nextStream = new MediaStream([...currentTracks, track]);
-            remoteStreamRef.current = nextStream;
-            return nextStream;
-          });
+          // Tab movie audio: add to remoteStream
+          if (!remoteStreamRef.current) {
+            remoteStreamRef.current = new MediaStream();
+          }
+          const rStream = remoteStreamRef.current;
+          if (!rStream.getAudioTracks().some((t) => t.id === track.id)) {
+            rStream.addTrack(track);
+          }
+          setRemoteStream(new MediaStream(rStream.getTracks()));
         }
       }
     };
@@ -249,27 +256,16 @@ export function useTheaterWebRTC({
           return;
         }
 
-        if (roomStateRef.current === "LIVE") {
+        if (roomStateRef.current === "LIVE" || roomStateRef.current === "STREAM_CONNECTING") {
           updateState("RECONNECTING");
-          if (isHost && restartAttemptsRef.current < 3) {
+          if (isHost && restartAttemptsRef.current < 5) {
             restartAttemptsRef.current += 1;
-            void (async () => {
-              try {
-                pc.restartIce();
-                const offer = await pc.createOffer({ iceRestart: true });
-                await pc.setLocalDescription(offer);
-                sendSignal("theater:offer", {
-                  sdp: offer,
-                  offerId: activeOfferIdRef.current,
-                  movieStreamId: localStreamRef.current?.id,
-                  voiceStreamId: localVoiceRef.current?.id,
-                });
-              } catch {
-                if (!isHost) updateState("FALLBACK_MODE");
-              }
-            })();
-          } else if (restartAttemptsRef.current >= 3 && !isHost) {
-            updateState("FALLBACK_MODE");
+            void renegotiateRef.current?.();
+          } else if (!isHost) {
+            // Mobile Viewer: ping host to renegotiate fresh connection without dropping to FALLBACK_MODE
+            setTimeout(() => {
+              sendViewerReadyRef.current?.();
+            }, 1200);
           }
         }
       }
@@ -295,22 +291,29 @@ export function useTheaterWebRTC({
       return;
     }
 
-    // 2. Debounce rapid renegotiations (at least 600ms between new offers)
+    // 2. Debounce and concurrency protection
     const now = Date.now();
-    if (now - lastRenegotiateTimeRef.current < 600) {
+    if (makingOfferRef.current || (now - lastRenegotiateTimeRef.current < 500 && !targetViewerId)) {
+      if (targetViewerId) {
+        pendingRenegotiateViewerIdRef.current = targetViewerId;
+      }
       return;
     }
     lastRenegotiateTimeRef.current = now;
-
-    if (makingOfferRef.current) return;
     makingOfferRef.current = true;
 
     try {
+      // When responding to a viewer readiness announcement, refresh, or when disconnected,
+      // instantiate a fresh RTCPeerConnection to guarantee clean SDP generation & fresh ICE candidate exchange.
       const needFresh =
         !pcRef.current ||
-        pcRef.current.connectionState === "failed" ||
-        pcRef.current.signalingState === "closed";
+        pcRef.current.connectionState !== "connected" ||
+        pcRef.current.signalingState === "closed" ||
+        Boolean(targetViewerId);
       const pc = getOrCreatePc(needFresh);
+      if (needFresh) {
+        pendingIceRef.current = [];
+      }
 
       // Add movie stream tracks if not already added
       const senders = pc.getSenders();
@@ -342,10 +345,13 @@ export function useTheaterWebRTC({
         }
       }
 
-      const offer = await pc.createOffer({ iceRestart: true });
+      const offerId = Math.random().toString(36).substring(2, 9);
+      activeOfferIdRef.current = offerId;
+
+      const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Wait up to 350ms for initial STUN candidates to gather into localDescription
+      // Wait up to 300ms for initial STUN/TURN candidates to gather into localDescription
       await new Promise<void>((resolve) => {
         if (pc.iceGatheringState === "complete") {
           resolve();
@@ -360,12 +366,9 @@ export function useTheaterWebRTC({
           setTimeout(() => {
             pc.removeEventListener("icegatheringstatechange", check);
             resolve();
-          }, 350);
+          }, 300);
         }
       });
-
-      const offerId = Math.random().toString(36).substring(2, 9);
-      activeOfferIdRef.current = offerId;
 
       sendSignal("theater:offer", {
         sdp: pc.localDescription || offer,
@@ -384,6 +387,13 @@ export function useTheaterWebRTC({
       console.error("[WebRTC Host] Failed creating renegotiated offer:", err);
     } finally {
       makingOfferRef.current = false;
+      if (pendingRenegotiateViewerIdRef.current) {
+        const nextViewer = pendingRenegotiateViewerIdRef.current;
+        pendingRenegotiateViewerIdRef.current = null;
+        setTimeout(() => {
+          void renegotiateForViewer(nextViewer);
+        }, 350);
+      }
     }
   }, [getOrCreatePc, isHost, sendSignal]);
 
@@ -395,6 +405,9 @@ export function useTheaterWebRTC({
       timestamp: Date.now(),
     });
   }, [isHost, sendSignal, userId]);
+
+  renegotiateRef.current = renegotiateForViewer;
+  sendViewerReadyRef.current = sendViewerReady;
 
   // Stop screen sharing cleanly
   const stopScreenShare = useCallback(() => {
@@ -498,10 +511,13 @@ export function useTheaterWebRTC({
       // Create offer
       makingOfferRef.current = true;
       try {
+        const offerId = Math.random().toString(36).substring(2, 9);
+        activeOfferIdRef.current = offerId;
+
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        // Wait up to 500ms for initial STUN candidates to gather into localDescription
+        // Wait up to 350ms for initial STUN/TURN candidates to gather into localDescription
         await new Promise<void>((resolve) => {
           if (pc.iceGatheringState === "complete") {
             resolve();
@@ -516,12 +532,10 @@ export function useTheaterWebRTC({
             setTimeout(() => {
               pc.removeEventListener("icegatheringstatechange", check);
               resolve();
-            }, 500);
+            }, 350);
           }
         });
 
-        const offerId = Math.random().toString(36).substring(2, 9);
-        activeOfferIdRef.current = offerId;
         sendSignal("theater:offer", {
           sdp: pc.localDescription || offer,
           surface: detectedSurface,
@@ -644,9 +658,12 @@ export function useTheaterWebRTC({
 
           const needFresh =
             !pcRef.current ||
-            pcRef.current.connectionState === "failed" ||
+            pcRef.current.connectionState !== "connected" ||
             pcRef.current.signalingState !== "stable";
           const pc = getOrCreatePc(needFresh);
+          if (needFresh) {
+            pendingIceRef.current = [];
+          }
 
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
           await flushPendingIce(pc);
@@ -664,7 +681,7 @@ export function useTheaterWebRTC({
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
-          // Wait up to 500ms for initial STUN candidates to gather into localDescription
+          // Wait up to 300ms for initial STUN candidates to gather into localDescription
           await new Promise<void>((resolve) => {
             if (pc.iceGatheringState === "complete") {
               resolve();
@@ -679,7 +696,7 @@ export function useTheaterWebRTC({
               setTimeout(() => {
                 pc.removeEventListener("icegatheringstatechange", check);
                 resolve();
-              }, 500);
+              }, 300);
             }
           });
 
@@ -748,7 +765,7 @@ export function useTheaterWebRTC({
             setStreamSourceType(payload.surface);
             streamSourceTypeRef.current = payload.surface;
           }
-          if (payload.state === "STREAM_ENDED" || payload.state === "FALLBACK_MODE") {
+          if (payload.state === "STREAM_ENDED") {
             setRemoteStream(null);
             remoteStreamRef.current = null;
           } else if (payload.state === "LIVE" && !isHost && !remoteStreamRef.current) {
@@ -817,6 +834,17 @@ export function useTheaterWebRTC({
           ...DEFAULT_ICE_SERVERS,
           ...res.data.iceServers,
         ];
+        if (pcRef.current && pcRef.current.signalingState !== "closed") {
+          try {
+            pcRef.current.setConfiguration({
+              iceServers: iceServersRef.current,
+              bundlePolicy: "max-bundle",
+              iceCandidatePoolSize: 2,
+            });
+          } catch {
+            /* ignore dynamic update error on older engines */
+          }
+        }
       }
     });
 
@@ -889,7 +917,7 @@ export function useTheaterWebRTC({
     let count = 0;
     const interval = setInterval(() => {
       count++;
-      if (count > 10) {
+      if (count > 25) {
         clearInterval(interval);
         return;
       }
@@ -902,12 +930,11 @@ export function useTheaterWebRTC({
       if (
         !remoteStreamRef.current &&
         !isConnecting &&
-        roomStateRef.current !== "STREAM_ENDED" &&
-        roomStateRef.current !== "FALLBACK_MODE"
+        roomStateRef.current !== "STREAM_ENDED"
       ) {
         sendViewerReady();
       }
-    }, 4000);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [isHost, sendViewerReady]);

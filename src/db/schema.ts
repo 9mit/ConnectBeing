@@ -34,6 +34,8 @@ export const watchSessionStatusEnum = pgEnum("watch_session_status", [
   "active",
   "completed",
   "cancelled",
+  "paused",
+  "ended_unfinished",
 ]);
 
 export const watchEventTypeEnum = pgEnum("watch_event_type", [
@@ -617,23 +619,31 @@ export const watchMessages = pgTable("watch_messages", {
     .defaultNow(),
 });
 
-export const movieMemories = pgTable("movie_memories", {
-  id: text("id").primaryKey(),
-  coupleId: text("couple_id")
-    .notNull()
-    .references(() => couples.id, { onDelete: "cascade" }),
-  sessionId: text("session_id")
-    .notNull()
-    .references(() => watchSessions.id, { onDelete: "cascade" }),
-  title: text("title").notNull(),
-  posterUrl: text("poster_url"),
-  watchDuration: integer("watch_duration").notNull(), // minutes
-  date: timestamp("date", { withTimezone: true }).notNull(),
-  aiSummary: jsonb("ai_summary"), // { recap, bestMoments, questions }
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const movieMemories = pgTable(
+  "movie_memories",
+  {
+    id: text("id").primaryKey(),
+    coupleId: text("couple_id")
+      .notNull()
+      .references(() => couples.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .unique()
+      .references(() => watchSessions.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    provider: text("provider"),
+    posterUrl: text("poster_url"),
+    watchDuration: integer("watch_duration").notNull(), // minutes
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("movie_memories_couple_expires_idx").on(table.coupleId, table.expiresAt),
+  ],
+);
 
 // ---------------------------------------------------------------------------
 // subscriptions — Razorpay state; updated only by webhooks

@@ -11,6 +11,7 @@ import {
   type Couple,
 } from "@/db/schema";
 import { purgeExpiredEphemeralMedia } from "@/actions/media";
+import { cleanupExpiredVaultRecords } from "@/actions/together";
 import { rotateCoupleVerifications } from "@/lib/couple-verification";
 import { petStateFromScore } from "@/lib/date-ist";
 import { getEngagementMeta, getEngagementScore } from "@/lib/engagement";
@@ -225,5 +226,13 @@ export async function runNightlyCalibrationJob() {
     console.error("[cron] ephemeral media purge failed", err);
   }
 
-  return { processed, verification, ephemeralPurged };
+  let vaultMemoriesPurged = 0;
+  try {
+    const res = await cleanupExpiredVaultRecords();
+    vaultMemoriesPurged = res.deleted;
+  } catch (err) {
+    console.error("[cron] vault memories purge failed", err);
+  }
+
+  return { processed, verification, ephemeralPurged, vaultMemoriesPurged };
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
-import { ArrowRight, Loader2 } from "lucide-react";
+import React from "react";
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 
 interface BeginStoryButtonProps {
   className?: string;
@@ -14,65 +15,21 @@ export function BeginStoryButton({
   children,
   showIcon = true,
 }: BeginStoryButtonProps) {
-  const [isPending, startTransition] = useTransition();
-  const [isNavigating, setIsNavigating] = useState(false);
-
-  // Safety timer to clear navigating lock if navigation is aborted or taking unusually long
-  useEffect(() => {
-    if (!isNavigating) return;
-    const timer = setTimeout(() => {
-      setIsNavigating(false);
-    }, 6000);
-    return () => clearTimeout(timer);
-  }, [isNavigating]);
-
-  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    // If opening in new tab or middle-click, allow default browser behavior
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) {
-      return;
-    }
-
-    // Prevent duplicate rapid clicks
-    if (isNavigating || isPending) {
-      e.preventDefault();
-      return;
-    }
-
-    setIsNavigating(true);
-
-    // Prefer standard top-level navigation to ensure fresh server-side evaluation
-    // and full cookie synchronization across redirects
-    startTransition(() => {
-      window.location.assign("/begin");
-    });
-  };
-
-  const busy = isNavigating || isPending;
-
   return (
-    <a
+    <Link
       href="/begin"
-      onClick={handleClick}
-      role="button"
-      aria-disabled={busy}
-      aria-busy={busy}
-      className={`${className} ${busy ? "opacity-80 pointer-events-none cursor-wait" : ""}`}
-      tabIndex={busy ? -1 : 0}
+      className={className}
+      aria-label="Begin Sanctuary — Begin Our Story"
     >
       {children ? (
         children
       ) : (
         <>
-          <span>{busy ? "Entering sanctuary..." : "Begin Our Story"}</span>
-          {showIcon && (
-            busy ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <ArrowRight className="w-3.5 h-3.5" />
-            )
-          )}
+          <span>Begin Our Story</span>
+          {showIcon && <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />}
         </>
       )}
-    </a>
+    </Link>
   );
 }
+

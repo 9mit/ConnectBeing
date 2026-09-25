@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/nightly",
       "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/cron/vault-cleanup",
+      "schedule": "0 * * * *"
     }
   ]
 }

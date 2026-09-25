@@ -14,14 +14,13 @@ import { createPartnerNotification } from "@/actions/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireVerifiedCouple } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
-import { getLocalAIProvider } from "@/lib/rie";
 import { createId } from "@/lib/ids";
 import {
   createWatchSessionSchema,
   watchEventSchema,
   watchSessionMessageSchema,
 } from "@/lib/validations";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { tryUnlockAchievement } from "@/lib/achievements";
@@ -215,14 +214,53 @@ export async function joinWatchSessionAction(
 
 export async function leaveWatchSessionAction(
   sessionId: string,
-): Promise<ActionResult<void>> {
+  currentPosition?: number,
+): Promise<ActionResult<{ resumable: boolean }>> {
   try {
     const { user, couple } = await requireVerifiedCouple();
     await assertWatchSessionOwned(sessionId, couple.id);
 
+    const session = await db.query.watchSessions.findFirst({
+      where: and(
+        eq(watchSessions.id, sessionId),
+        eq(watchSessions.coupleId, couple.id),
+      ),
+    });
+
+    if (!session) {
+      throw new AppError("NOT_FOUND", "Watch session not found.", 404);
+    }
+
+    const now = new Date();
+    const pos =
+      typeof currentPosition === "number" && currentPosition >= 0
+        ? Math.round(currentPosition)
+        : undefined;
+
+    // Atomically transition to ended_unfinished ONLY IF NOT COMPLETED.
+    // If the session was already completed, ne(watchSessions.status, "completed")
+    // guarantees that a "Not yet" or leave request NEVER reverts a completed session!
+    const updated = await db
+      .update(watchSessions)
+      .set({
+        status: "ended_unfinished",
+        currentPosition: pos,
+        playbackState: "paused",
+        hostStreamActive: false,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(watchSessions.id, sessionId),
+          eq(watchSessions.coupleId, couple.id),
+          ne(watchSessions.status, "completed"),
+        ),
+      )
+      .returning();
+
     await db
       .update(watchParticipants)
-      .set({ leftAt: new Date() })
+      .set({ leftAt: now })
       .where(
         and(
           eq(watchParticipants.sessionId, sessionId),
@@ -230,158 +268,226 @@ export async function leaveWatchSessionAction(
         ),
       );
 
-    return ok();
+    try {
+      revalidatePath("/together");
+      revalidatePath(`/together/room/${sessionId}`);
+    } catch {
+      // safe fallback
+    }
+
+    return ok({ resumable: updated.length > 0 });
   } catch (e) {
     return fail(e);
   }
 }
 
-export async function sendWatchMessageAction(
-  input: unknown,
-): Promise<ActionResult<{ id: string; content: string; createdAt: string }>> {
+export async function finishWatchSessionAction(
+  sessionId: string,
+  playbackPosition?: number,
+): Promise<ActionResult<{ memoryId: string; sessionId: string }>> {
   try {
-    const parsed = watchSessionMessageSchema.parse(input);
     const { user, couple } = await requireVerifiedCouple();
-    await assertWatchSessionOwned(parsed.sessionId, couple.id);
+    await assertWatchSessionOwned(sessionId, couple.id);
 
-    const id = createId();
+    const endedAt = new Date();
+    // Strict 7-day retention: expires_at must equal endedAt + 7 days
+    const expiresAt = new Date(endedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const result = await db.transaction(async (tx) => {
+      // 1. Transactional state transition:
+      // ONLY active / paused / ended_unfinished / scheduled -> completed
+      // If already completed (e.g. concurrent request by partner), updated.length will be 0.
+      const updated = await tx
+        .update(watchSessions)
+        .set({
+          status: "completed",
+          endedAt,
+          currentPosition:
+            typeof playbackPosition === "number" && playbackPosition >= 0
+              ? Math.round(playbackPosition)
+              : undefined,
+          playbackState: "paused",
+          hostStreamActive: false,
+          updatedAt: endedAt,
+        })
+        .where(
+          and(
+            eq(watchSessions.id, sessionId),
+            eq(watchSessions.coupleId, couple.id),
+            inArray(watchSessions.status, ["active", "paused", "ended_unfinished", "scheduled"]),
+          ),
+        )
+        .returning();
+
+      // If already completed or not in resumable status:
+      if (updated.length === 0) {
+        const existingSession = await tx.query.watchSessions.findFirst({
+          where: and(
+            eq(watchSessions.id, sessionId),
+            eq(watchSessions.coupleId, couple.id),
+          ),
+        });
+
+        if (!existingSession) {
+          throw new AppError("NOT_FOUND", "Watch session not found.", 404);
+        }
+
+        // Concurrently completed: query existing movie_memories record
+        const existingMemory = await tx.query.movieMemories.findFirst({
+          where: and(
+            eq(movieMemories.sessionId, sessionId),
+            eq(movieMemories.coupleId, couple.id),
+          ),
+        });
+
+        return {
+          memoryId: existingMemory?.id || "",
+          sessionId,
+          alreadyCompleted: true,
+          watchDuration: 0,
+        };
+      }
+
+      const session = updated[0];
+      const watchDuration = session.startedAt
+        ? Math.max(1, Math.round((endedAt.getTime() - session.startedAt.getTime()) / 60000))
+        : 1;
+
+      // 2. Insert exactly one movie_memories record
+      // With UNIQUE(session_id) and onConflictDoNothing, guarantees zero duplicate vault records.
+      const memoryId = createId();
+      await tx
+        .insert(movieMemories)
+        .values({
+          id: memoryId,
+          coupleId: couple.id,
+          sessionId: session.id,
+          title: session.title,
+          provider: session.provider,
+          posterUrl: session.posterUrl,
+          watchDuration,
+          date: endedAt,
+          expiresAt,
+        })
+        .onConflictDoNothing({ target: movieMemories.sessionId });
+
+      // Update participant record
+      await tx
+        .update(watchParticipants)
+        .set({ leftAt: endedAt })
+        .where(
+          and(
+            eq(watchParticipants.sessionId, sessionId),
+            eq(watchParticipants.userId, user.id),
+          ),
+        );
+
+      return {
+        memoryId,
+        sessionId,
+        alreadyCompleted: false,
+        watchDuration,
+      };
+    });
+
+    if (!result.alreadyCompleted) {
+      try {
+        await appendRelationshipEvent({
+          coupleId: couple.id,
+          actorUserId: user.id,
+          eventType: "watch_ended",
+          payload: { sessionId, watchDuration: result.watchDuration, completed: true },
+        });
+        await incrementEngagement(couple.id, "watch");
+        await bumpChallengeProgress({
+          coupleId: couple.id,
+          actorUserId: user.id,
+          code: "movie_night",
+        });
+        await tryUnlockAchievement(couple.id, user.id, "first_watch");
+      } catch (metricErr) {
+        console.warn("[finishWatchSessionAction] Metrics update warning:", metricErr);
+      }
+    }
+
+    try {
+      revalidatePath("/together");
+      revalidatePath(`/together/room/${sessionId}`);
+    } catch {
+      // safe fallback
+    }
+
+    return ok({ memoryId: result.memoryId, sessionId });
+  } catch (e) {
+    console.error("[finishWatchSessionAction] Error:", e);
+    return fail(e);
+  }
+}
+
+export async function deleteMovieMemoryAction(
+  memoryId: string,
+): Promise<ActionResult<{ deleted: true }>> {
+  try {
+    const { couple } = await requireVerifiedCouple();
+
+    // Verify ownership: memory must belong to current user's active couple
+    const existing = await db.query.movieMemories.findFirst({
+      where: and(
+        eq(movieMemories.id, memoryId),
+        eq(movieMemories.coupleId, couple.id),
+      ),
+    });
+
+    if (!existing) {
+      throw new AppError("NOT_FOUND", "Movie memory not found or access denied.", 404);
+    }
+
+    await db
+      .delete(movieMemories)
+      .where(
+        and(
+          eq(movieMemories.id, memoryId),
+          eq(movieMemories.coupleId, couple.id),
+        ),
+      );
+
+    try {
+      revalidatePath("/together");
+    } catch {
+      // safe fallback
+    }
+
+    return ok({ deleted: true });
+  } catch (e) {
+    console.error("[deleteMovieMemoryAction] Error:", e);
+    return fail(e);
+  }
+}
+
+export async function cleanupExpiredVaultRecords(): Promise<{ deleted: number }> {
+  try {
     const now = new Date();
-    await db.insert(watchMessages).values({
-      id,
-      sessionId: parsed.sessionId,
-      userId: user.id,
-      content: parsed.content,
-      playbackPosition: parsed.playbackPosition,
-      createdAt: now,
-    });
+    // Only delete expired movie_memories records.
+    // NEVER touch watch_sessions, chat, or other memories!
+    const result = await db
+      .delete(movieMemories)
+      .where(lte(movieMemories.expiresAt, now));
 
-    return ok({ id, content: parsed.content, createdAt: now.toISOString() });
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function recordWatchEventAction(
-  input: unknown,
-): Promise<ActionResult<void>> {
-  try {
-    const parsed = watchEventSchema.parse(input);
-    const { user, couple } = await requireVerifiedCouple();
-    await assertWatchSessionOwned(parsed.sessionId, couple.id);
-
-    await db.insert(watchEvents).values({
-      id: createId(),
-      sessionId: parsed.sessionId,
-      userId: user.id,
-      eventType: parsed.eventType,
-      playbackPosition: Math.round(parsed.playbackPosition),
-    });
-
-    return ok();
-  } catch (e) {
-    return fail(e);
+    const count = typeof (result as any).rowCount === "number" ? (result as any).rowCount : 0;
+    return { deleted: count };
+  } catch (err) {
+    console.error("[cleanupExpiredVaultRecords] Error:", err);
+    return { deleted: 0 };
   }
 }
 
 export async function endWatchSessionAction(
   sessionId: string,
 ): Promise<ActionResult<void>> {
-  try {
-    const { user, couple } = await requireVerifiedCouple();
-
-    const session = await db.query.watchSessions.findFirst({
-      where: and(
-        eq(watchSessions.id, sessionId),
-        eq(watchSessions.coupleId, couple.id),
-      ),
-      with: {
-        messages: true,
-      },
-    });
-
-    if (!session) {
-      throw new AppError("NOT_FOUND", "Watch session not found.", 404);
-    }
-
-    const endedAt = new Date();
-    if (session.status !== "completed") {
-      await db
-        .update(watchSessions)
-        .set({ status: "completed", endedAt })
-        .where(eq(watchSessions.id, sessionId));
-    }
-
-    const watchDuration = session.startedAt 
-      ? Math.max(1, Math.round((endedAt.getTime() - session.startedAt.getTime()) / 60000))
-      : 1;
-
-    // Check if memory recap was already recorded to avoid duplicate key conflicts
-    const existingMemory = await db.query.movieMemories.findFirst({
-      where: and(
-        eq(movieMemories.sessionId, session.id),
-        eq(movieMemories.coupleId, couple.id),
-      ),
-    });
-
-    if (!existingMemory) {
-      // Generate RIE Summary locally with robust fallback
-      const msgsList = (session.messages || [])
-        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-        .map((m) => m.content);
-
-      let aiSummary = null;
-      try {
-        const rie = getLocalAIProvider();
-        aiSummary = await rie.generateSummary(msgsList, session.title, watchDuration);
-      } catch (aiErr) {
-        console.warn("[endWatchSessionAction] AI summary fallback:", aiErr);
-        aiSummary = {
-          recap: `You shared a cinematic watch of "${session.title}" (${watchDuration} mins) together in your private theater.`,
-          bestMoments: ["Movie night together in private theater"],
-          questions: [],
-        };
-      }
-
-      try {
-        await db.insert(movieMemories).values({
-          id: createId(),
-          coupleId: couple.id,
-          sessionId: session.id,
-          title: session.title,
-          posterUrl: session.posterUrl,
-          watchDuration,
-          date: endedAt,
-          aiSummary,
-        });
-      } catch (insertMemErr) {
-        console.warn("[endWatchSessionAction] Memory insert warning:", insertMemErr);
-      }
-    }
-
-    try {
-      await appendRelationshipEvent({
-        coupleId: couple.id,
-        actorUserId: user.id,
-        eventType: "watch_ended",
-        payload: { sessionId, watchDuration },
-      });
-      await incrementEngagement(couple.id, "watch");
-      await bumpChallengeProgress({
-        coupleId: couple.id,
-        actorUserId: user.id,
-        code: "movie_night",
-      });
-      await tryUnlockAchievement(couple.id, user.id, "first_watch");
-    } catch (metricErr) {
-      console.warn("[endWatchSessionAction] Metrics update warning:", metricErr);
-    }
-
-    revalidatePath("/together");
-    return ok();
-  } catch (e) {
-    console.error("[endWatchSessionAction] Error:", e);
-    return fail(e);
-  }
+  // Legacy / graceful fallback: leaving session preserves unfinished resumable state without vault insertion.
+  const res = await leaveWatchSessionAction(sessionId);
+  if (!res.ok) return fail(res.error);
+  return ok();
 }
 
 export async function updateWatchSessionStreamAction(
@@ -391,7 +497,7 @@ export async function updateWatchSessionStreamAction(
     hostStreamType?: "none" | "tab" | "window" | "screen";
     playbackState?: "idle" | "playing" | "paused" | "buffering";
     currentPosition?: number;
-    status?: "scheduled" | "active" | "completed" | "cancelled";
+    status?: "scheduled" | "active" | "paused" | "ended_unfinished" | "completed" | "cancelled";
   },
 ): Promise<ActionResult<{ success: true }>> {
   try {
@@ -475,6 +581,34 @@ export async function getWatchSessionDetailsAction(
       currentPosition: session.currentPosition || 0,
       isHost: session.hostUserId ? session.hostUserId === user.id : couple.userAId === user.id,
     });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function sendWatchMessageAction(
+  rawInput: {
+    sessionId: string;
+    content: string;
+    playbackPosition?: number | null;
+  },
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const { user, couple } = await requireVerifiedCouple();
+    const parsed = watchSessionMessageSchema.parse(rawInput);
+    await assertWatchSessionOwned(parsed.sessionId, couple.id);
+
+    const messageId = createId();
+    await db.insert(watchMessages).values({
+      id: messageId,
+      sessionId: parsed.sessionId,
+      userId: user.id,
+      content: parsed.content,
+      playbackPosition: typeof parsed.playbackPosition === "number" ? parsed.playbackPosition : null,
+      createdAt: new Date(),
+    });
+
+    return ok({ id: messageId });
   } catch (e) {
     return fail(e);
   }

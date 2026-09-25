@@ -30,6 +30,7 @@ export default async function MovieMemoryPage({
     redirect(redirectPathForAuthError(error));
   }
 
+  const now = new Date();
   const memory = await db.query.movieMemories.findFirst({
     where: and(
       eq(movieMemories.sessionId, params.sessionId),
@@ -37,15 +38,14 @@ export default async function MovieMemoryPage({
     ),
   });
 
-  if (!memory) {
+  if (!memory || memory.expiresAt <= now) {
     redirect("/together");
   }
 
-  const aiSummary = memory.aiSummary as {
-    recap?: string;
-    bestMoments?: string[];
-    questions?: string[];
-  } | null;
+  const daysRemaining = Math.max(
+    0,
+    Math.ceil((new Date(memory.expiresAt).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
+  );
 
   return (
     <AppShell coupleId={couple.id} userId={user.id}>
@@ -66,55 +66,33 @@ export default async function MovieMemoryPage({
             <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-slate-400">
               Watched Together on {formatDateMedium(memory.date)}
             </p>
-            <div className="mt-6 flex justify-center gap-4">
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
               <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-bold text-amber-200">
                 ⏱️ {memory.watchDuration} minutes together
+              </span>
+              {memory.provider && (
+                <span className="rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-xs font-bold text-slate-300 uppercase">
+                  📺 {memory.provider}
+                </span>
+              )}
+              <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-1.5 text-xs font-bold text-rose-300">
+                ⏳ {daysRemaining} days left in Vault
               </span>
             </div>
           </div>
 
-          <div className="p-8 md:p-10 space-y-8">
-            {aiSummary ? (
-              <div className="space-y-8">
-                <div>
-                  <h2 className="text-xs font-bold uppercase tracking-widest text-amber-400/80 mb-2">The Vibe</h2>
-                  <p className="italic text-slate-200 text-base md:text-lg leading-relaxed bg-purple-950/60 border border-amber-500/20 p-6 rounded-2xl">
-                    &ldquo;{aiSummary.recap}&rdquo;
-                  </p>
-                </div>
-                
-                {aiSummary.bestMoments && aiSummary.bestMoments.length > 0 && (
-                  <div>
-                    <h2 className="text-xs font-bold uppercase tracking-widest text-amber-400/80 mb-3">Best Moments</h2>
-                    <ul className="space-y-2.5 text-sm text-slate-300 font-medium">
-                      {aiSummary.bestMoments.map((m: string, i: number) => (
-                        <li key={i} className="flex items-center gap-3 bg-purple-950/40 px-4 py-3 rounded-xl border border-amber-500/15">
-                          <span className="text-amber-400">✨</span>
-                          <span>{m}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {aiSummary.questions && aiSummary.questions.length > 0 && (
-                  <div>
-                    <h2 className="text-xs font-bold uppercase tracking-widest text-amber-400/80 mb-3">Conversation Starters</h2>
-                    <div className="space-y-3">
-                      {aiSummary.questions.map((q: string, i: number) => (
-                        <div key={i} className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-slate-200 font-medium italic">
-                          💬 &ldquo;{q}&rdquo;
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="text-center text-slate-400 text-sm py-8">
-                No AI summary available for this watch session.
-              </div>
+          <div className="p-8 md:p-10 flex flex-col items-center justify-center text-center space-y-4">
+            {memory.posterUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={memory.posterUrl}
+                alt={memory.title}
+                className="max-h-72 rounded-2xl shadow-xl border border-white/10 object-cover"
+              />
             )}
+            <p className="text-sm text-slate-300 max-w-md">
+              A shared memory of your movie date. Kept in your private vault for 7 days before being automatically cleaned up.
+            </p>
           </div>
         </div>
       </div>

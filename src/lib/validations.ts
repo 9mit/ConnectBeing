@@ -145,7 +145,7 @@ export const createWatchSessionSchema = z.object({
 export const watchSessionMessageSchema = z.object({
   sessionId: z.string().min(1),
   content: z.string().trim().min(1).max(1000),
-  playbackPosition: z.number().int().min(0).optional(),
+  playbackPosition: z.number().int().min(0).nullish(),
 });
 
 export const watchEventSchema = z.object({

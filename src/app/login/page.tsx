@@ -29,7 +29,7 @@ export default async function LoginPage({
         redirect("/onboarding");
       }
       if (!appUser.coupleId) {
-        redirect("/invite");
+        redirect("/onboarding/decision");
       }
       redirect("/dashboard");
     }

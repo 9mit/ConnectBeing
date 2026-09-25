@@ -33,12 +33,15 @@ import {
   ChevronLeft,
   Sliders,
   Smile,
+  Bookmark,
+  CheckCircle2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 
 import {
   endWatchSessionAction,
+  finishWatchSessionAction,
   leaveWatchSessionAction,
   getWatchMessagesAction,
   joinWatchSessionAction,
@@ -150,7 +153,12 @@ export function VirtualRoom({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
+  const [showCompletionPrompt, setShowCompletionPrompt] = useState(false);
+  const [isSubmittingCompletion, setIsSubmittingCompletion] = useState(false);
+  const [partnerCompletedNotice, setPartnerCompletedNotice] = useState<{ completedBy?: string } | null>(null);
   const [isAutoplayMuted, setIsAutoplayMuted] = useState(false);
+  const isAutoplayMutedRef = useRef(isAutoplayMuted);
+  isAutoplayMutedRef.current = isAutoplayMuted;
   const [userSwitchedToCompanion, setUserSwitchedToCompanion] = useState(false);
 
   // OTT Mobile & Cinema Player States
@@ -158,19 +166,27 @@ export function VirtualRoom({
   const [showControls, setShowControls] = useState(true);
   const [isImmersiveTheater, setIsImmersiveTheater] = useState(false);
   const [isPiP, setIsPiP] = useState(false);
-  const [mobileConsoleTab, setMobileConsoleTab] = useState<"whispers" | "controls" | "vibe">("whispers");
   const [skipRipple, setSkipRipple] = useState<{ direction: "left" | "right"; id: number } | null>(null);
   const [playPausePulse, setPlayPausePulse] = useState<"playing" | "paused" | null>(null);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [isScreenLocked, setIsScreenLocked] = useState(false);
   const [showLockPrompt, setShowLockPrompt] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
+  const [showRotateCue, setShowRotateCue] = useState(false);
+  const rotateCueTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const checkOrientation = () => {
       if (typeof window !== "undefined") {
         const landscape = window.innerWidth > window.innerHeight && window.innerWidth < 1024;
         setIsLandscape(landscape);
+        if (landscape) {
+          setShowRotateCue(false);
+          if (rotateCueTimeoutRef.current) {
+            window.clearTimeout(rotateCueTimeoutRef.current);
+            rotateCueTimeoutRef.current = null;
+          }
+        }
       }
     };
     checkOrientation();
@@ -179,6 +195,7 @@ export function VirtualRoom({
     return () => {
       window.removeEventListener("resize", checkOrientation);
       window.removeEventListener("orientationchange", checkOrientation);
+      if (rotateCueTimeoutRef.current) window.clearTimeout(rotateCueTimeoutRef.current);
     };
   }, []);
 
@@ -224,26 +241,76 @@ export function VirtualRoom({
     if (!videoEl) return;
 
     if (remoteStream) {
-      videoEl.srcObject = remoteStream;
-      const playPromise = videoEl.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          console.warn("[VirtualRoom] Autoplay blocked, falling back to muted playback:", err);
-          videoEl.muted = true;
-          setIsAutoplayMuted(true);
-          void videoEl.play().catch(() => {});
+      const currentStream = videoEl.srcObject as MediaStream | null;
+      const currentVideoTrack = currentStream?.getVideoTracks()[0];
+      const newVideoTrack = remoteStream.getVideoTracks()[0];
+
+      // Only reassign srcObject if the stream or video track has actually changed
+      if (!currentStream || currentVideoTrack?.id !== newVideoTrack?.id) {
+        videoEl.srcObject = remoteStream;
+      } else {
+        // Add any new audio tracks without resetting the video element decoder
+        remoteStream.getAudioTracks().forEach((aTrack) => {
+          if (!currentStream.getAudioTracks().some((t) => t.id === aTrack.id)) {
+            currentStream.addTrack(aTrack);
+          }
         });
       }
+
+      videoEl.playsInline = true;
+      videoEl.setAttribute("playsinline", "true");
+      videoEl.setAttribute("webkit-playsinline", "true");
+      videoEl.setAttribute("x5-playsinline", "true");
+
+      const hasAudio = remoteStream.getAudioTracks().length > 0;
+
+      const startPlayback = async () => {
+        // If user already muted or autoplay was muted, keep muted
+        if (isVideoMuted || isAutoplayMutedRef.current) {
+          videoEl.muted = true;
+          try {
+            await videoEl.play();
+          } catch {
+            // Retry
+          }
+          return;
+        }
+
+        // Try unmuted first (desktop browsers)
+        try {
+          videoEl.muted = false;
+          await videoEl.play();
+          setIsAutoplayMuted(false);
+        } catch (unmutedErr) {
+          console.warn("[VirtualRoom] Unmuted autoplay blocked by browser policy, switching to muted video:", unmutedErr);
+          // Fallback: Mute video immediately so video frames render without delay
+          videoEl.muted = true;
+          if (hasAudio) {
+            setIsAutoplayMuted(true);
+          }
+          try {
+            await videoEl.play();
+          } catch (mutedErr) {
+            console.error("[VirtualRoom] Muted playback also failed:", mutedErr);
+          }
+        }
+      };
+
+      void startPlayback();
     } else {
       videoEl.srcObject = null;
       setIsAutoplayMuted(false);
     }
-  }, [remoteStream]);
+  }, [remoteStream, isVideoMuted]);
 
   const handleUnmuteRemote = useCallback(() => {
     if (remoteVideoRef.current) {
       remoteVideoRef.current.muted = false;
       setIsAutoplayMuted(false);
+      setIsVideoMuted(false);
+      void remoteVideoRef.current.play().catch((err) => {
+        console.warn("[VirtualRoom] User gesture unmute failed:", err);
+      });
     }
   }, []);
 
@@ -342,6 +409,90 @@ export function VirtualRoom({
     }
   }, [isHost]);
 
+  // Cinema Mode & Fullscreen Controls
+  const enterCinemaMode = useCallback(() => {
+    setIsImmersiveTheater(true);
+    setIsFullscreen(true);
+
+    if (cinemaContainerRef.current && "requestFullscreen" in cinemaContainerRef.current) {
+      cinemaContainerRef.current
+        .requestFullscreen()
+        .then(() => setIsFullscreen(true))
+        .catch(() => {
+          // Graceful fallback to CSS 100dvh viewport
+          setIsImmersiveTheater(true);
+        });
+    }
+
+    // Temporary visual cue helper for portrait mobile devices
+    const triggerRotateCue = () => {
+      if (!isLandscape) {
+        setShowRotateCue(true);
+        if (rotateCueTimeoutRef.current) {
+          window.clearTimeout(rotateCueTimeoutRef.current);
+        }
+        rotateCueTimeoutRef.current = window.setTimeout(() => {
+          setShowRotateCue(false);
+        }, 3500);
+      }
+    };
+
+    if (
+      typeof screen !== "undefined" &&
+      "orientation" in screen &&
+      screen.orientation &&
+      "lock" in screen.orientation
+    ) {
+      try {
+        void (screen.orientation as any)
+          .lock("landscape")
+          .catch(() => {
+            triggerRotateCue();
+          });
+      } catch {
+        triggerRotateCue();
+      }
+    } else {
+      triggerRotateCue();
+    }
+  }, [isLandscape]);
+
+  const exitCinemaMode = useCallback(() => {
+    setIsImmersiveTheater(false);
+    setIsFullscreen(false);
+    setShowRotateCue(false);
+    if (rotateCueTimeoutRef.current) {
+      window.clearTimeout(rotateCueTimeoutRef.current);
+      rotateCueTimeoutRef.current = null;
+    }
+
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+    }
+
+    if (
+      typeof screen !== "undefined" &&
+      "orientation" in screen &&
+      screen.orientation &&
+      "unlock" in screen.orientation
+    ) {
+      try {
+        screen.orientation.unlock();
+      } catch {
+        /* orientation unlock not supported */
+      }
+    }
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const isCurrentlyFullscreen = isFullscreen || isImmersiveTheater;
+    if (isCurrentlyFullscreen) {
+      exitCinemaMode();
+    } else {
+      enterCinemaMode();
+    }
+  }, [enterCinemaMode, exitCinemaMode, isFullscreen, isImmersiveTheater]);
+
   // OTT Gesture & Double-Tap detection
   const handleVideoAreaInteraction = useCallback(
     (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
@@ -377,24 +528,36 @@ export function VirtualRoom({
       ) {
         // Double-tap recognized!
         lastTapRef.current = null;
-        if (relativeX < 0.35) {
-          seekBy(-10);
-          setSkipRipple({ direction: "left", id: now });
-          setTimeout(() => setSkipRipple((s) => (s?.id === now ? null : s)), 750);
-        } else if (relativeX > 0.65) {
-          seekBy(10);
-          setSkipRipple({ direction: "right", id: now });
-          setTimeout(() => setSkipRipple((s) => (s?.id === now ? null : s)), 750);
+        if (capabilities.canPlaybackControl) {
+          if (relativeX < 0.35) {
+            seekBy(-10);
+            setSkipRipple({ direction: "left", id: now });
+            setTimeout(() => setSkipRipple((s) => (s?.id === now ? null : s)), 750);
+          } else if (relativeX > 0.65) {
+            seekBy(10);
+            setSkipRipple({ direction: "right", id: now });
+            setTimeout(() => setSkipRipple((s) => (s?.id === now ? null : s)), 750);
+          } else {
+            togglePlayback();
+          }
         } else {
-          togglePlayback();
+          // Truthful mobile OTT: double tap left toggles audio mute, double tap right toggles cinema mode
+          if (relativeX < 0.5) {
+            toggleVideoMute();
+          } else {
+            toggleFullscreen();
+          }
         }
       } else {
         lastTapRef.current = { time: now, x: clientX, y: clientY };
+        if (!isHost && isAutoplayMuted) {
+          handleUnmuteRemote();
+        }
         setShowControls((prev) => !prev);
         resetControlsTimer();
       }
     },
-    [isScreenLocked, resetControlsTimer, seekBy, togglePlayback]
+    [capabilities.canPlaybackControl, handleUnmuteRemote, isAutoplayMuted, isHost, isScreenLocked, resetControlsTimer, seekBy, toggleFullscreen, togglePlayback, toggleVideoMute]
   );
 
   const formatSeconds = useCallback((sec: number) => {
@@ -445,6 +608,15 @@ export function VirtualRoom({
         if (!chatOpen) {
           setUnreadCount((c) => c + 1);
         }
+      })
+      .on("broadcast", { event: "theater:session_completed" }, ({ payload }: { payload: any }) => {
+        setPartnerCompletedNotice({ completedBy: payload?.userId || "partner" });
+        setTimeout(() => {
+          window.location.assign("/together");
+        }, 2500);
+      })
+      .on("broadcast", { event: "theater:partner_leave" }, () => {
+        // Partner left room; stay alive without completing session
       })
       .on(
         "postgres_changes",
@@ -525,40 +697,6 @@ export function VirtualRoom({
     document.addEventListener("fullscreenchange", onFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
   }, [isImmersiveTheater]);
-
-  const toggleFullscreen = useCallback(() => {
-    const isCurrentlyFullscreen = isFullscreen || isImmersiveTheater;
-    if (isCurrentlyFullscreen) {
-      if (document.fullscreenElement) {
-        void document.exitFullscreen().catch(() => {});
-      }
-      setIsImmersiveTheater(false);
-      setIsFullscreen(false);
-    } else {
-      if (cinemaContainerRef.current && cinemaContainerRef.current.requestFullscreen) {
-        cinemaContainerRef.current
-          .requestFullscreen()
-          .then(() => setIsFullscreen(true))
-          .catch(() => {
-            // iOS Safari iPhone fallback
-            setIsImmersiveTheater(true);
-            setIsFullscreen(true);
-          });
-      } else {
-        const activeVideo = isHost ? localVideoRef.current : remoteVideoRef.current;
-        if (activeVideo && (activeVideo as any).webkitEnterFullscreen) {
-          try {
-            (activeVideo as any).webkitEnterFullscreen();
-          } catch {
-            setIsImmersiveTheater(true);
-          }
-        } else {
-          setIsImmersiveTheater(true);
-        }
-        setIsFullscreen(true);
-      }
-    }
-  }, [isHost, isFullscreen, isImmersiveTheater]);
 
   const lastReactionTimeRef = useRef<number>(0);
   const broadcastReaction = (emoji: string) => {
@@ -670,28 +808,10 @@ export function VirtualRoom({
     return `${mins}:${String(secs).padStart(2, "0")}`;
   };
 
-  const handleLeaveSession = async () => {
-    if (isLeaving) return;
-    setIsLeaving(true);
-
-    try {
-      await notifyPartnerLeaving();
-    } catch {
-      /* ignore */
-    }
-    try {
-      void channelRef.current?.send({
-        type: "broadcast",
-        event: "theater:partner_leave",
-        payload: { senderUserId: userId },
-      });
-    } catch {
-      /* ignore */
-    }
-
+  const cleanupMediaAndFullscreen = () => {
     if (typeof document !== "undefined" && document.fullscreenElement) {
       try {
-        await document.exitFullscreen();
+        void document.exitFullscreen().catch(() => {});
       } catch {
         /* ignore */
       }
@@ -714,19 +834,71 @@ export function VirtualRoom({
     } catch {
       /* ignore */
     }
+  };
+
+  const handleLeaveSession = () => {
+    setShowCompletionPrompt(true);
+  };
+
+  const handleResumeLater = async () => {
+    if (isSubmittingCompletion) return;
+    setIsSubmittingCompletion(true);
+
+    try {
+      await notifyPartnerLeaving();
+    } catch {
+      /* ignore */
+    }
+    try {
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "theater:partner_leave",
+        payload: { senderUserId: userId },
+      });
+    } catch {
+      /* ignore */
+    }
+
+    cleanupMediaAndFullscreen();
+
+    try {
+      await leaveWatchSessionAction(sessionId, positionSeconds);
+    } catch (err) {
+      console.error("[VirtualRoom] leaveWatchSessionAction error:", err);
+    }
+
+    window.location.assign("/together");
+  };
+
+  const handleConfirmFinished = async () => {
+    if (isSubmittingCompletion) return;
+    setIsSubmittingCompletion(true);
+
+    try {
+      await notifyPartnerLeaving();
+    } catch {
+      /* ignore */
+    }
+    try {
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "theater:session_completed",
+        payload: { userId },
+      });
+    } catch {
+      /* ignore */
+    }
+
+    cleanupMediaAndFullscreen();
 
     let destination = "/together";
     try {
-      if (isHost) {
-        const res = await endWatchSessionAction(sessionId);
-        if (res.ok) {
-          destination = `/together/memory/${sessionId}`;
-        }
-      } else {
-        await leaveWatchSessionAction(sessionId);
+      const res = await finishWatchSessionAction(sessionId, positionSeconds);
+      if (res.ok) {
+        destination = `/together/memory/${sessionId}`;
       }
     } catch (err) {
-      console.error("[VirtualRoom] Leave error:", err);
+      console.error("[VirtualRoom] finishWatchSessionAction error:", err);
     }
 
     window.location.assign(destination);
@@ -741,18 +913,16 @@ export function VirtualRoom({
   // Authoritative active video stream presence for the cinema stage
   const hasActiveStream = isHost
     ? isHostCapturing
-    : (roomState === "LIVE" || roomState === "STREAM_CONNECTING" || roomState === "RECONNECTING") &&
-      !!remoteStream &&
-      remoteStream.getVideoTracks().some((t) => t.readyState === "live");
+    : !!remoteStream &&
+      remoteStream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled);
 
   // Companion Mode decision:
-  // Automatically activate Companion Mode if:
-  // 1. User explicitly requested it, OR
-  // 2. Room state is explicitly FALLBACK_MODE (and host is not actively capturing), OR
-  // 3. Current user is Host on a device that CANNOT capture tab/screen (mobile host).
+  // Companion Mode is ONLY for:
+  // 1. User explicitly requested it via button (both host and viewer), OR
+  // 2. Current user is Host on a device that CANNOT capture tab/screen (mobile host).
+  // A viewer MUST NEVER be automatically forced into Companion Mode merely because they are on mobile or WebRTC is connecting/reconnecting!
   const isCompanionMode =
     userSwitchedToCompanion ||
-    (!isHostCapturing && roomState === "FALLBACK_MODE") ||
     (isHost && !canShareScreen && !hasActiveStream);
 
   const isCinemaFullscreen = isImmersiveTheater || isFullscreen || isLandscape;
@@ -775,10 +945,10 @@ export function VirtualRoom({
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             <button
               type="button"
-              onClick={() => router.push("/together")}
+              onClick={handleLeaveSession}
               className="p-1.5 -ml-1 text-zinc-400 hover:text-white rounded-full hover:bg-white/[0.06] transition-colors md:hidden"
-              title="Back to Theater"
-              aria-label="Back to Theater"
+              title="Leave / Exit Theater"
+              aria-label="Leave / Exit Theater"
             >
               <ChevronLeft size={18} />
             </button>
@@ -941,16 +1111,12 @@ export function VirtualRoom({
             {/* Leave Session */}
             <button
               type="button"
-              disabled={isLeaving}
-              onClick={() => void handleLeaveSession()}
+              disabled={isSubmittingCompletion}
+              onClick={handleLeaveSession}
               aria-label="Leave watch session"
               className="rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 sm:px-3 py-1 text-xs font-medium text-rose-300 hover:bg-rose-500/20 transition-colors disabled:opacity-60 disabled:cursor-wait inline-flex items-center gap-1"
             >
-              {isLeaving ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <span>Leave</span>
-              )}
+              <span>Leave</span>
             </button>
           </div>
         </header>
@@ -985,7 +1151,7 @@ export function VirtualRoom({
 
           {/* FLOATING AUTOPLAY UNMUTE BANNER */}
           <AnimatePresence>
-            {!isHost && isAutoplayMuted && hasActiveStream && (
+            {!isHost && isAutoplayMuted && hasActiveStream && remoteStream && remoteStream.getAudioTracks().length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -994,7 +1160,10 @@ export function VirtualRoom({
               >
                 <button
                   type="button"
-                  onClick={handleUnmuteRemote}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleUnmuteRemote();
+                  }}
                   className="inline-flex items-center gap-2 rounded-full border border-amber-400/60 bg-amber-500/90 text-slate-950 px-4 py-2 text-xs font-bold shadow-2xl hover:bg-amber-400 transition-all active:scale-95"
                 >
                   <VolumeX size={14} className="animate-pulse" />
@@ -1008,7 +1177,7 @@ export function VirtualRoom({
           <div
             onClick={handleVideoAreaInteraction}
             onMouseMove={resetControlsTimer}
-            className="relative flex-1 flex items-center justify-center bg-black overflow-hidden min-h-0 cursor-pointer touch-manipulation group"
+            className="relative flex-1 w-full h-full flex items-center justify-center bg-black overflow-hidden min-h-0 cursor-pointer touch-manipulation group"
           >
             {/* SCREEN LOCK PROMPT (OTT EXPERIENCE) */}
             {showLockPrompt && (
@@ -1049,19 +1218,19 @@ export function VirtualRoom({
               </button>
             )}
 
-            {/* QUICK EXPAND TO FULLSCREEN IN PORTRAIT MODE */}
+            {/* QUICK EXPAND TO CINEMA MODE IN PORTRAIT */}
             {!isCinemaFullscreen && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  toggleFullscreen();
+                  enterCinemaMode();
                 }}
-                className="absolute bottom-3 right-3 z-30 p-2 rounded-full bg-black/60 border border-white/20 text-white hover:bg-black/90 backdrop-blur-md transition-all shadow-lg active:scale-95 pointer-events-auto"
-                title="Enter Fullscreen OTT Mode"
-                aria-label="Enter Fullscreen OTT Mode"
+                className="absolute bottom-3 right-3 z-30 min-w-[44px] min-h-[44px] p-2.5 rounded-full bg-black/70 border border-white/25 text-white hover:bg-black/90 backdrop-blur-md transition-all shadow-xl active:scale-90 flex items-center justify-center pointer-events-auto"
+                title="Enter Cinema Mode"
+                aria-label="Enter Cinema Mode"
               >
-                <Maximize2 size={14} />
+                <Maximize2 size={16} />
               </button>
             )}
 
@@ -1079,10 +1248,11 @@ export function VirtualRoom({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggleFullscreen();
+                        exitCinemaMode();
                       }}
-                      className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-                      title="Exit Fullscreen"
+                      className="min-w-[44px] min-h-[44px] p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center justify-center active:scale-95"
+                      title="Exit Cinema Mode"
+                      aria-label="Exit Cinema Mode"
                     >
                       <ChevronLeft size={20} />
                     </button>
@@ -1164,64 +1334,83 @@ export function VirtualRoom({
                   </div>
                 </div>
 
-                {/* CENTER HUD: -10s, PLAY/PAUSE, +10s */}
-                <div className="flex items-center justify-center gap-8 sm:gap-12 pointer-events-auto">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      seekBy(-10);
-                    }}
-                    className="p-3 sm:p-4 rounded-full bg-black/60 border border-white/20 text-white hover:bg-black/80 hover:scale-110 active:scale-95 transition-all shadow-2xl flex flex-col items-center gap-0.5"
-                    title="Rewind 10 seconds"
-                  >
-                    <RotateCcw size={22} />
-                    <span className="text-[9px] font-mono font-bold">-10s</span>
-                  </button>
+                {/* CENTER HUD: -10s, PLAY/PAUSE, +10s (Rendered ONLY if provider genuinely supports playback control) */}
+                {capabilities.canPlaybackControl && (
+                  <div className="flex items-center justify-center gap-8 sm:gap-12 pointer-events-auto">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        seekBy(-10);
+                      }}
+                      className="p-3 sm:p-4 rounded-full bg-black/60 border border-white/20 text-white hover:bg-black/80 hover:scale-110 active:scale-95 transition-all shadow-2xl flex flex-col items-center gap-0.5"
+                      title="Rewind 10 seconds"
+                    >
+                      <RotateCcw size={22} />
+                      <span className="text-[9px] font-mono font-bold">-10s</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      togglePlayback();
-                    }}
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white text-black flex items-center justify-center hover:bg-zinc-200 hover:scale-105 active:scale-95 transition-all shadow-2xl"
-                    title={playbackState === "playing" ? "Pause" : "Play"}
-                  >
-                    {playbackState === "playing" ? <Pause size={30} /> : <Play size={30} className="translate-x-0.5" />}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        togglePlayback();
+                      }}
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white text-black flex items-center justify-center hover:bg-zinc-200 hover:scale-105 active:scale-95 transition-all shadow-2xl"
+                      title={playbackState === "playing" ? "Pause" : "Play"}
+                    >
+                      {playbackState === "playing" ? <Pause size={30} /> : <Play size={30} className="translate-x-0.5" />}
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      seekBy(10);
-                    }}
-                    className="p-3 sm:p-4 rounded-full bg-black/60 border border-white/20 text-white hover:bg-black/80 hover:scale-110 active:scale-95 transition-all shadow-2xl flex flex-col items-center gap-0.5"
-                    title="Forward 10 seconds"
-                  >
-                    <RotateCw size={22} />
-                    <span className="text-[9px] font-mono font-bold">+10s</span>
-                  </button>
-                </div>
-
-                {/* BOTTOM HUD ROW: PROGRESS SLIDER & CONTROLS */}
-                <div className="space-y-2 pointer-events-auto pb-[env(safe-area-inset-bottom,0px)]">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-mono text-zinc-300 min-w-[45px]">{formattedTime}</span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={estimatedDuration}
-                      value={positionSeconds}
-                      onChange={(e) => seekToPosition(Number(e.target.value))}
-                      className="ott-slider flex-1"
-                      aria-label="Seek video position"
-                    />
-                    <span className="text-xs font-mono text-zinc-400 min-w-[45px] text-right">
-                      {formatSeconds(estimatedDuration)}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        seekBy(10);
+                      }}
+                      className="p-3 sm:p-4 rounded-full bg-black/60 border border-white/20 text-white hover:bg-black/80 hover:scale-110 active:scale-95 transition-all shadow-2xl flex flex-col items-center gap-0.5"
+                      title="Forward 10 seconds"
+                    >
+                      <RotateCw size={22} />
+                      <span className="text-[9px] font-mono font-bold">+10s</span>
+                    </button>
                   </div>
+                )}
+
+                {/* BOTTOM HUD ROW: PROGRESS / LIVE STREAM INDICATOR & CONTROLS */}
+                <div className="space-y-2 pointer-events-auto pb-[env(safe-area-inset-bottom,0px)]">
+                  {capabilities.canPlaybackControl ? (
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-mono text-zinc-300 min-w-[45px]">{formattedTime}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={estimatedDuration}
+                        value={positionSeconds}
+                        onChange={(e) => seekToPosition(Number(e.target.value))}
+                        className="ott-slider flex-1"
+                        aria-label="Seek video position"
+                      />
+                      <span className="text-xs font-mono text-zinc-400 min-w-[45px] text-right">
+                        {formatSeconds(estimatedDuration)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between pb-1 text-xs font-mono">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/20 px-2.5 py-0.5 rounded-full border border-rose-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                          Live Stream
+                        </span>
+                        <span className="text-zinc-300">
+                          Watched: <span className="text-white font-medium">{formattedTime}</span>
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-zinc-400 font-sans hidden xs:inline">
+                        Synchronized with partner
+                      </span>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between pt-1">
                     {/* Reactions Bar inside OTT Fullscreen */}
@@ -1234,7 +1423,8 @@ export function VirtualRoom({
                             e.stopPropagation();
                             broadcastReaction(emoji);
                           }}
-                          className="text-xl sm:text-2xl hover:scale-125 active:scale-90 transition-transform p-1"
+                          className="min-w-[40px] min-h-[40px] text-xl sm:text-2xl hover:scale-125 active:scale-90 transition-transform p-1 flex items-center justify-center"
+                          aria-label={`Send reaction ${emoji}`}
                         >
                           {emoji}
                         </button>
@@ -1248,19 +1438,21 @@ export function VirtualRoom({
                           e.stopPropagation();
                           toggleVideoMute();
                         }}
-                        className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-                        title={isVideoMuted ? "Unmute" : "Mute"}
+                        className="min-w-[40px] min-h-[40px] p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center justify-center active:scale-95"
+                        title={isVideoMuted ? "Unmute movie audio" : "Mute movie audio"}
+                        aria-label={isVideoMuted ? "Unmute movie audio" : "Mute movie audio"}
                       >
-                        {isVideoMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                        {isVideoMuted ? <VolumeX size={16} className="text-amber-400" /> : <Volume2 size={16} />}
                       </button>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          toggleFullscreen();
+                          exitCinemaMode();
                         }}
-                        className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
-                        title="Exit Fullscreen"
+                        className="min-w-[44px] min-h-[44px] p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center justify-center active:scale-95"
+                        title="Exit Cinema Mode"
+                        aria-label="Exit Cinema Mode"
                       >
                         <Minimize2 size={16} />
                       </button>
@@ -1270,14 +1462,14 @@ export function VirtualRoom({
               </div>
             )}
 
-            {/* OTT DOUBLE-TAP SKIP RIPPLE OVERLAYS */}
-            {skipRipple?.direction === "left" && (
+            {/* OTT DOUBLE-TAP SKIP RIPPLE OVERLAYS (Only if provider genuinely supports seek control) */}
+            {capabilities.canPlaybackControl && skipRipple?.direction === "left" && (
               <div className="absolute left-8 top-1/2 -translate-y-1/2 z-40 pointer-events-none flex flex-col items-center gap-1 text-white bg-black/75 px-5 py-4 rounded-full border border-white/20 backdrop-blur-md animate-ott-ripple-left shadow-2xl">
                 <RotateCcw size={28} />
                 <span className="text-xs font-bold font-mono tracking-wider">-10s</span>
               </div>
             )}
-            {skipRipple?.direction === "right" && (
+            {capabilities.canPlaybackControl && skipRipple?.direction === "right" && (
               <div className="absolute right-8 top-1/2 -translate-y-1/2 z-40 pointer-events-none flex flex-col items-center gap-1 text-white bg-black/75 px-5 py-4 rounded-full border border-white/20 backdrop-blur-md animate-ott-ripple-right shadow-2xl">
                 <RotateCw size={28} />
                 <span className="text-xs font-bold font-mono tracking-wider">+10s</span>
@@ -1285,7 +1477,7 @@ export function VirtualRoom({
             )}
 
             {/* OTT CENTER PLAY/PAUSE MOMENTARY PULSE */}
-            {playPausePulse && (
+            {capabilities.canPlaybackControl && playPausePulse && (
               <div className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center">
                 <div className="w-16 h-16 rounded-full bg-black/75 border border-white/25 backdrop-blur-md flex items-center justify-center text-white shadow-2xl scale-125 transition-transform">
                   {playPausePulse === "playing" ? (
@@ -1296,6 +1488,22 @@ export function VirtualRoom({
                 </div>
               </div>
             )}
+
+            {/* TEMPORARY ORIENTATION VISUAL CUE FOR CINEMA MODE */}
+            <AnimatePresence>
+              {showRotateCue && !isLandscape && isCinemaFullscreen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 15, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  transition={{ duration: 0.25 }}
+                  className="pointer-events-none absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 rounded-full border border-amber-500/30 bg-black/90 px-4 py-2 text-xs font-medium text-amber-200 shadow-2xl backdrop-blur-md whitespace-nowrap"
+                >
+                  <RotateCcw size={15} className="text-amber-400" />
+                  <span>Turn your phone sideways for Cinema Mode</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* A. HOST VIEW: LOCAL SHARED TAB STREAM (VISUAL PREVIEW ONLY - PERMANENTLY MUTED TO PREVENT ECHO) */}
             {isHost && (
@@ -1321,7 +1529,8 @@ export function VirtualRoom({
                 playsInline
                 webkit-playsinline="true"
                 x5-playsinline="true"
-                className="h-full w-full object-contain"
+                className="h-full w-full object-contain block"
+                style={{ maxHeight: "100%", maxWidth: "100%" }}
               />
             )}
 
@@ -1654,307 +1863,405 @@ export function VirtualRoom({
           </div>
         </div>
 
-        {/* MOBILE OTT CONSOLE (Portrait Mode below Video Stage) */}
+        {/* MOBILE OTT THEATER CONSOLE (Portrait Mode below Video Stage) */}
         {!isCinemaFullscreen && (
-          <div className="md:hidden flex-1 flex flex-col min-h-0 bg-[#07090e] border-t border-white/[0.08]">
-            {/* Console Tabs */}
-            <div className="flex items-center justify-around border-b border-white/[0.06] bg-[#0b0c13] px-1 py-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => setMobileConsoleTab("whispers")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                  mobileConsoleTab === "whispers"
-                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <MessageSquare size={13} />
-                <span>Whispers</span>
-                {messages.length > 0 && (
-                  <span className="text-[10px] font-mono bg-white/[0.08] px-1.5 py-0.2 rounded-full text-zinc-300">
-                    {messages.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMobileConsoleTab("vibe")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                  mobileConsoleTab === "vibe"
-                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <Sparkles size={13} />
-                <span>Vibe & Reactions</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMobileConsoleTab("controls")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                  mobileConsoleTab === "controls"
-                    ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <Sliders size={13} />
-                <span>Remote & Sync</span>
-              </button>
-            </div>
-
-            {/* Tab 1: Live Whispers Stream */}
-            {mobileConsoleTab === "whispers" && (
-              <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex-1 overflow-y-auto p-3 space-y-2.5 scrollbar-thin">
-                  {messages.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center p-4 space-y-1.5 text-zinc-500">
-                      <Sparkles size={18} className="text-zinc-600" />
-                      <p className="text-xs">No whispers yet.</p>
-                      <p className="text-[11px] text-zinc-600 max-w-xs">
-                        Whisper your thoughts, reactions, or favorite moments synced to this movie!
-                      </p>
-                    </div>
-                  ) : (
-                    messages.map((m) => {
-                      const isMe = m.userId === userId;
-                      const timeTag = formatMsgTime(m.playbackPosition);
-                      return (
-                        <div key={m.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                          <div className="flex items-baseline gap-1.5 mb-0.5">
-                            <span className="text-[10px] font-medium text-zinc-400">{isMe ? "You" : "Partner"}</span>
-                            {timeTag && (
-                              <span className="text-[9px] font-mono text-rose-300/80 bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/20">
-                                {timeTag}
-                              </span>
-                            )}
-                          </div>
-                          <div
-                            className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-xs leading-relaxed ${
-                              isMe
-                                ? "bg-rose-600/90 text-white rounded-tr-none shadow-sm"
-                                : "bg-white/[0.06] text-zinc-200 rounded-tl-none border border-white/[0.06]"
-                            }`}
-                          >
-                            {m.content}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                  <div ref={chatBottomRef} />
-                </div>
-
-                {/* Mobile Composer */}
-                <form
-                  onSubmit={handleSendMessage}
-                  className="border-t border-white/[0.07] p-2.5 space-y-1.5 bg-[#050609] pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]"
-                >
-                  <div className="flex items-center justify-between text-[10px] text-zinc-400 px-1">
-                    <button
-                      type="button"
-                      onClick={() => setStampTimestamp((s) => !s)}
-                      className={`inline-flex items-center gap-1 font-mono transition-colors ${
-                        stampTimestamp ? "text-rose-400 font-semibold" : "text-zinc-500"
-                      }`}
+          <div className="md:hidden flex-1 flex flex-col min-h-0 bg-[#07090e] border-t border-white/[0.08] divide-y divide-white/[0.06]">
+            {/* 1. MOVIE & SESSION INFO + TIMELINE + QUICK ACTIONS */}
+            <div className="p-3 space-y-2.5 bg-[#090b12] shrink-0">
+              {/* Title & Status Badges */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-sm font-bold text-white tracking-wide truncate">
+                      {title}
+                    </h1>
+                    <span
+                      className="text-[9px] font-mono uppercase tracking-wider px-2 py-0.5 rounded font-semibold shrink-0"
+                      style={{
+                        backgroundColor: provider?.brandColor ? `${provider.brandColor}22` : "#ffffff15",
+                        color: provider?.brandColor || "#f43f5e",
+                        border: `1px solid ${provider?.brandColor ? `${provider.brandColor}44` : "#ffffff25"}`,
+                      }}
                     >
-                      <Clock size={10} />
-                      <span>Stamp at {formattedTime}</span>
-                    </button>
-                    <span className="text-zinc-600">Enter to send</span>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      placeholder="Whisper at this moment…"
-                      aria-label="Whisper message"
-                      className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-base sm:text-xs text-white placeholder-zinc-500 outline-none focus:border-rose-500/50 transition-colors"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!newMessage.trim()}
-                      className="rounded-xl bg-white text-zinc-950 px-4 py-2 text-xs font-bold hover:bg-zinc-200 disabled:opacity-40 transition-all shadow-sm active:scale-95 shrink-0"
-                    >
-                      Send
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {/* Tab 2: Vibe & Reactions */}
-            {mobileConsoleTab === "vibe" && (
-              <div className="flex-1 overflow-y-auto p-4 space-y-5">
-                <div>
-                  <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-amber-400">
-                    Realtime Reactions
-                  </span>
-                  <p className="text-xs text-zinc-400 mt-0.5">
-                    Tap an emoji to float it over both your screens in real-time:
-                  </p>
-                  <div className="grid grid-cols-6 gap-2 mt-3">
-                    {THEATER_REACTIONS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => broadcastReaction(emoji)}
-                        className="aspect-square rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center text-2xl hover:bg-white/[0.08] active:scale-90 transition-all shadow-sm"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Voice Connection Card */}
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Phone size={14} className={voiceActive ? "text-emerald-400" : "text-zinc-500"} />
-                      <span className="text-xs font-semibold text-white">Voice Connection</span>
-                    </div>
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-                      voiceActive ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-white/[0.04] text-zinc-400 border-white/[0.08]"
-                    }`}>
-                      {voiceActive ? "Connected" : "Disconnected"}
+                      {providerName}
                     </span>
                   </div>
 
+                  <div className="flex items-center gap-2 mt-1 text-[11px] text-zinc-400">
+                    {/* Live WebRTC / Companion Status */}
+                    {hasActiveStream ? (
+                      <span className="inline-flex items-center gap-1 font-mono text-[10px] text-emerald-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Live {streamSourceType}
+                      </span>
+                    ) : isCompanionMode ? (
+                      <span className="inline-flex items-center gap-1 font-mono text-[10px] text-amber-300">
+                        <Compass size={11} /> Companion Mode
+                      </span>
+                    ) : roomState === "STREAM_CONNECTING" ? (
+                      <span className="inline-flex items-center gap-1 font-mono text-[10px] text-rose-300 animate-pulse">
+                        <Loader2 size={11} className="animate-spin" /> Connecting…
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 font-mono text-[10px] text-zinc-400">
+                        <Film size={11} /> Cinema Lounge
+                      </span>
+                    )}
+
+                    <span className="text-zinc-600">•</span>
+
+                    {/* Partner Presence */}
+                    <span className="inline-flex items-center gap-1">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          partnerPresence === "watching" || partnerPresence === "online"
+                            ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+                            : partnerPresence === "left"
+                              ? "bg-rose-500 animate-pulse"
+                              : "bg-zinc-600"
+                        }`}
+                      />
+                      <span
+                        className={
+                          partnerPresence === "watching" || partnerPresence === "online"
+                            ? "text-emerald-300/90 font-medium"
+                            : "text-zinc-500"
+                        }
+                      >
+                        {partnerPresence === "watching" || partnerPresence === "online"
+                          ? "Partner here"
+                          : partnerPresence === "left"
+                            ? "Partner left"
+                            : "Partner offline"}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Enter Cinema Mode quick shortcut button */}
+                <button
+                  type="button"
+                  onClick={enterCinemaMode}
+                  className="min-w-[44px] min-h-[44px] p-2 rounded-xl bg-white/[0.06] border border-white/[0.1] text-zinc-200 hover:text-white hover:bg-white/[0.1] active:scale-95 transition-all flex items-center justify-center shrink-0 shadow-sm"
+                  title="Enter Cinema Mode"
+                  aria-label="Enter Cinema Mode"
+                >
+                  <Maximize2 size={16} />
+                </button>
+              </div>
+
+              {/* Truthful Timeline or Live OTT Stream Status Bar */}
+              {capabilities.canPlaybackControl ? (
+                <div className="space-y-1.5 pt-0.5">
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (voiceActive) stopVoiceCall();
-                        else void startVoiceCall();
-                      }}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                        voiceActive
-                          ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30"
-                          : "bg-emerald-500 text-black hover:bg-emerald-400"
-                      }`}
+                      onClick={togglePlayback}
+                      className="min-w-[44px] min-h-[44px] rounded-full bg-white text-zinc-950 flex items-center justify-center hover:bg-zinc-200 active:scale-90 transition-all shadow-sm shrink-0"
+                      title={playbackState === "playing" ? "Pause playback" : "Resume playback"}
+                      aria-label={playbackState === "playing" ? "Pause" : "Play"}
                     >
-                      {voiceActive ? "Leave Voice Call" : "Connect Voice with Partner"}
+                      {playbackState === "playing" ? (
+                        <Pause size={18} />
+                      ) : (
+                        <Play size={18} className="translate-x-0.5" />
+                      )}
                     </button>
 
-                    {voiceActive && (
-                      <button
-                        type="button"
-                        onClick={toggleMic}
-                        className={`p-2.5 rounded-xl border transition-all ${
-                          micMuted
-                            ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                            : "bg-white/[0.06] text-white border-white/10 hover:bg-white/12"
-                        }`}
-                        title={micMuted ? "Unmute" : "Mute"}
-                      >
-                        {micMuted ? <MicOff size={16} /> : <Mic size={16} />}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Tab 3: Remote & Sync */}
-            {mobileConsoleTab === "controls" && (
-              <div className="flex-1 overflow-y-auto p-4 space-y-5">
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-xs font-mono text-zinc-400">
-                    <span>{formattedTime}</span>
-                    <span>{formatSeconds(estimatedDuration)}</span>
-                  </div>
-
-                  <input
-                    type="range"
-                    min={0}
-                    max={estimatedDuration}
-                    value={positionSeconds}
-                    onChange={(e) => seekToPosition(Number(e.target.value))}
-                    className="ott-slider w-full"
-                    aria-label="Seek position"
-                  />
-
-                  <div className="flex items-center justify-center gap-4 pt-2">
                     <button
                       type="button"
                       onClick={() => seekBy(-10)}
-                      className="p-3 rounded-full bg-white/[0.04] border border-white/[0.08] text-zinc-300 hover:text-white active:scale-95 transition-all"
-                      title="Rewind 10s"
+                      className="min-w-[44px] min-h-[44px] rounded-full bg-white/[0.05] border border-white/[0.08] text-zinc-300 hover:text-white active:scale-90 transition-all flex items-center justify-center shrink-0"
+                      title="Rewind 10 seconds"
+                      aria-label="Rewind 10 seconds"
                     >
-                      <RotateCcw size={18} />
+                      <RotateCcw size={16} />
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={togglePlayback}
-                      className="w-12 h-12 rounded-full bg-white text-zinc-950 flex items-center justify-center hover:bg-zinc-200 active:scale-95 transition-all shadow-md"
-                      title={playbackState === "playing" ? "Pause" : "Play"}
-                    >
-                      {playbackState === "playing" ? <Pause size={20} /> : <Play size={20} className="translate-x-0.5" />}
-                    </button>
+                    <div className="flex-1 flex flex-col justify-center px-1">
+                      <input
+                        type="range"
+                        min={0}
+                        max={estimatedDuration}
+                        value={positionSeconds}
+                        onChange={(e) => seekToPosition(Number(e.target.value))}
+                        className="ott-slider w-full"
+                        aria-label="Seek timeline position"
+                      />
+                      <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 mt-0.5">
+                        <span className="text-white font-medium">{formattedTime}</span>
+                        <span>{formatSeconds(estimatedDuration)}</span>
+                      </div>
+                    </div>
 
                     <button
                       type="button"
                       onClick={() => seekBy(10)}
-                      className="p-3 rounded-full bg-white/[0.04] border border-white/[0.08] text-zinc-300 hover:text-white active:scale-95 transition-all"
-                      title="Forward 10s"
+                      className="min-w-[44px] min-h-[44px] rounded-full bg-white/[0.05] border border-white/[0.08] text-zinc-300 hover:text-white active:scale-90 transition-all flex items-center justify-center shrink-0"
+                      title="Forward 10 seconds"
+                      aria-label="Forward 10 seconds"
                     >
-                      <RotateCw size={18} />
+                      <RotateCw size={16} />
                     </button>
                   </div>
                 </div>
-
-                {/* Quick Launch OTT App */}
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3">
-                  <div>
-                    <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-amber-400">
-                      Launch Native App
+              ) : (
+                /* Truthful Live OTT Stream Status Bar */
+                <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/[0.06] text-xs font-mono">
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/15 px-2.5 py-0.5 rounded-full border border-rose-500/25">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                      Live Stream
                     </span>
-                    <p className="text-xs text-zinc-400 mt-0.5">
-                      Open directly in your mobile {providerName} app:
-                    </p>
+                    <span className="text-[11px] text-zinc-300">
+                      Watched: <span className="font-semibold text-white">{formattedTime}</span>
+                    </span>
                   </div>
 
-                  <div className="flex gap-2">
-                    <a
-                      href={nativeAppDeepLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-bold text-black bg-amber-400 hover:bg-amber-300 transition-all shadow-sm active:scale-95"
-                    >
-                      <ExternalLink size={13} /> Open {providerName} ↗
-                    </a>
-
+                  {!isHost && hasActiveStream && (
                     <button
                       type="button"
-                      onClick={() => setUserSwitchedToCompanion((c) => !c)}
-                      className="px-3.5 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] text-xs font-medium text-zinc-300 hover:text-white"
+                      onClick={toggleVideoMute}
+                      className="inline-flex items-center gap-1.5 text-[11px] text-zinc-300 hover:text-white px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] transition-colors active:scale-95"
+                      title={isVideoMuted ? "Unmute audio" : "Mute audio"}
+                      aria-label={isVideoMuted ? "Unmute audio" : "Mute audio"}
                     >
-                      {isCompanionMode ? "Lounge Mode" : "Companion Mode"}
+                      {isVideoMuted ? <VolumeX size={13} className="text-amber-400" /> : <Volume2 size={13} />}
+                      <span>{isVideoMuted ? "Muted" : "Audio On"}</span>
                     </button>
-                  </div>
+                  )}
                 </div>
+              )}
+
+              {/* Horizontal Action Pills (Touch-friendly 44px min height) */}
+              <div className="flex items-center gap-2 overflow-x-auto py-0.5 scrollbar-none">
+                {/* Voice Call Pill */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (voiceActive) stopVoiceCall();
+                    else void startVoiceCall();
+                  }}
+                  className={`min-h-[44px] px-3.5 rounded-xl text-xs font-semibold inline-flex items-center gap-2 border transition-all active:scale-95 shrink-0 ${
+                    voiceActive
+                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm"
+                      : "bg-white/[0.04] text-zinc-300 border-white/[0.08] hover:bg-white/[0.08]"
+                  }`}
+                  title={voiceActive ? "Leave voice call" : "Start voice call with partner"}
+                  aria-label={voiceActive ? "Leave voice call" : "Start voice call"}
+                >
+                  <Phone size={13} className={voiceActive ? "animate-pulse text-emerald-400" : ""} />
+                  <span>{voiceActive ? "Voice Connected" : "Voice Call"}</span>
+                </button>
+
+                {/* Mic Toggle when Voice is Active */}
+                {voiceActive && (
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    className={`min-w-[44px] min-h-[44px] p-2.5 rounded-xl border flex items-center justify-center transition-all active:scale-95 shrink-0 ${
+                      micMuted
+                        ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                        : "bg-white/[0.06] text-white border-white/10 hover:bg-white/12"
+                    }`}
+                    title={micMuted ? "Unmute microphone" : "Mute microphone"}
+                    aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+                  >
+                    {micMuted ? <MicOff size={15} /> : <Mic size={15} />}
+                  </button>
+                )}
+
+                {/* Viewer Unmute Movie Audio button if Autoplay muted */}
+                {!isHost && hasActiveStream && isAutoplayMuted && (
+                  <button
+                    type="button"
+                    onClick={handleUnmuteRemote}
+                    className="min-h-[44px] px-3.5 rounded-xl text-xs font-bold text-amber-300 bg-amber-500/20 border border-amber-500/40 inline-flex items-center gap-1.5 active:scale-95 transition-all shrink-0 animate-pulse shadow-sm"
+                    title="Unmute movie audio"
+                    aria-label="Unmute movie audio"
+                  >
+                    <VolumeX size={14} />
+                    <span>Unmute Movie</span>
+                  </button>
+                )}
+
+                {/* Host Screen Share Buttons */}
+                {isHost && hasActiveStream && (
+                  <button
+                    type="button"
+                    onClick={stopScreenShare}
+                    className="min-h-[44px] px-3.5 rounded-xl text-xs font-medium text-rose-300 border border-rose-500/30 bg-rose-500/10 active:scale-95 transition-all shrink-0 inline-flex items-center gap-1.5"
+                    title="Stop sharing tab"
+                    aria-label="Stop sharing tab"
+                  >
+                    <Share2 size={13} />
+                    <span>Stop Sharing</span>
+                  </button>
+                )}
+
+                {isHost && !hasActiveStream && canShareScreen && !isCompanionMode && (
+                  <button
+                    type="button"
+                    onClick={() => void startScreenShare()}
+                    className="min-h-[44px] px-3.5 rounded-xl text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 border border-rose-500/40 active:scale-95 transition-all shrink-0 inline-flex items-center gap-1.5 shadow-sm"
+                    title="Share browser tab"
+                    aria-label="Share browser tab"
+                  >
+                    <Share2 size={13} />
+                    <span>Share Tab</span>
+                  </button>
+                )}
+
+                {/* OTT Native App Deep Link */}
+                <a
+                  href={nativeAppDeepLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[44px] px-3.5 rounded-xl text-xs font-medium text-zinc-300 bg-white/[0.04] border border-white/[0.08] hover:text-white active:scale-95 transition-all inline-flex items-center gap-1.5 shrink-0"
+                  title={`Open in ${providerName}`}
+                  aria-label={`Open in ${providerName}`}
+                >
+                  <ExternalLink size={13} />
+                  <span>Open {providerName}</span>
+                </a>
+
+                {/* Companion Mode Switcher */}
+                <button
+                  type="button"
+                  onClick={() => setUserSwitchedToCompanion((c) => !c)}
+                  className="min-h-[44px] px-3 rounded-xl text-xs font-medium text-zinc-400 bg-white/[0.02] border border-white/[0.06] hover:text-zinc-200 active:scale-95 transition-all inline-flex items-center gap-1.5 shrink-0"
+                  title="Switch viewing mode"
+                  aria-label="Switch viewing mode"
+                >
+                  <Compass size={13} />
+                  <span>{isCompanionMode ? "Lounge Mode" : "Companion Mode"}</span>
+                </button>
               </div>
-            )}
+            </div>
+
+            {/* 2. INSTANT TOUCH REACTIONS BAR */}
+            <div className="px-3 py-2 bg-[#08090f] shrink-0 flex items-center justify-between gap-1 overflow-x-auto scrollbar-none">
+              <div className="flex items-center gap-1.5">
+                <Sparkles size={13} className="text-amber-400 shrink-0 ml-1 mr-0.5" />
+                <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 hidden xs:inline shrink-0">
+                  React:
+                </span>
+              </div>
+              <div className="flex items-center gap-1 sm:gap-2 flex-1 justify-around">
+                {THEATER_REACTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => broadcastReaction(emoji)}
+                    className="min-w-[44px] min-h-[44px] rounded-2xl bg-white/[0.04] border border-white/[0.07] flex items-center justify-center text-xl hover:bg-white/[0.08] active:scale-90 transition-all touch-manipulation shadow-sm"
+                    title={`React with ${emoji}`}
+                    aria-label={`React with ${emoji}`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. COUPLE WHISPERS CHAT STREAM */}
+            <div className="flex-1 flex flex-col min-h-0 bg-[#050609]">
+              <div className="flex-1 overflow-y-auto p-3 space-y-2.5 scrollbar-thin">
+                {messages.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-4 space-y-1.5 text-zinc-500">
+                    <Sparkles size={20} className="text-rose-400/60 animate-pulse" />
+                    <p className="text-xs font-medium text-zinc-400">No whispers yet</p>
+                    <p className="text-[11px] text-zinc-600 max-w-xs leading-relaxed">
+                      Whisper your thoughts, reactions, and favorite moments synced directly to this movie!
+                    </p>
+                  </div>
+                ) : (
+                  messages.map((m) => {
+                    const isMe = m.userId === userId;
+                    const timeTag = formatMsgTime(m.playbackPosition);
+                    return (
+                      <div key={m.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                        <div className="flex items-baseline gap-1.5 mb-0.5">
+                          <span className="text-[10px] font-medium text-zinc-400">{isMe ? "You" : "Partner"}</span>
+                          {timeTag && (
+                            <span className="text-[9px] font-mono text-rose-300/80 bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/20">
+                              {timeTag}
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-xs leading-relaxed break-words ${
+                            isMe
+                              ? "bg-rose-600/90 text-white rounded-tr-none shadow-sm"
+                              : "bg-white/[0.07] text-zinc-200 rounded-tl-none border border-white/[0.08]"
+                          }`}
+                        >
+                          {m.content}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={chatBottomRef} />
+              </div>
+
+              {/* 4. PINNED WHISPER COMPOSER */}
+              <form
+                onSubmit={handleSendMessage}
+                className="border-t border-white/[0.07] p-2.5 space-y-1.5 bg-[#06070b] pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] shrink-0"
+              >
+                <div className="flex items-center justify-between text-[10px] text-zinc-400 px-1">
+                  <button
+                    type="button"
+                    onClick={() => setStampTimestamp((s) => !s)}
+                    className={`min-h-[24px] inline-flex items-center gap-1 font-mono transition-colors ${
+                      stampTimestamp ? "text-rose-400 font-semibold" : "text-zinc-500"
+                    }`}
+                    title="Toggle movie timestamp stamp"
+                    aria-label="Toggle movie timestamp stamp"
+                  >
+                    <Clock size={11} />
+                    <span>Stamp at {formattedTime}</span>
+                  </button>
+                  <span className="text-zinc-600 text-[10px]">Enter to send</span>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder="Whisper at this moment…"
+                    aria-label="Whisper message"
+                    className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-base sm:text-xs text-white placeholder-zinc-500 outline-none focus:border-rose-500/50 transition-colors"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newMessage.trim()}
+                    className="min-w-[56px] min-h-[44px] rounded-xl bg-white text-zinc-950 px-4 text-xs font-bold hover:bg-zinc-200 disabled:opacity-40 transition-all shadow-sm active:scale-95 shrink-0 flex items-center justify-center"
+                    aria-label="Send whisper"
+                  >
+                    Send
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 
-        {/* MOBILE CHAT BACKDROP OVERLAY */}
-        {chatOpen && (
+        {/* MOBILE CHAT BACKDROP OVERLAY (Active only in Cinema / Landscape mode) */}
+        {isCinemaFullscreen && chatOpen && (
           <div
             className="md:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity"
             onClick={() => setChatOpen(false)}
           />
         )}
 
-        {/* 2. CHAT SIDEBAR (DOCKED ON DESKTOP, SLIDE-OVER ON LANDSCAPE/FULLSCREEN) */}
+        {/* 2. CHAT SIDEBAR (DOCKED ON DESKTOP, SLIDE-OVER ON LANDSCAPE/CINEMA) */}
         {chatOpen && (
           <aside
-            className="fixed inset-y-0 right-0 z-50 w-80 max-w-[85vw] border-l border-white/[0.1] bg-[#07090e]/95 backdrop-blur-2xl shadow-2xl flex flex-col transition-all duration-300 ease-out md:static md:z-20 md:h-full md:w-80 md:w-[28%] md:min-w-[280px] md:max-w-sm md:rounded-none md:border-t-0 md:border-l md:shadow-none"
+            className={`fixed inset-y-0 right-0 z-50 w-80 max-w-[85vw] border-l border-white/[0.1] bg-[#07090e]/95 backdrop-blur-2xl shadow-2xl flex flex-col transition-all duration-300 ease-out md:static md:z-20 md:h-full md:w-80 md:w-[28%] md:min-w-[280px] md:max-w-sm md:rounded-none md:border-t-0 md:border-l md:shadow-none ${
+              !isCinemaFullscreen ? "hidden md:flex" : "flex"
+            }`}
           >
             {/* Mobile Handle */}
             <div className="md:hidden flex items-center justify-center pt-2 pb-1">
@@ -2069,6 +2376,129 @@ export function VirtualRoom({
           </form>
         </aside>
       )}
+
+      {/* WARM RELATIONSHIP COMPLETION PROMPT MODAL */}
+      <AnimatePresence>
+        {showCompletionPrompt && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 12 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 12 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="w-full max-w-md overflow-hidden rounded-3xl border border-white/[0.12] bg-[#0c0d14]/95 p-6 shadow-2xl text-center space-y-5"
+            >
+              {/* Header Icon */}
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400">
+                <Film size={26} />
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-widest text-rose-400">
+                  Movie Night Ended?
+                </span>
+                <h3 className="text-xl font-bold text-white tracking-tight">
+                  You watched &ldquo;{title}&rdquo;
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Did you finish it together?
+                </p>
+              </div>
+
+              <div className="space-y-2.5 pt-2">
+                <button
+                  type="button"
+                  disabled={isSubmittingCompletion}
+                  onClick={() => void handleConfirmFinished()}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-rose-500/20 hover:from-rose-600 hover:to-amber-600 disabled:opacity-50 transition-all active:scale-[0.98]"
+                >
+                  {isSubmittingCompletion ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <>
+                      <Sparkles size={16} />
+                      <span>We finished it</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isSubmittingCompletion}
+                  onClick={() => void handleResumeLater()}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-white/[0.1] bg-white/[0.04] px-5 py-3 text-sm font-medium text-zinc-200 hover:bg-white/[0.08] hover:text-white disabled:opacity-50 transition-all active:scale-[0.98]"
+                >
+                  {isSubmittingCompletion ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <>
+                      <Bookmark size={16} />
+                      <span>Not yet — resume later</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between">
+                <p className="text-[11px] text-zinc-500 text-left">
+                  Your unfinished movies can be resumed anytime.
+                </p>
+                <button
+                  type="button"
+                  disabled={isSubmittingCompletion}
+                  onClick={() => setShowCompletionPrompt(false)}
+                  className="text-xs text-zinc-400 hover:text-white px-2 py-1 rounded transition-colors shrink-0"
+                >
+                  Keep Watching
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* PARTNER COMPLETED NOTIFICATION OVERLAY */}
+      <AnimatePresence>
+        {partnerCompletedNotice && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 12 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 12 }}
+              className="w-full max-w-sm rounded-3xl border border-amber-500/25 bg-[#0c0d14]/95 p-6 shadow-2xl text-center space-y-4"
+            >
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                <CheckCircle2 size={28} />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">
+                  Movie Night Completed
+                </span>
+                <h3 className="text-lg font-bold text-white tracking-tight">
+                  &ldquo;{title}&rdquo; is finished!
+                </h3>
+                <p className="text-xs text-zinc-300">
+                  Your partner marked the movie as finished. It has been added to your Memory Vault for 7 days.
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2 text-xs text-zinc-400 pt-2">
+                <Loader2 size={14} className="animate-spin text-amber-400" />
+                <span>Returning to theater…</span>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       </div>
     </div>
   );
