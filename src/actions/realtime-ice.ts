@@ -32,11 +32,13 @@ export async function getTurnCredentialsAction(): Promise<
       "turn:a.relay.metered.ca:80",
       "turn:a.relay.metered.ca:443",
       "turn:a.relay.metered.ca:443?transport=tcp",
+      "turns:a.relay.metered.ca:443",
+      "turns:a.relay.metered.ca:443?transport=tcp",
     ];
 
     const turnSecret = process.env.TURN_SECRET;
-    const turnUsername = process.env.TURN_USERNAME;
-    const turnCredential = process.env.TURN_CREDENTIAL;
+    const turnUsername = process.env.TURN_USERNAME || process.env.NEXT_PUBLIC_TURN_USERNAME;
+    const turnCredential = process.env.TURN_CREDENTIAL || process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
 
     const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
 

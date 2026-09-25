@@ -25,7 +25,7 @@ const nextConfig = {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
-      `connect-src 'self' ${supabaseHost} wss://*.supabase.co https://*.supabase.co https://api.razorpay.com https://lumberjack.razorpay.com https://vitals.vercel-insights.com`,
+      `connect-src 'self' ${supabaseHost} wss://*.supabase.co https://*.supabase.co https://api.razorpay.com https://lumberjack.razorpay.com https://vitals.vercel-insights.com *.metered.ca *.l.google.com *.cloudflare.com *.twilio.com`,
       "media-src 'self' blob:",
       "worker-src 'self' blob:",
       "frame-src https://api.razorpay.com https://checkout.razorpay.com",

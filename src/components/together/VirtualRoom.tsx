@@ -236,6 +236,8 @@ export function VirtualRoom({
   }, [localStream]);
 
   // Attach remote media stream to remote video element (Viewer) with robust autoplay mitigation
+  // IMPORTANT: This effect depends ONLY on remoteStream to avoid re-running on mute toggles.
+  // Mute state is synced in a separate effect below to prevent mobile autoplay rejection loops.
   useEffect(() => {
     const videoEl = remoteVideoRef.current;
     if (!videoEl) return;
@@ -262,11 +264,9 @@ export function VirtualRoom({
       videoEl.setAttribute("webkit-playsinline", "true");
       videoEl.setAttribute("x5-playsinline", "true");
 
-      const hasAudio = remoteStream.getAudioTracks().length > 0;
-
       const startPlayback = async () => {
         // If user already muted or autoplay was muted, keep muted
-        if (isVideoMuted || isAutoplayMutedRef.current) {
+        if (isAutoplayMutedRef.current) {
           videoEl.muted = true;
           try {
             await videoEl.play();
@@ -285,9 +285,9 @@ export function VirtualRoom({
           console.warn("[VirtualRoom] Unmuted autoplay blocked by browser policy, switching to muted video:", unmutedErr);
           // Fallback: Mute video immediately so video frames render without delay
           videoEl.muted = true;
-          if (hasAudio) {
-            setIsAutoplayMuted(true);
-          }
+          // Always set isAutoplayMuted, regardless of whether audio tracks exist yet.
+          // Audio may arrive in a separate ontrack event after video.
+          setIsAutoplayMuted(true);
           try {
             await videoEl.play();
           } catch (mutedErr) {
@@ -301,7 +301,15 @@ export function VirtualRoom({
       videoEl.srcObject = null;
       setIsAutoplayMuted(false);
     }
-  }, [remoteStream, isVideoMuted]);
+  }, [remoteStream]);
+
+  // Sync video mute state separately from stream attachment to avoid
+  // re-triggering play() outside user gesture on mobile browsers.
+  useEffect(() => {
+    const videoEl = remoteVideoRef.current;
+    if (!videoEl || !remoteStream) return;
+    videoEl.muted = isVideoMuted || isAutoplayMuted;
+  }, [isVideoMuted, isAutoplayMuted, remoteStream]);
 
   const handleUnmuteRemote = useCallback(() => {
     if (remoteVideoRef.current) {
@@ -1622,7 +1630,9 @@ export function VirtualRoom({
             )}
 
             {/* D. VIEWER WAITING LOUNGE (When viewer is waiting for remote stream) */}
-            {!isHost && !hasActiveStream && !isCompanionMode && (
+            {/* Hide when roomState is LIVE — hasActiveStream can be transiently false
+                (e.g. audio track arrives before video) while video is actually rendering */}
+            {!isHost && !hasActiveStream && !isCompanionMode && roomState !== "LIVE" && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-gradient-to-b from-[#090b11]/90 via-[#07080d]/95 to-black backdrop-blur-md overflow-y-auto">
                 <div className="max-w-md w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15]/90 p-6 sm:p-8 shadow-2xl space-y-5 sm:space-y-6 my-auto">
                   <div className="relative w-16 h-24 sm:w-20 sm:h-28 rounded-xl overflow-hidden mx-auto border border-white/[0.1] shadow-2xl">

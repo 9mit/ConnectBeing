@@ -163,6 +163,13 @@ export function useTheaterWebRTC({
       pcRef.current = null;
     }
 
+    // Clear stale remote media state so dead tracks from old PC don't contaminate new streams
+    if (forceFresh) {
+      remoteStreamRef.current = null;
+      remoteMovieStreamIdRef.current = null;
+      remoteVoiceStreamIdRef.current = null;
+    }
+
     const pc = new RTCPeerConnection({
       iceServers: iceServersRef.current,
       bundlePolicy: "max-bundle",
@@ -183,6 +190,20 @@ export function useTheaterWebRTC({
       const track = ev.track;
       const associatedStream = ev.streams[0];
       const streamId = associatedStream?.id;
+
+      // === MANDATORY DIAGNOSTIC: ontrack event details ===
+      console.log("[WebRTC] ontrack fired:", {
+        kind: track.kind,
+        trackId: track.id,
+        readyState: track.readyState,
+        enabled: track.enabled,
+        muted: track.muted,
+        label: track.label,
+        streamsCount: ev.streams.length,
+        streamId,
+        existingRemoteVideoTracks: remoteStreamRef.current?.getVideoTracks().length ?? 0,
+        existingRemoteAudioTracks: remoteStreamRef.current?.getAudioTracks().length ?? 0,
+      });
 
       if (track.kind === "video") {
         if (streamId) {
@@ -244,6 +265,106 @@ export function useTheaterWebRTC({
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
+      // === MANDATORY DIAGNOSTIC: connection state change ===
+      console.log("[WebRTC] connectionStateChange:", {
+        connectionState: state,
+        iceConnectionState: pc.iceConnectionState,
+        iceGatheringState: pc.iceGatheringState,
+        signalingState: pc.signalingState,
+        senderCount: pc.getSenders().length,
+        receiverCount: pc.getReceivers().length,
+        videoSenderTrack: pc.getSenders().find(s => s.track?.kind === "video")?.track
+          ? { readyState: pc.getSenders().find(s => s.track?.kind === "video")!.track!.readyState, enabled: pc.getSenders().find(s => s.track?.kind === "video")!.track!.enabled }
+          : null,
+        remoteVideoTracks: remoteStreamRef.current?.getVideoTracks().map(t => ({ id: t.id, readyState: t.readyState, enabled: t.enabled })) ?? [],
+        isHost,
+      });
+
+      // Expose diagnostic function on window for DevTools access
+      if (typeof window !== "undefined") {
+        (window as any).__WEBRTC_DIAG = async () => {
+          const currentPc = pcRef.current || pc;
+          const stats: Record<string, any> = {
+            connectionState: currentPc.connectionState,
+            iceConnectionState: currentPc.iceConnectionState,
+            signalingState: currentPc.signalingState,
+            senders: currentPc.getSenders().map(s => ({
+              kind: s.track?.kind,
+              readyState: s.track?.readyState,
+              enabled: s.track?.enabled,
+              id: s.track?.id,
+              settings: s.track?.getSettings(),
+            })),
+            receivers: currentPc.getReceivers().map(r => ({
+              kind: r.track?.kind,
+              readyState: r.track?.readyState,
+              enabled: r.track?.enabled,
+              id: r.track?.id,
+            })),
+            localStream: localStreamRef.current ? {
+              videoTracks: localStreamRef.current.getVideoTracks().map(t => ({ readyState: t.readyState, enabled: t.enabled, settings: t.getSettings() })),
+              audioTracks: localStreamRef.current.getAudioTracks().length,
+            } : null,
+            remoteStream: remoteStreamRef.current ? {
+              videoTracks: remoteStreamRef.current.getVideoTracks().map(t => ({ id: t.id, readyState: t.readyState, enabled: t.enabled, muted: t.muted })),
+              audioTracks: remoteStreamRef.current.getAudioTracks().length,
+            } : null,
+            iceServers: iceServersRef.current.map(s => ({ urls: s.urls, hasCredential: !!s.credential })),
+          };
+
+          // Collect RTP stats
+          const rtpStats = await currentPc.getStats();
+          const rtp: Record<string, any>[] = [];
+          const ice: Record<string, any>[] = [];
+          rtpStats.forEach((report: any) => {
+            if (report.type === "outbound-rtp" && report.kind === "video") {
+              rtp.push({ direction: "outbound-video", bytesSent: report.bytesSent, packetsSent: report.packetsSent, framesEncoded: report.framesEncoded, keyFramesEncoded: report.keyFramesEncoded, frameWidth: report.frameWidth, frameHeight: report.frameHeight, framesPerSecond: report.framesPerSecond });
+            }
+            if (report.type === "inbound-rtp" && report.kind === "video") {
+              rtp.push({ direction: "inbound-video", bytesReceived: report.bytesReceived, packetsReceived: report.packetsReceived, framesReceived: report.framesReceived, framesDecoded: report.framesDecoded, framesDropped: report.framesDropped, frameWidth: report.frameWidth, frameHeight: report.frameHeight, framesPerSecond: report.framesPerSecond });
+            }
+            if (report.type === "candidate-pair" && report.state === "succeeded") {
+              ice.push({ state: report.state, localCandidateId: report.localCandidateId, remoteCandidateId: report.remoteCandidateId, nominated: report.nominated, bytesSent: report.bytesSent, bytesReceived: report.bytesReceived, currentRoundTripTime: report.currentRoundTripTime });
+            }
+          });
+          // Resolve candidate types
+          for (const pair of ice) {
+            rtpStats.forEach((report: any) => {
+              if (report.id === pair.localCandidateId) {
+                pair.localType = report.candidateType;
+                pair.localProtocol = report.protocol;
+                pair.localAddress = report.address ? `${report.address}:${report.port}` : "hidden";
+              }
+              if (report.id === pair.remoteCandidateId) {
+                pair.remoteType = report.candidateType;
+                pair.remoteProtocol = report.protocol;
+              }
+            });
+          }
+          stats.rtp = rtp;
+          stats.ice = ice;
+
+          // Video element state
+          const videoEl = document.querySelector("video");
+          if (videoEl) {
+            stats.videoElement = {
+              srcObject: !!videoEl.srcObject,
+              srcObjectTrackCount: (videoEl.srcObject as MediaStream)?.getTracks().length ?? 0,
+              videoWidth: videoEl.videoWidth,
+              videoHeight: videoEl.videoHeight,
+              readyState: videoEl.readyState,
+              networkState: videoEl.networkState,
+              paused: videoEl.paused,
+              muted: videoEl.muted,
+              currentTime: videoEl.currentTime,
+            };
+          }
+
+          console.log("[WebRTC DIAGNOSTIC DUMP]", JSON.stringify(stats, null, 2));
+          return stats;
+        };
+      }
+
       if (state === "connected") {
         restartAttemptsRef.current = 0;
         void applyBitrateCap(pc);
@@ -647,6 +768,11 @@ export function useTheaterWebRTC({
           ) {
             return;
           }
+          // A new offerId from the host means the host created a fresh RTCPeerConnection
+          // (e.g., in renegotiateForViewer). The viewer MUST also create a fresh PC so that
+          // ontrack fires for the new transceivers. Reusing the old PC causes ontrack to
+          // never fire (W3C WebRTC spec: existing transceivers don't re-fire ontrack).
+          const isNewOffer = payload.offerId !== activeOfferIdRef.current;
           activeOfferIdRef.current = payload.offerId;
 
           if (payload.movieStreamId) {
@@ -658,8 +784,8 @@ export function useTheaterWebRTC({
 
           const needFresh =
             !pcRef.current ||
-            pcRef.current.connectionState !== "connected" ||
-            pcRef.current.signalingState !== "stable";
+            pcRef.current.signalingState === "closed" ||
+            isNewOffer;
           const pc = getOrCreatePc(needFresh);
           if (needFresh) {
             pendingIceRef.current = [];
@@ -829,6 +955,16 @@ export function useTheaterWebRTC({
 
     // Load TURN credentials
     void getTurnCredentialsAction().then((res) => {
+      // === MANDATORY DIAGNOSTIC: TURN credential verification ===
+      console.log("[WebRTC] TURN credentials response:", {
+        ok: res.ok,
+        serverCount: res.ok ? res.data.iceServers.length : 0,
+        hasTurnServer: res.ok ? res.data.iceServers.some((s: any) => {
+          const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+          return urls.some((u: string) => u.startsWith("turn:"));
+        }) : false,
+        hasCredential: res.ok ? res.data.iceServers.some((s: any) => !!s.credential) : false,
+      });
       if (res.ok && res.data.iceServers && res.data.iceServers.length > 0) {
         iceServersRef.current = [
           ...DEFAULT_ICE_SERVERS,
@@ -915,28 +1051,57 @@ export function useTheaterWebRTC({
   useEffect(() => {
     if (isHost) return;
     let count = 0;
+    let mediaWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
     const interval = setInterval(() => {
       count++;
-      if (count > 25) {
+      if (count > 40) {
         clearInterval(interval);
         return;
       }
-      // If still waiting without a stream, ping viewer readiness ONLY if not already connecting/connected
-      const pc = pcRef.current;
-      const isConnecting =
-        pc &&
-        (pc.connectionState === "connecting" ||
-          pc.connectionState === "connected");
+      // Check whether we have a live video track, not just a connected PC.
+      // A PC can be "connected" at the ICE/DTLS layer while video RTP is blocked
+      // (e.g. missing TURN relay, stale transceiver, codec mismatch).
+      const hasLiveVideo = remoteStreamRef.current?.getVideoTracks().some(
+        (t) => t.readyState === "live",
+      );
+      const isActivelyConnecting = pcRef.current?.connectionState === "connecting";
+
       if (
-        !remoteStreamRef.current &&
-        !isConnecting &&
+        !hasLiveVideo &&
+        !isActivelyConnecting &&
         roomStateRef.current !== "STREAM_ENDED"
       ) {
         sendViewerReady();
       }
     }, 3000);
 
-    return () => clearInterval(interval);
+    // Media watchdog: if PC reaches "connected" but no video track arrives
+    // within 8 seconds, force a viewer-ready renegotiation to recover.
+    const originalOnConnectionStateChange = pcRef.current?.onconnectionstatechange;
+    const checkMediaAfterConnect = () => {
+      const pc = pcRef.current;
+      if (pc?.connectionState === "connected") {
+        mediaWatchdogTimer = setTimeout(() => {
+          const hasLiveVideo = remoteStreamRef.current?.getVideoTracks().some(
+            (t) => t.readyState === "live",
+          );
+          if (!hasLiveVideo && roomStateRef.current !== "STREAM_ENDED") {
+            console.warn("[WebRTC Viewer] Media watchdog: connected but no video after 8s, requesting renegotiation");
+            sendViewerReady();
+          }
+        }, 8000);
+      }
+    };
+    // Attach watchdog alongside existing handler (if PC exists at mount time)
+    if (pcRef.current) {
+      checkMediaAfterConnect();
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (mediaWatchdogTimer) clearTimeout(mediaWatchdogTimer);
+    };
   }, [isHost, sendViewerReady]);
 
   const notifyPartnerLeaving = useCallback(async () => {
