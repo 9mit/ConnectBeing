@@ -29,6 +29,9 @@ export interface TheaterWebRTCProps {
   onDriftCorrect?: (remotePos: number) => void;
 }
 
+const envTurnUser = process.env.NEXT_PUBLIC_TURN_USERNAME || "openrelayproject";
+const envTurnCred = process.env.NEXT_PUBLIC_TURN_CREDENTIAL || "openrelayproject";
+
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   {
     urls: [
@@ -36,11 +39,158 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
       "stun:stun1.l.google.com:19302",
       "stun:stun2.l.google.com:19302",
       "stun:stun.cloudflare.com:3478",
-      "stun:openrelay.metered.ca:80",
+      "stun:global.stun.twilio.com:3478",
     ],
   },
-  { urls: ["stun:global.stun.twilio.com:3478"] },
+  {
+    urls: [
+      "turn:a.relay.metered.ca:80",
+      "turn:a.relay.metered.ca:443",
+      "turn:openrelay.metered.ca:80",
+      "turn:openrelay.metered.ca:443",
+    ],
+    username: envTurnUser,
+    credential: envTurnCred,
+  },
+  {
+    urls: [
+      "turn:a.relay.metered.ca:443?transport=tcp",
+      "turn:openrelay.metered.ca:443?transport=tcp",
+      "turns:a.relay.metered.ca:443",
+      "turns:openrelay.metered.ca:443",
+    ],
+    username: envTurnUser,
+    credential: envTurnCred,
+  },
 ];
+
+/**
+ * Reorders video payload types in SDP so mobile-friendly codecs (H.264 Baseline & VP8)
+ * are listed ahead of VP9/AV1. This prevents iOS Safari and Android hardware decoders
+ * from stalling or failing silently when PC Chrome negotiates high-profile VP9.
+ * Note: Only apply to OFFER sdp. Do NOT munge answer sdp per RFC 8829 §5.4.
+ */
+function prioritizeCodecsInSdp(sdp: string): string {
+  if (!sdp || typeof sdp !== "string") return sdp;
+
+  try {
+    const isCrlf = sdp.includes("\r\n");
+    const lines = isCrlf ? sdp.split("\r\n") : sdp.split("\n");
+    let videoMediaLineIndex = -1;
+    const rtpMap = new Map<string, string>(); // pt -> codecName
+    const fmtpMap = new Map<string, string>(); // pt -> fmtpConfig
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith("m=video ")) {
+        videoMediaLineIndex = i;
+      } else if (line.startsWith("a=rtpmap:")) {
+        const parts = line.substring(9).split(" ");
+        const pt = parts[0];
+        const codec = parts[1]?.split("/")[0]?.toUpperCase() || "";
+        rtpMap.set(pt, codec);
+      } else if (line.startsWith("a=fmtp:")) {
+        const parts = line.substring(7).split(" ");
+        const pt = parts[0];
+        const fmtp = parts.slice(1).join(" ");
+        fmtpMap.set(pt, fmtp.toLowerCase());
+      }
+    }
+
+    if (videoMediaLineIndex === -1) return sdp;
+
+    const mLine = lines[videoMediaLineIndex];
+    const mTokens = mLine.split(" ");
+    if (mTokens.length < 4) return sdp;
+
+    const prefix = mTokens.slice(0, 3);
+    const payloadTypes = mTokens.slice(3);
+
+    const getScore = (pt: string): number => {
+      const codec = rtpMap.get(pt) || "";
+      const fmtp = fmtpMap.get(pt) || "";
+
+      if (codec === "H264") {
+        if (fmtp.includes("42e01f") || fmtp.includes("42001f")) {
+          return 100;
+        }
+        if (fmtp.includes("4d001f") || fmtp.includes("4d002a")) {
+          return 90;
+        }
+        return 80;
+      }
+      if (codec === "VP8") {
+        return 70;
+      }
+      if (codec === "VP9") {
+        return 40;
+      }
+      if (codec === "AV1") {
+        return 20;
+      }
+      return 10;
+    };
+
+    const sortedPayloads = [...payloadTypes].sort((a, b) => getScore(b) - getScore(a));
+    lines[videoMediaLineIndex] = `${prefix.join(" ")} ${sortedPayloads.join(" ")}`;
+    return isCrlf ? lines.join("\r\n") : lines.join("\n");
+  } catch (err) {
+    console.warn("[WebRTC] SDP codec prioritization fallback:", err);
+    return sdp;
+  }
+}
+
+/**
+ * Configure RTCRtpTransceiver codec preferences API (modern WebRTC standard)
+ */
+function prioritizeMobileSafeCodecs(transceiver: RTCRtpTransceiver) {
+  if (
+    !transceiver ||
+    typeof transceiver.setCodecPreferences !== "function" ||
+    typeof RTCRtpSender === "undefined" ||
+    typeof RTCRtpSender.getCapabilities !== "function"
+  ) {
+    return;
+  }
+
+  try {
+    const capabilities = RTCRtpSender.getCapabilities("video");
+    if (!capabilities || !capabilities.codecs || capabilities.codecs.length === 0) {
+      return;
+    }
+
+    const codecs = [...capabilities.codecs];
+    codecs.sort((a, b) => {
+      const aMime = (a.mimeType || "").toLowerCase();
+      const bMime = (b.mimeType || "").toLowerCase();
+      const aIsH264 = aMime === "video/h264";
+      const bIsH264 = bMime === "video/h264";
+      const aIsVP8 = aMime === "video/vp8";
+      const bIsVP8 = bMime === "video/vp8";
+
+      if (aIsH264 && !bIsH264) return -1;
+      if (!aIsH264 && bIsH264) return 1;
+
+      if (aIsH264 && bIsH264) {
+        const aFmtp = (a.sdpFmtpLine || "").toLowerCase();
+        const bFmtp = (b.sdpFmtpLine || "").toLowerCase();
+        const aBaseline = aFmtp.includes("42e01f") || aFmtp.includes("42001f");
+        const bBaseline = bFmtp.includes("42e01f") || bFmtp.includes("42001f");
+        if (aBaseline && !bBaseline) return -1;
+        if (!aBaseline && bBaseline) return 1;
+      }
+
+      if (aIsVP8 && !bIsVP8) return -1;
+      if (!aIsVP8 && bIsVP8) return 1;
+
+      return 0;
+    });
+
+    transceiver.setCodecPreferences(codecs);
+  } catch (e) {
+    console.warn("[WebRTC] setCodecPreferences notice:", e);
+  }
+}
 
 export function useTheaterWebRTC({
   sessionId,
@@ -177,6 +327,12 @@ export function useTheaterWebRTC({
     });
     pcRef.current = pc;
 
+    // Viewer: DO NOT call pc.addTransceiver() proactively!
+    // Per W3C WebRTC 1.0 Spec §5.1.1, transceivers created proactively with addTransceiver
+    // DO NOT fire ontrack when setRemoteDescription runs!
+    // Letting setRemoteDescription(offer) instantiate transceivers guarantees pc.ontrack
+    // fires reliably on both mobile WebKit (Safari) and Chromium.
+
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
         sendSignal("theater:ice-candidate", {
@@ -210,15 +366,15 @@ export function useTheaterWebRTC({
           remoteMovieStreamIdRef.current = streamId;
         }
 
-        const nativeStream = associatedStream || new MediaStream([track]);
         if (!remoteStreamRef.current) {
-          remoteStreamRef.current = nativeStream;
+          remoteStreamRef.current = new MediaStream();
         }
         const rStream = remoteStreamRef.current;
         if (!rStream.getVideoTracks().some((t) => t.id === track.id)) {
           rStream.addTrack(track);
         }
 
+        // Always create a new MediaStream instance so React state updates reliably across renders
         setRemoteStream(new MediaStream(rStream.getTracks()));
         updateState("LIVE");
 
@@ -260,7 +416,7 @@ export function useTheaterWebRTC({
         } else {
           // Tab movie audio: add to remoteStream
           if (!remoteStreamRef.current) {
-            remoteStreamRef.current = associatedStream || new MediaStream([track]);
+            remoteStreamRef.current = new MediaStream();
           }
           const rStream = remoteStreamRef.current;
           if (!rStream.getAudioTracks().some((t) => t.id === track.id)) {
@@ -477,8 +633,16 @@ export function useTheaterWebRTC({
       const offerId = Math.random().toString(36).substring(2, 9);
       activeOfferIdRef.current = offerId;
 
+      pc.getTransceivers().forEach((transceiver) => {
+        if (transceiver.sender.track?.kind === "video" || transceiver.receiver.track?.kind === "video") {
+          prioritizeMobileSafeCodecs(transceiver);
+        }
+      });
+
       const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+      const safeOfferSdp = prioritizeCodecsInSdp(offer.sdp || "");
+      const modifiedOffer = { type: offer.type, sdp: safeOfferSdp };
+      await pc.setLocalDescription(modifiedOffer);
 
       // Wait up to 300ms for initial STUN/TURN candidates to gather into localDescription
       await new Promise<void>((resolve) => {
@@ -587,11 +751,13 @@ export function useTheaterWebRTC({
 
       updateState("AWAITING_SCREEN_SHARE");
 
-      // Prefer tab sharing with audio
+      // Prefer tab sharing with audio, constrained to 1080p @ 30fps to prevent overloading mobile decoders
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           displaySurface: "browser",
-          frameRate: { ideal: 30, max: 60 },
+          frameRate: { ideal: 30, max: 30 },
+          width: { ideal: 1920, max: 1920 },
+          height: { ideal: 1080, max: 1080 },
         },
         audio: true,
       });
@@ -643,8 +809,16 @@ export function useTheaterWebRTC({
         const offerId = Math.random().toString(36).substring(2, 9);
         activeOfferIdRef.current = offerId;
 
+        pc.getTransceivers().forEach((transceiver) => {
+          if (transceiver.sender.track?.kind === "video" || transceiver.receiver.track?.kind === "video") {
+            prioritizeMobileSafeCodecs(transceiver);
+          }
+        });
+
         const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+        const safeOfferSdp = prioritizeCodecsInSdp(offer.sdp || "");
+        const modifiedOffer = { type: offer.type, sdp: safeOfferSdp };
+        await pc.setLocalDescription(modifiedOffer);
 
         // Wait up to 350ms for initial STUN/TURN candidates to gather into localDescription
         await new Promise<void>((resolve) => {
@@ -799,8 +973,29 @@ export function useTheaterWebRTC({
             pendingIceRef.current = [];
           }
 
-          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          const rawSdp = typeof payload.sdp === "string" ? payload.sdp : payload.sdp?.sdp || "";
+          const safeOfferSdp = prioritizeCodecsInSdp(rawSdp);
+          await pc.setRemoteDescription(new RTCSessionDescription({
+            type: "offer",
+            sdp: safeOfferSdp,
+          }));
           await flushPendingIce(pc);
+
+          // Defensive receiver track recovery: ensure any newly provisioned receiver track is attached
+          pc.getReceivers().forEach((receiver) => {
+            const rTrack = receiver.track;
+            if (rTrack && rTrack.kind === "video" && rTrack.readyState === "live") {
+              if (!remoteStreamRef.current) {
+                remoteStreamRef.current = new MediaStream();
+              }
+              const rStream = remoteStreamRef.current;
+              if (!rStream.getVideoTracks().some((t) => t.id === rTrack.id)) {
+                rStream.addTrack(rTrack);
+                setRemoteStream(new MediaStream(rStream.getTracks()));
+                updateState("LIVE");
+              }
+            }
+          });
 
           if (localVoiceRef.current) {
             const vTrack = localVoiceRef.current.getAudioTracks()[0];
@@ -812,10 +1007,18 @@ export function useTheaterWebRTC({
             }
           }
 
+          pc.getTransceivers().forEach((transceiver) => {
+            if (transceiver.receiver.track?.kind === "video" || transceiver.sender.track?.kind === "video") {
+              prioritizeMobileSafeCodecs(transceiver);
+            }
+          });
+
           const answer = await pc.createAnswer();
+          // CRITICAL: DO NOT munge answer SDP per RFC 8829 §5.4!
+          // Modifying answer payload types causes WebKit (iOS Safari) and Chromium to throw InvalidModificationError.
           await pc.setLocalDescription(answer);
 
-          // Wait up to 300ms for initial STUN candidates to gather into localDescription
+          // Wait up to 300ms for initial STUN/TURN candidates to gather into localDescription
           await new Promise<void>((resolve) => {
             if (pc.iceGatheringState === "complete") {
               resolve();
@@ -857,8 +1060,14 @@ export function useTheaterWebRTC({
             (pc.signalingState === "have-local-offer" ||
               pc.signalingState === "have-remote-pranswer")
           ) {
-            await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-            await flushPendingIce(pc);
+            const answerDesc =
+              typeof payload.sdp === "string"
+                ? { type: "answer", sdp: payload.sdp }
+                : payload.sdp;
+            if (answerDesc && answerDesc.sdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription(answerDesc));
+              await flushPendingIce(pc);
+            }
           }
         } catch (e) {
           console.error("[WebRTC Host] Failed handling WebRTC answer:", e);

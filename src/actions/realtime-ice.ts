@@ -26,6 +26,10 @@ export async function getTurnCredentialsAction(): Promise<
 
     const iceServers: IceServer[] = [
       { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun.cloudflare.com:3478" },
+      { urls: "stun:global.stun.twilio.com:3478" },
     ];
 
     const turnUrls = [
@@ -59,7 +63,19 @@ export async function getTurnCredentialsAction(): Promise<
         credential: turnCredential,
       });
     } else {
-      // Graceful fallback to reliable STUN servers when dedicated TURN relay is not provisioned
+      // Free reliable OpenRelay TURN servers when custom TURN is not configured
+      // Guarantees mobile cellular (4G/5G Symmetric NAT / CGNAT) WebRTC peer traversal
+      iceServers.push({
+        urls: [
+          "turn:openrelay.metered.ca:80",
+          "turn:openrelay.metered.ca:443",
+          "turn:openrelay.metered.ca:443?transport=tcp",
+          "turns:openrelay.metered.ca:443",
+          "turns:openrelay.metered.ca:443?transport=tcp",
+        ],
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      });
       iceServers.push(
         { urls: "stun:stun1.l.google.com:19302" },
         { urls: "stun:stun.cloudflare.com:3478" },

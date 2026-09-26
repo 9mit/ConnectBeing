@@ -162,6 +162,19 @@ export function VirtualRoom({
   isAutoplayMutedRef.current = isAutoplayMuted;
   const [userSwitchedToCompanion, setUserSwitchedToCompanion] = useState(false);
 
+  // Playback active state & DRM black screen detection
+  const [isVideoActuallyPlaying, setIsVideoActuallyPlaying] = useState(false);
+  const [isMediaRendering, setIsMediaRendering] = useState(false);
+  const [isDrmBlackScreenDetected, setIsDrmBlackScreenDetected] = useState(false);
+  const [partnerDrmReported, setPartnerDrmReported] = useState(false);
+
+  // Direct Synchronized Movie Player states (open-source / web video fallback)
+  const [directMediaUrl, setDirectMediaUrl] = useState<string | null>(null);
+  const [directMediaTitle, setDirectMediaTitle] = useState<string | null>(null);
+  const [showDirectMediaModal, setShowDirectMediaModal] = useState(false);
+  const [directMediaInput, setDirectMediaInput] = useState("");
+  const directVideoRef = useRef<HTMLVideoElement>(null);
+
   // OTT Mobile & Cinema Player States
   const [estimatedDuration, setEstimatedDuration] = useState(7200);
   const [showControls, setShowControls] = useState(true);
@@ -245,22 +258,7 @@ export function VirtualRoom({
     if (!videoEl) return;
 
     if (remoteStream) {
-      const currentStream = videoEl.srcObject as MediaStream | null;
-      const currentVideoTrack = currentStream?.getVideoTracks()[0];
-      const newVideoTrack = remoteStream.getVideoTracks()[0];
-
-      // Only reassign srcObject if the stream or video track has actually changed
-      if (!currentStream || currentVideoTrack?.id !== newVideoTrack?.id) {
-        videoEl.srcObject = remoteStream;
-      } else {
-        // Add any new audio tracks without resetting the video element decoder
-        remoteStream.getAudioTracks().forEach((aTrack) => {
-          if (!currentStream.getAudioTracks().some((t) => t.id === aTrack.id)) {
-            currentStream.addTrack(aTrack);
-          }
-        });
-      }
-
+      // 1. Critical for mobile Safari & Android: configure attributes BEFORE assigning srcObject
       videoEl.playsInline = true;
       videoEl.defaultMuted = true;
       videoEl.muted = true;
@@ -268,22 +266,88 @@ export function VirtualRoom({
       videoEl.setAttribute("webkit-playsinline", "true");
       videoEl.setAttribute("x5-playsinline", "true");
 
-      const startPlayback = async () => {
-        // Prioritize immediate playback so video frames decode without delay.
-        // Mobile browsers always require muted autoplay initially.
-        videoEl.muted = true;
-        setIsAutoplayMuted(true);
-        try {
-          await videoEl.play();
-        } catch (err) {
-          console.warn("[VirtualRoom] Autoplay play() attempt:", err);
+      if (videoEl.srcObject !== remoteStream) {
+        videoEl.srcObject = remoteStream;
+      }
+
+      const updateRenderingState = () => {
+        const hasDimensions = videoEl.videoWidth > 0 && videoEl.videoHeight > 0;
+        const isPlaying = !videoEl.paused;
+        if (hasDimensions && isPlaying) {
+          setIsMediaRendering(true);
+          setIsVideoActuallyPlaying(true);
         }
       };
 
-      void startPlayback();
+      const tryPlay = async () => {
+        try {
+          videoEl.muted = true;
+          setIsAutoplayMuted(true);
+          await videoEl.play();
+          updateRenderingState();
+        } catch (err) {
+          console.warn("[VirtualRoom] Autoplay play() attempt:", err);
+          setIsVideoActuallyPlaying(false);
+          setIsMediaRendering(false);
+        }
+      };
+
+      const onTrackUnmute = () => {
+        console.log("[VirtualRoom] Remote video track unmuted, initiating playback");
+        void tryPlay();
+      };
+
+      const newVideoTrack = remoteStream.getVideoTracks()[0];
+      if (newVideoTrack) {
+        newVideoTrack.addEventListener("unmute", onTrackUnmute);
+      }
+
+      const onPlaying = () => {
+        updateRenderingState();
+      };
+      const onPause = () => {
+        setIsVideoActuallyPlaying(false);
+        setIsMediaRendering(false);
+      };
+      const onCanPlay = () => {
+        if (videoEl.paused) void tryPlay();
+        updateRenderingState();
+      };
+      const onLoadedMetadata = () => {
+        updateRenderingState();
+        if (videoEl.paused) void tryPlay();
+      };
+      const onResize = () => {
+        updateRenderingState();
+      };
+
+      videoEl.addEventListener("playing", onPlaying);
+      videoEl.addEventListener("pause", onPause);
+      videoEl.addEventListener("canplay", onCanPlay);
+      videoEl.addEventListener("loadedmetadata", onLoadedMetadata);
+      videoEl.addEventListener("loadeddata", onLoadedMetadata);
+      videoEl.addEventListener("resize", onResize);
+      videoEl.addEventListener("timeupdate", updateRenderingState);
+
+      void tryPlay();
+
+      return () => {
+        if (newVideoTrack) {
+          newVideoTrack.removeEventListener("unmute", onTrackUnmute);
+        }
+        videoEl.removeEventListener("playing", onPlaying);
+        videoEl.removeEventListener("pause", onPause);
+        videoEl.removeEventListener("canplay", onCanPlay);
+        videoEl.removeEventListener("loadedmetadata", onLoadedMetadata);
+        videoEl.removeEventListener("loadeddata", onLoadedMetadata);
+        videoEl.removeEventListener("resize", onResize);
+        videoEl.removeEventListener("timeupdate", updateRenderingState);
+      };
     } else {
       videoEl.srcObject = null;
       setIsAutoplayMuted(false);
+      setIsVideoActuallyPlaying(false);
+      setIsMediaRendering(false);
     }
   }, [remoteStream]);
 
@@ -300,7 +364,12 @@ export function VirtualRoom({
       remoteVideoRef.current.muted = false;
       setIsAutoplayMuted(false);
       setIsVideoMuted(false);
-      void remoteVideoRef.current.play().catch((err) => {
+      void remoteVideoRef.current.play().then(() => {
+        if (remoteVideoRef.current && remoteVideoRef.current.videoWidth > 0) {
+          setIsMediaRendering(true);
+        }
+        setIsVideoActuallyPlaying(true);
+      }).catch((err) => {
         console.warn("[VirtualRoom] User gesture unmute failed:", err);
       });
     }
@@ -345,6 +414,9 @@ export function VirtualRoom({
   const seekToPosition = useCallback((newPos: number) => {
     const clamped = Math.max(0, Math.min(newPos, estimatedDuration));
     setPositionSeconds(clamped);
+    if (directVideoRef.current) {
+      directVideoRef.current.currentTime = clamped;
+    }
     void channelRef.current?.send({
       type: "broadcast",
       event: "theater:playback",
@@ -355,6 +427,9 @@ export function VirtualRoom({
   const seekBy = useCallback((delta: number) => {
     setPositionSeconds((prev) => {
       const next = Math.max(0, Math.min(prev + delta, estimatedDuration));
+      if (directVideoRef.current) {
+        directVideoRef.current.currentTime = next;
+      }
       void channelRef.current?.send({
         type: "broadcast",
         event: "theater:playback",
@@ -376,6 +451,13 @@ export function VirtualRoom({
     setPlayPausePulse(next);
     if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
     pulseTimerRef.current = setTimeout(() => setPlayPausePulse(null), 800);
+    if (directVideoRef.current) {
+      if (next === "playing") {
+        void directVideoRef.current.play().catch(() => {});
+      } else {
+        directVideoRef.current.pause();
+      }
+    }
     void channelRef.current?.send({
       type: "broadcast",
       event: "theater:playback",
@@ -600,8 +682,35 @@ export function VirtualRoom({
       })
       .on("broadcast", { event: "theater:playback" }, ({ payload }: { payload: any }) => {
         if (payload.userId === userId) return;
-        if (payload.state) setPlaybackState(payload.state);
-        if (typeof payload.position === "number") setPositionSeconds(payload.position);
+        if (payload.state) {
+          setPlaybackState(payload.state);
+          if (directVideoRef.current) {
+            if (payload.state === "playing") {
+              void directVideoRef.current.play().catch(() => {});
+            } else {
+              directVideoRef.current.pause();
+            }
+          }
+        }
+        if (typeof payload.position === "number") {
+          setPositionSeconds(payload.position);
+          if (directVideoRef.current && Math.abs(directVideoRef.current.currentTime - payload.position) > 2) {
+            directVideoRef.current.currentTime = payload.position;
+          }
+        }
+      })
+      .on("broadcast", { event: "theater:drm-detected" }, ({ payload }: { payload: any }) => {
+        setPartnerDrmReported(Boolean(payload?.isBlack));
+      })
+      .on("broadcast", { event: "theater:direct-media" }, ({ payload }: { payload: any }) => {
+        if (payload?.url) {
+          setDirectMediaUrl(payload.url);
+          setDirectMediaTitle(payload.title || "Shared Movie");
+          if (payload.duration) setEstimatedDuration(payload.duration);
+        } else {
+          setDirectMediaUrl(null);
+          setDirectMediaTitle(null);
+        }
       })
       .on("broadcast", { event: "theater:message" }, ({ payload }: { payload: any }) => {
         if (!payload || payload.userId === userId) return;
@@ -932,6 +1041,57 @@ export function VirtualRoom({
     : !!remoteStream &&
       remoteStream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled);
 
+  // DRM Black Screen Detector for PC screen sharing Hotstar/Netflix
+  useEffect(() => {
+    const video = isHost ? localVideoRef.current : remoteVideoRef.current;
+    if (!video || !hasActiveStream || Boolean(directMediaUrl)) {
+      setIsDrmBlackScreenDetected(false);
+      return;
+    }
+
+    let consecutiveBlackSamples = 0;
+    const canvas = document.createElement("canvas");
+    canvas.width = 16;
+    canvas.height = 16;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+
+    const interval = window.setInterval(() => {
+      if (video.videoWidth === 0 || video.videoHeight === 0 || video.paused) return;
+      try {
+        ctx.drawImage(video, 0, 0, 16, 16);
+        const imgData = ctx.getImageData(0, 0, 16, 16).data;
+        let isBlack = true;
+        for (let i = 0; i < imgData.length; i += 4) {
+          if (imgData[i] > 12 || imgData[i + 1] > 12 || imgData[i + 2] > 12) {
+            isBlack = false;
+            break;
+          }
+        }
+        if (isBlack) {
+          consecutiveBlackSamples++;
+          if (consecutiveBlackSamples >= 3) {
+            setIsDrmBlackScreenDetected(true);
+            if (isHost) {
+              void channelRef.current?.send({
+                type: "broadcast",
+                event: "theater:drm-detected",
+                payload: { isBlack: true },
+              });
+            }
+          }
+        } else {
+          consecutiveBlackSamples = 0;
+          setIsDrmBlackScreenDetected(false);
+        }
+      } catch {
+        /* cross-origin canvas security exception */
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [directMediaUrl, hasActiveStream, isHost]);
+
   // Companion Mode decision:
   // Companion Mode is ONLY for:
   // 1. User explicitly requested it via button (both host and viewer), OR
@@ -939,7 +1099,7 @@ export function VirtualRoom({
   // A viewer MUST NEVER be automatically forced into Companion Mode merely because they are on mobile or WebRTC is connecting/reconnecting!
   const isCompanionMode =
     userSwitchedToCompanion ||
-    (isHost && !canShareScreen && !hasActiveStream);
+    (isHost && !canShareScreen && !hasActiveStream && !directMediaUrl);
 
   const isCinemaFullscreen = isImmersiveTheater || isFullscreen || isLandscape;
 
@@ -1089,6 +1249,19 @@ export function VirtualRoom({
                 <PictureInPicture2 size={14} className={isPiP ? "text-amber-400" : ""} />
               </button>
             )}
+
+            {/* Direct Movie Player Shortcut Button */}
+            <button
+              type="button"
+              onClick={() => setShowDirectMediaModal(true)}
+              className={`p-1.5 rounded-full transition-colors ${
+                directMediaUrl ? "text-rose-400 bg-rose-500/10" : "text-zinc-400 hover:text-white hover:bg-white/[0.05]"
+              }`}
+              title="Play direct movie or video link"
+              aria-label="Play direct movie"
+            >
+              <Film size={14} />
+            </button>
 
             {/* Fullscreen Button */}
             <button
@@ -1544,7 +1717,7 @@ export function VirtualRoom({
                 webkit-playsinline="true"
                 x5-playsinline="true"
                 className={`h-full w-full object-contain ${
-                  isHostCapturing ? "block" : "hidden"
+                  isHostCapturing && !directMediaUrl ? "block" : "hidden"
                 }`}
               />
             )}
@@ -1558,13 +1731,138 @@ export function VirtualRoom({
                 playsInline
                 webkit-playsinline="true"
                 x5-playsinline="true"
-                className="h-full w-full object-contain block"
+                className={`h-full w-full object-contain ${
+                  !directMediaUrl ? "block" : "hidden"
+                }`}
                 style={{ maxHeight: "100%", maxWidth: "100%" }}
               />
             )}
 
+            {/* C. SYNCHRONIZED DIRECT MEDIA PLAYER (Direct Movie Link / Open-Source / YouTube) */}
+            {directMediaUrl && (
+              <video
+                ref={directVideoRef}
+                src={directMediaUrl}
+                playsInline
+                webkit-playsinline="true"
+                x5-playsinline="true"
+                className="h-full w-full object-contain block z-10"
+                style={{ maxHeight: "100%", maxWidth: "100%" }}
+                onTimeUpdate={(e) => {
+                  if (isHost) {
+                    setPositionSeconds(Math.floor(e.currentTarget.currentTime));
+                  }
+                }}
+                onLoadedMetadata={(e) => {
+                  if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
+                    setEstimatedDuration(Math.floor(e.currentTarget.duration));
+                  }
+                }}
+                onPlay={() => setPlaybackState("playing")}
+                onPause={() => setPlaybackState("paused")}
+              />
+            )}
+
+            {/* MOBILE TAP TO START VIDEO OVERLAY (When remote stream is ready but mobile browser requires user tap to play) */}
+            {!isHost && hasActiveStream && (!isMediaRendering || !isVideoActuallyPlaying) && !isCompanionMode && !directMediaUrl && (
+              <div
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (remoteVideoRef.current) {
+                    remoteVideoRef.current.muted = true;
+                    try {
+                      await remoteVideoRef.current.play();
+                      if (remoteVideoRef.current.videoWidth > 0) {
+                        setIsMediaRendering(true);
+                      }
+                      setIsVideoActuallyPlaying(true);
+                    } catch (err) {
+                      console.warn("[VirtualRoom] Manual play error:", err);
+                    }
+                  }
+                }}
+                className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm cursor-pointer p-6 text-center select-none"
+              >
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center shadow-2xl shadow-rose-600/50 animate-pulse active:scale-95 transition-all">
+                  <Play size={32} className="translate-x-0.5" />
+                </div>
+                <h4 className="mt-4 text-sm sm:text-base font-semibold text-white tracking-wide">
+                  Partner is Sharing Movie Stream
+                </h4>
+                <p className="text-xs text-rose-300 font-medium mt-1">
+                  Tap anywhere to watch
+                </p>
+                <span className="text-[10px] text-zinc-400 mt-2 max-w-xs">
+                  Mobile browsers require one screen tap to initiate streaming video playback
+                </span>
+              </div>
+            )}
+
+            {/* DRM BLACK SCREEN DETECTED BANNER ON HOST (PC) */}
+            {isHost && isDrmBlackScreenDetected && !directMediaUrl && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-lg w-[94%] rounded-2xl border border-amber-500/40 bg-[#0d0f17]/95 p-4 shadow-2xl backdrop-blur-xl text-left space-y-2 pointer-events-auto">
+                <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                  <AlertCircle size={16} className="text-amber-400 shrink-0" />
+                  <span>Streaming DRM Protection Detected</span>
+                </div>
+                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                  Your browser is sending black video to your partner because Hotstar/Netflix DRM prevents screen recording with graphics acceleration enabled.
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                  <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-mono text-[10px] border border-amber-500/20">
+                    Fix: Chrome Settings &rarr; System &rarr; Turn OFF graphics acceleration &rarr; Restart Chrome
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDirectMediaModal(true);
+                    }}
+                    className="text-xs font-semibold text-rose-300 hover:text-white underline ml-auto"
+                  >
+                    Play Direct Movie Link &rarr;
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* DRM PROTECTION NOTICE ON VIEWER (MOBILE) */}
+            {!isHost && (isDrmBlackScreenDetected || partnerDrmReported) && !directMediaUrl && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-md w-[94%] rounded-2xl border border-amber-500/40 bg-[#0d0f17]/95 p-4 shadow-2xl backdrop-blur-xl text-left space-y-2 pointer-events-auto">
+                <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                  <AlertCircle size={16} className="text-amber-400 shrink-0" />
+                  <span>Movie Stream is DRM-Protected</span>
+                </div>
+                <p className="text-[11px] text-zinc-300 leading-relaxed">
+                  Your partner is streaming DRM content (Hotstar/Netflix). We have alerted them to disable hardware acceleration in Chrome, or you can switch viewing modes below:
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setUserSwitchedToCompanion(true);
+                    }}
+                    className="text-xs font-semibold px-3 py-1 rounded-full bg-amber-400 text-black hover:bg-amber-300 active:scale-95 transition-all shadow"
+                  >
+                    Switch to Companion Mode
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDirectMediaModal(true);
+                    }}
+                    className="text-xs text-zinc-300 hover:text-white underline ml-1"
+                  >
+                    Direct Movie Player
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* C. HOST SETUP GUIDE (When no screen capture is active) */}
-            {isHost && !isHostCapturing && !isCompanionMode && (
+            {isHost && !isHostCapturing && !isCompanionMode && !directMediaUrl && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-gradient-to-b from-[#090b11]/90 via-[#07080d]/95 to-black backdrop-blur-md overflow-y-auto">
                 <div className="max-w-lg w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15]/90 p-6 sm:p-8 shadow-2xl space-y-5 sm:space-y-6 my-auto">
                   <div
@@ -1633,6 +1931,14 @@ export function VirtualRoom({
                     >
                       <Share2 size={13} /> 2. Share Movie Tab
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowDirectMediaModal(true)}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-xs font-semibold text-zinc-200 bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.1] transition-all active:scale-95"
+                    >
+                      <Film size={13} /> Direct Movie Player 🎬
+                    </button>
                   </div>
 
                   {/* Fallback to Companion Mode option */}
@@ -1656,10 +1962,8 @@ export function VirtualRoom({
               </div>
             )}
 
-            {/* D. VIEWER WAITING LOUNGE (When viewer is waiting for remote stream) */}
-            {/* Hide when roomState is LIVE — hasActiveStream can be transiently false
-                (e.g. audio track arrives before video) while video is actually rendering */}
-            {!isHost && !hasActiveStream && !isCompanionMode && roomState !== "LIVE" && (
+            {/* D. VIEWER WAITING LOUNGE (When viewer is waiting for remote stream to establish) */}
+            {!isHost && !hasActiveStream && !isCompanionMode && roomState !== "STREAM_ENDED" && !directMediaUrl && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-gradient-to-b from-[#090b11]/90 via-[#07080d]/95 to-black backdrop-blur-md overflow-y-auto">
                 <div className="max-w-md w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15]/90 p-6 sm:p-8 shadow-2xl space-y-5 sm:space-y-6 my-auto">
                   <div className="relative w-16 h-24 sm:w-20 sm:h-28 rounded-xl overflow-hidden mx-auto border border-white/[0.1] shadow-2xl">
@@ -1678,28 +1982,37 @@ export function VirtualRoom({
                       {title}
                     </h3>
                     <p className="text-xs text-zinc-400 font-light mt-2 leading-relaxed">
-                      Your partner is preparing the movie stream. As soon as they share their tab,
-                      the theater will play here automatically in high definition.
+                      {roomState === "LIVE" || roomState === "STREAM_CONNECTING"
+                        ? "Partner is currently sharing their movie tab. Establishing direct WebRTC video stream…"
+                        : "Your partner is preparing the movie stream. As soon as they share their tab, the theater will play here automatically in high definition."}
                     </p>
                   </div>
 
                   <div className="flex items-center justify-center gap-2 text-xs text-zinc-300 bg-white/[0.03] border border-white/[0.06] rounded-full py-2 px-4 w-fit mx-auto">
                     <RefreshCw size={12} className="animate-spin text-rose-400" />
                     <span>
-                      {roomState === "STREAM_CONNECTING"
+                      {roomState === "LIVE" || roomState === "STREAM_CONNECTING"
                         ? "Connecting to partner's movie stream…"
                         : "Awaiting partner WebRTC broadcast…"}
                     </span>
                   </div>
 
                   {/* Manual trigger button if viewer wants to re-check immediately */}
-                  <div className="pt-1">
+                  <div className="pt-1 flex flex-col gap-2 items-center">
                     <button
                       type="button"
                       onClick={() => sendViewerReady()}
-                      className="text-[11px] text-amber-300/80 hover:text-amber-200 underline transition-colors"
+                      className="px-4 py-2 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/30 active:scale-95 transition-all inline-flex items-center gap-1.5"
                     >
-                      Partner already started? Request stream now ⚡
+                      <Sparkles size={12} />
+                      <span>{roomState === "LIVE" || roomState === "STREAM_CONNECTING" ? "Tap to Connect / Refresh Stream ⚡" : "Partner started? Request stream now ⚡"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDirectMediaModal(true)}
+                      className="text-[11px] text-rose-300 hover:text-rose-200 underline transition-colors"
+                    >
+                      Or play direct movie together 🎬
                     </button>
                   </div>
 
@@ -1717,7 +2030,7 @@ export function VirtualRoom({
             )}
 
             {/* E. STREAM ENDED OVERLAY */}
-            {roomState === "STREAM_ENDED" && !isCompanionMode && (
+            {roomState === "STREAM_ENDED" && !isCompanionMode && !directMediaUrl && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center bg-black/90 backdrop-blur-md">
                 <div className="max-w-md w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15] p-8 shadow-2xl space-y-5">
                   <Film size={32} className="text-zinc-500 mx-auto" />
@@ -1750,7 +2063,7 @@ export function VirtualRoom({
             )}
 
             {/* F. COMPANION MODE (Optimized for Mobile & DRM OTTs) */}
-            {isCompanionMode && (
+            {isCompanionMode && !directMediaUrl && (
               <div className="relative inset-0 flex-1 w-full h-full flex flex-col items-center justify-center p-4 sm:p-6 overflow-hidden">
                 {/* Cinematic Ambient Backdrop */}
                 <div
@@ -2149,6 +2462,22 @@ export function VirtualRoom({
                   </button>
                 )}
 
+                {/* Direct Movie Player Pill */}
+                <button
+                  type="button"
+                  onClick={() => setShowDirectMediaModal(true)}
+                  className={`min-h-[44px] px-3.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-all active:scale-95 shrink-0 ${
+                    directMediaUrl
+                      ? "bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm"
+                      : "bg-white/[0.04] text-zinc-300 border-white/[0.08] hover:bg-white/[0.08]"
+                  }`}
+                  title="Direct movie / video player"
+                  aria-label="Direct movie / video player"
+                >
+                  <Film size={13} className={directMediaUrl ? "text-rose-400" : ""} />
+                  <span>{directMediaUrl ? "Direct Movie Active" : "Direct Movie"}</span>
+                </button>
+
                 {/* OTT Native App Deep Link */}
                 <a
                   href={nativeAppDeepLink}
@@ -2534,6 +2863,144 @@ export function VirtualRoom({
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* DIRECT SYNCHRONIZED MOVIE / VIDEO PLAYER MODAL */}
+      <AnimatePresence>
+        {showDirectMediaModal && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="max-w-md w-full rounded-2xl border border-white/[0.12] bg-[#0c0e15] p-6 shadow-2xl space-y-4 text-left"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Film size={20} className="text-rose-400" />
+                  <h3 className="text-base font-semibold text-white">Direct Movie Player</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDirectMediaModal(false)}
+                  className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08]"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-xs text-zinc-300 leading-relaxed">
+                Stream any direct video link (MP4, WebM, HLS) in 100% sync on both PC and Mobile without screen recording or DRM black screens.
+              </p>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                  Video / Movie Stream URL
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://example.com/movie.mp4"
+                  value={directMediaInput}
+                  onChange={(e) => setDirectMediaInput(e.target.value)}
+                  className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+
+              {/* Quick sample open-source free movie links */}
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
+                  Or pick a free open-source movie:
+                </span>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("/souls.mp4");
+                    }}
+                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
+                  >
+                    🎬 Soul Connection (Demo)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4");
+                    }}
+                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
+                  >
+                    🐰 Big Buck Bunny (1080p)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
+                    }}
+                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
+                  >
+                    🐘 Elephants Dream
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4");
+                    }}
+                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
+                  >
+                    🤖 Tears of Steel (Sci-Fi)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4");
+                    }}
+                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
+                  >
+                    🐉 Sintel (Fantasy Animation)
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.08]">
+                {directMediaUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaUrl(null);
+                      setDirectMediaTitle(null);
+                      setShowDirectMediaModal(false);
+                      void channelRef.current?.send({
+                        type: "broadcast",
+                        event: "theater:direct-media",
+                        payload: { url: null },
+                      });
+                    }}
+                    className="px-3 py-2 text-xs font-medium text-zinc-400 hover:text-white"
+                  >
+                    Stop Direct Stream
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = directMediaInput.trim();
+                    if (!url) return;
+                    setDirectMediaUrl(url);
+                    setDirectMediaTitle("Synchronized Movie");
+                    setShowDirectMediaModal(false);
+                    void channelRef.current?.send({
+                      type: "broadcast",
+                      event: "theater:direct-media",
+                      payload: { url, title: "Synchronized Movie" },
+                    });
+                  }}
+                  className="rounded-full bg-rose-600 hover:bg-rose-500 px-5 py-2 text-xs font-semibold text-white transition-all shadow-md active:scale-95"
+                >
+                  Play Together in Sync 🎬
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
       </div>

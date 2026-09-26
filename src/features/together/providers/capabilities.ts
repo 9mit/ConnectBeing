@@ -128,16 +128,16 @@ export function getProviderTechnicalCapability(
   const norm = (providerId || "").toLowerCase();
   const screenSharePossible = isBrowserScreenShareSupported();
 
-  // YouTube can have embedded API control if embedded
-  if (norm === "youtube") {
+  // Direct web video and YouTube support embedded synchronized control
+  if (norm === "youtube" || norm === "webvideo" || norm === "direct") {
     return {
       canDeepLink: true,
       canScreenShare: screenSharePossible,
       canPlaybackControl: true,
       canSync: true,
       canOpenInNewTab: true,
-      requiresCompanionOnMobile: true,
-      defaultMode: screenSharePossible ? "STREAM" : "COMPANION",
+      requiresCompanionOnMobile: false,
+      defaultMode: "STREAM",
     };
   }
 
