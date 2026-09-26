@@ -424,14 +424,14 @@ export async function createCoupleFromInvite(input: {
     where: eq(inviteTokens.id, input.tokenId),
   });
 
-  if (!tokenRow) {
-    throw new AppError("INVITE_TOKEN_INVALID", "Invite token not found.", 404);
+  if (!tokenRow || tokenRow.used || tokenRow.status !== "pending") {
+    throw new AppError("INVITE_TOKEN_INVALID", "Invite token is invalid or already used.", 400);
   }
 
   const coupleId = createId();
 
   await db.transaction(async (tx) => {
-    await tx
+    const updated = await tx
       .update(inviteTokens)
       .set({
         status: "accepted",
@@ -439,7 +439,18 @@ export async function createCoupleFromInvite(input: {
         usedById: input.usedById,
         acceptedAt: new Date(),
       })
-      .where(eq(inviteTokens.id, input.tokenId));
+      .where(
+        and(
+          eq(inviteTokens.id, input.tokenId),
+          eq(inviteTokens.used, false),
+          eq(inviteTokens.status, "pending"),
+        ),
+      )
+      .returning({ id: inviteTokens.id });
+
+    if (updated.length === 0) {
+      throw new AppError("INVITE_TOKEN_INVALID", "Invite token has already been claimed.", 400);
+    }
 
     const verifiedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 

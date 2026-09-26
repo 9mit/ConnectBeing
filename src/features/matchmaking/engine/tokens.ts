@@ -5,10 +5,10 @@ import { isProductionRuntime } from "@/lib/runtime";
 function getTokenSecret(): string {
   const secret = process.env.SESSION_SECRET?.trim();
   if (secret && secret.length >= 32) return secret;
-  if (isProductionRuntime()) {
+  if (isProductionRuntime() || process.env.NODE_ENV === "production" || process.env.VERCEL) {
     throw new AppError(
       "INTERNAL_ERROR",
-      "SESSION_SECRET is misconfigured in production.",
+      "SESSION_SECRET is misconfigured in deployed environment.",
       500,
     );
   }
@@ -38,7 +38,7 @@ export function generateCandidateToken(targetUserId: string, viewerUserId: strin
  */
 export function resolveCandidateId(tokenOrId: string, viewerUserId: string): string {
   if (!tokenOrId.includes(".")) {
-    if (isProductionRuntime()) {
+    if (isProductionRuntime() || process.env.NODE_ENV === "production" || process.env.VERCEL) {
       throw new AppError("FORBIDDEN", "Direct candidate IDs are not accepted in production.", 403);
     }
     // Direct ID fallback (for local development or automated test fixtures only)

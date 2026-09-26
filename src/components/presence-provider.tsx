@@ -69,11 +69,24 @@ export function usePresence() {
 }
 
 // Gentle synthetic notification chime using Web Audio API (zero external assets)
+let sharedAudioCtx: AudioContext | null = null;
+function getSharedAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return null;
+  if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
+    sharedAudioCtx = new AudioCtx();
+  }
+  if (sharedAudioCtx.state === "suspended") {
+    void sharedAudioCtx.resume().catch(() => {});
+  }
+  return sharedAudioCtx;
+}
+
 function playGentleNudgeSound() {
   try {
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
 
     const osc1 = ctx.createOscillator();
@@ -104,11 +117,6 @@ function playGentleNudgeSound() {
     /* AudioContext not allowed or unsupported */
   }
 }
-
-// Module-level channel cache to keep Supabase Realtime connected seamlessly across route navigations
-let activeRealtimeChannel: RealtimeChannel | null = null;
-let activeChannelTopic = "";
-let channelCleanupTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function PresenceProvider({
   coupleId,
@@ -194,11 +202,6 @@ export function PresenceProvider({
       return;
     }
 
-    if (channelCleanupTimer) {
-      clearTimeout(channelCleanupTimer);
-      channelCleanupTimer = null;
-    }
-
     let disposed = false;
     let supabase: ReturnType<typeof createClient>;
     try {
@@ -210,15 +213,6 @@ export function PresenceProvider({
 
     const topic = `couple:${coupleId}:presence`;
 
-    // Fast-path: Reuse existing connected channel if topic matches
-    if (activeRealtimeChannel && activeChannelTopic === topic) {
-      channelRef.current = activeRealtimeChannel;
-      setHealth("connected");
-      return () => {
-        disposed = true;
-      };
-    }
-
     void authorizeRealtimeTopicAction(topic).then((auth) => {
       if (disposed || !auth.ok) {
         setHealth("offline");
@@ -229,8 +223,6 @@ export function PresenceProvider({
       config: { presence: { key: userId } },
     });
     channelRef.current = channel;
-    activeRealtimeChannel = channel;
-    activeChannelTopic = topic;
 
     const updateFromPresenceState = () => {
       if (disposed) return;
@@ -297,21 +289,14 @@ export function PresenceProvider({
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       channelRef.current = null;
-      // Delay channel cleanup to allow next route component to seamlessly reuse active channel
-      if (channelCleanupTimer) clearTimeout(channelCleanupTimer);
-      channelCleanupTimer = setTimeout(() => {
-        if (activeRealtimeChannel) {
-          void supabase.removeChannel(activeRealtimeChannel);
-          activeRealtimeChannel = null;
-          activeChannelTopic = "";
-        }
-      }, 5000);
+      void supabase.removeChannel(channel);
     };
   }, [coupleId, userId, triggerNudgeDisplay, triggerNotificationDisplay]);
 
   // Periodic heartbeat & presence sync fallback (every 25s)
   useEffect(() => {
     if (!coupleId || !userId) return;
+    let isMounted = true;
 
     const interval = setInterval(async () => {
       try {
@@ -320,7 +305,7 @@ export function PresenceProvider({
 
         // Query partner's state from Redis fallback
         const res = await getPartnerPresenceAction();
-        if (res.ok) {
+        if (isMounted && res.ok) {
           if (res.data.partnerOnline) {
             setPartnerOnline(true);
           }
@@ -330,17 +315,21 @@ export function PresenceProvider({
       }
     }, 25000);
 
-    return () => clearInterval(interval);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [coupleId, userId]);
 
   // Periodic Nudge Check Fallback (every 8s) to ensure zero missed pings
   useEffect(() => {
     if (!coupleId || !userId) return;
+    let isMounted = true;
 
     const interval = setInterval(async () => {
       try {
         const res = await checkPendingNudgeAction();
-        if (res.ok && res.data.hasNudge) {
+        if (isMounted && res.ok && res.data.hasNudge) {
           triggerNudgeDisplay(res.data.senderName || "Your partner", res.data.timestamp || "");
         }
       } catch {
@@ -348,17 +337,21 @@ export function PresenceProvider({
       }
     }, 8000);
 
-    return () => clearInterval(interval);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [coupleId, userId, triggerNudgeDisplay]);
 
   // Periodic Notifications Check Fallback (every 5s) for instant delivery
   useEffect(() => {
     if (!coupleId || !userId) return;
+    let isMounted = true;
 
     const interval = setInterval(async () => {
       try {
         const res = await pollPendingNotificationsAction();
-        if (res.ok && res.data.notifications.length > 0) {
+        if (isMounted && res.ok && res.data.notifications.length > 0) {
           for (const notif of res.data.notifications) {
             triggerNotificationDisplay(notif);
           }
@@ -368,7 +361,10 @@ export function PresenceProvider({
       }
     }, 5000);
 
-    return () => clearInterval(interval);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [coupleId, userId, triggerNotificationDisplay]);
 
   // Auto-dismiss nudge after 7s

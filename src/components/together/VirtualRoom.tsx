@@ -169,6 +169,7 @@ export function VirtualRoom({
   const [isPiP, setIsPiP] = useState(false);
   const [skipRipple, setSkipRipple] = useState<{ direction: "left" | "right"; id: number } | null>(null);
   const [playPausePulse, setPlayPausePulse] = useState<"playing" | "paused" | null>(null);
+  const pulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [isScreenLocked, setIsScreenLocked] = useState(false);
   const [showLockPrompt, setShowLockPrompt] = useState(false);
@@ -363,11 +364,18 @@ export function VirtualRoom({
     });
   }, [estimatedDuration, playbackState, userId]);
 
+  useEffect(() => {
+    return () => {
+      if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+    };
+  }, []);
+
   const togglePlayback = useCallback(() => {
     const next = playbackState === "playing" ? "paused" : "playing";
     setPlaybackState(next);
     setPlayPausePulse(next);
-    setTimeout(() => setPlayPausePulse(null), 800);
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+    pulseTimerRef.current = setTimeout(() => setPlayPausePulse(null), 800);
     void channelRef.current?.send({
       type: "broadcast",
       event: "theater:playback",

@@ -65,6 +65,14 @@ export async function renamePetAction(
     const parsed = renamePetSchema.parse(input);
     const { couple } = await requireActiveCouple();
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:pet:rename:${couple.id}`,
+      limit: 10,
+      windowSeconds: 60 * 15,
+      message: "Too many rename attempts. Please wait.",
+    });
+
     await db
       .update(couples)
       .set({ petName: parsed.petName })

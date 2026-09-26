@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, or, desc } from "drizzle-orm";
+import { and, eq, or, desc, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
@@ -319,15 +319,16 @@ export async function respondToCandidateAction(
     }
 
     // 4. Mutual match found! Create or fetch existing connection
+    const [uA, uB] = user.id < candidateUserId ? [user.id, candidateUserId] : [candidateUserId, user.id];
     let connection = await db.query.matchmakingConnections.findFirst({
       where: or(
         and(
-          eq(matchmakingConnections.userAId, user.id),
-          eq(matchmakingConnections.userBId, candidateUserId),
+          eq(matchmakingConnections.userAId, uA),
+          eq(matchmakingConnections.userBId, uB),
         ),
         and(
-          eq(matchmakingConnections.userAId, candidateUserId),
-          eq(matchmakingConnections.userBId, user.id),
+          eq(matchmakingConnections.userAId, uB),
+          eq(matchmakingConnections.userBId, uA),
         ),
       ),
     });
@@ -346,19 +347,36 @@ export async function respondToCandidateAction(
           : { overallScore: 85, reasons: ["Complementary connection"] };
 
       const connectionId = createId();
-      await db.insert(matchmakingConnections).values({
-        id: connectionId,
-        userAId: user.id,
-        userBId: candidateUserId,
-        status: "connected",
-        compatibilityScore: comp.overallScore,
-        compatibilityReasons: comp.reasons,
+      await db
+        .insert(matchmakingConnections)
+        .values({
+          id: connectionId,
+          userAId: uA,
+          userBId: uB,
+          status: "connected",
+          compatibilityScore: comp.overallScore,
+          compatibilityReasons: comp.reasons,
+        })
+        .onConflictDoNothing();
+
+      // Refetch in case of concurrent insert
+      connection = await db.query.matchmakingConnections.findFirst({
+        where: or(
+          and(
+            eq(matchmakingConnections.userAId, uA),
+            eq(matchmakingConnections.userBId, uB),
+          ),
+          and(
+            eq(matchmakingConnections.userAId, uB),
+            eq(matchmakingConnections.userBId, uA),
+          ),
+        ),
       });
 
       return ok({
         actionRecorded: true,
         mutualMatch: true,
-        connectionId,
+        connectionId: connection?.id ?? connectionId,
       });
     }
 
@@ -401,22 +419,29 @@ export async function getConnectionsAction(): Promise<
       orderBy: [desc(matchmakingConnections.createdAt)],
     });
 
-    const results = [];
-    for (const c of conns) {
-      const partnerId = c.userAId === user.id ? c.userBId : c.userAId;
-      const partnerProfile = await db.query.matchmakingProfiles.findFirst({
-        where: eq(matchmakingProfiles.userId, partnerId),
-      });
+    if (conns.length === 0) {
+      return ok([]);
+    }
 
-      results.push({
+    const partnerIds = conns.map((c) => (c.userAId === user.id ? c.userBId : c.userAId));
+    const partnerProfiles = await db.query.matchmakingProfiles.findMany({
+      where: inArray(matchmakingProfiles.userId, partnerIds),
+    });
+    const profileMap = new Map(partnerProfiles.map((p) => [p.userId, p]));
+
+    const results = conns.map((c) => {
+      const partnerId = c.userAId === user.id ? c.userBId : c.userAId;
+      const partnerProfile = profileMap.get(partnerId);
+
+      return {
         id: c.id,
         partnerAge: partnerProfile?.age ?? 25,
-        partnerCountry: partnerProfile?.countryCode.toUpperCase() ?? "IN",
+        partnerCountry: (partnerProfile?.countryCode || "IN").toUpperCase(),
         compatibilityScore: c.compatibilityScore,
         reasons: c.compatibilityReasons ?? [],
         createdAt: c.createdAt.toISOString(),
-      });
-    }
+      };
+    });
 
     return ok(results);
   } catch (e) {

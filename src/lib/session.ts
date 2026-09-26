@@ -70,11 +70,19 @@ export async function verifyAuthToken(
 ): Promise<AuthPayload | null> {
   try {
     const { payload } = await jwtVerify(token, getSecretKey());
+    const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
+    const supabaseAuthId = typeof payload.supabaseAuthId === "string" ? payload.supabaseAuthId.trim() : "";
+    const email = typeof payload.email === "string" ? payload.email.trim() : "";
+
+    if (!userId || !supabaseAuthId || !email) {
+      return null;
+    }
+
     return {
-      userId: String(payload.userId),
-      supabaseAuthId: String(payload.supabaseAuthId),
-      email: String(payload.email),
-      exp: payload.exp,
+      userId,
+      supabaseAuthId,
+      email,
+      exp: typeof payload.exp === "number" ? payload.exp : undefined,
     };
   } catch (error) {
     if (error instanceof SessionSecretError) {

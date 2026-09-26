@@ -12,7 +12,15 @@ import { rateLimitOrThrow } from "@/lib/security";
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
-  avatarUrl: z.string().trim().max(2048).optional().nullable(),
+  avatarUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .refine((val) => !val || val.startsWith("avatars/") || /^https?:\/\//i.test(val), {
+      message: "Invalid avatar format.",
+    })
+    .optional()
+    .nullable(),
   selfDescription: z.string().trim().max(500).optional(),
   partnerExpectation: z.string().trim().max(500).optional(),
   hobbies: z.array(z.string().trim().min(1).max(40)).max(20).optional(),

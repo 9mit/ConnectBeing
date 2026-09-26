@@ -46,7 +46,7 @@ export function formatSessionDateTime(d: Date | string | number): string {
  */
 export function formatDateShort(d: Date | string | number): string {
   const date = toValidDate(d);
-  return `${MONTHS_SHORT[date.getMonth()]} ${date.getDate()}`;
+  return `${MONTHS_SHORT[date.getUTCMonth()]} ${date.getUTCDate()}`;
 }
 
 /**
@@ -54,7 +54,7 @@ export function formatDateShort(d: Date | string | number): string {
  */
 export function formatDateMedium(d: Date | string | number): string {
   const date = toValidDate(d);
-  return `${MONTHS_SHORT[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+  return `${MONTHS_SHORT[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
 }
 
 /**
@@ -62,7 +62,7 @@ export function formatDateMedium(d: Date | string | number): string {
  */
 export function formatDateLong(d: Date | string | number): string {
   const date = toValidDate(d);
-  return `${MONTHS_LONG[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+  return `${MONTHS_LONG[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
 }
 
 /**
@@ -70,7 +70,7 @@ export function formatDateLong(d: Date | string | number): string {
  */
 export function formatWeekdayDate(d: Date | string | number): string {
   const date = toValidDate(d);
-  return `${DAYS_LONG[date.getDay()]}, ${MONTHS_SHORT[date.getMonth()]} ${date.getDate()}`;
+  return `${DAYS_LONG[date.getUTCDay()]}, ${MONTHS_SHORT[date.getUTCMonth()]} ${date.getUTCDate()}`;
 }
 
 /**

@@ -46,7 +46,7 @@ export function PrivacyPanel() {
         a.href = url;
         a.download = `${BRAND.name.toLowerCase()}-export-${new Date().toISOString().slice(0, 10)}.json`;
         a.click();
-        URL.revokeObjectURL(url);
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
       } else {
         setError(res.error.message);
       }

@@ -131,6 +131,7 @@ export function EmojiPicker({ open, onClose, onPick }: Props) {
             <button
               key={`${emoji}-${i}`}
               type="button"
+              aria-label={`Select emoji ${emoji}`}
               className="rounded-lg p-1.5 text-xl leading-none transition hover:bg-white/10 active:scale-95 touch-manipulation"
               onClick={() => {
                 setRecent(rememberEmoji(emoji));

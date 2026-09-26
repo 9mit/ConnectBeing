@@ -27,70 +27,52 @@ export async function incrementEngagement(
   const scoreKey = engagementScoreKey(coupleId, date);
   const metaKey = `couple:${coupleId}:score-meta:${date}`;
 
-  const meta = ((await redis.hgetall(metaKey)) ?? {}) as Record<string, unknown>;
-  const messages = Number(meta.messages ?? 0);
-  const quiz = Number(meta.quiz ?? 0);
-  const mood = Number(meta.mood ?? 0);
-  const watch = Number(meta.watch ?? 0);
-  const audio = Number(meta.audio ?? 0);
-  const location = Number(meta.location ?? 0);
-
   let delta = 0;
-  const next = { messages, quiz, mood, watch, audio, location };
 
   switch (event) {
     case "message": {
-      if (messages < 5) {
-        delta = 5;
-        next.messages = messages + 1;
-      }
+      const cur = await redis.hincrby(metaKey, "messages", 1);
+      await redis.expire(metaKey, 60 * 60 * 48);
+      if (cur <= 5) delta = 5;
       break;
     }
     case "quiz": {
-      if (quiz === 0) {
-        delta = 25;
-        next.quiz = 1;
-      }
+      const cur = await redis.hincrby(metaKey, "quiz", 1);
+      await redis.expire(metaKey, 60 * 60 * 48);
+      if (cur === 1) delta = 25;
       break;
     }
     case "mood": {
-      if (mood === 0) {
-        delta = 20;
-        next.mood = 1;
-      }
+      const cur = await redis.hincrby(metaKey, "mood", 1);
+      await redis.expire(metaKey, 60 * 60 * 48);
+      if (cur === 1) delta = 20;
       break;
     }
     case "watch": {
-      if (watch === 0) {
-        delta = 15;
-        next.watch = 1;
-      }
+      const cur = await redis.hincrby(metaKey, "watch", 1);
+      await redis.expire(metaKey, 60 * 60 * 48);
+      if (cur === 1) delta = 15;
       break;
     }
     case "audio_minute": {
-      const add = Math.min(amount, Math.max(0, 20 - audio));
-      delta = add;
-      next.audio = audio + add;
+      const inc = Math.max(1, Math.floor(amount));
+      const cur = await redis.hincrby(metaKey, "audio", inc);
+      await redis.expire(metaKey, 60 * 60 * 48);
+      const prevAudio = cur - inc;
+      if (prevAudio < 20) delta = Math.min(inc, 20 - prevAudio);
       break;
     }
     case "location_minute": {
-      const add = Math.min(amount, Math.max(0, 10 - location));
-      delta = add;
-      next.location = location + add;
+      const inc = Math.max(1, Math.floor(amount));
+      const cur = await redis.hincrby(metaKey, "location", inc);
+      await redis.expire(metaKey, 60 * 60 * 48);
+      const prevLoc = cur - inc;
+      if (prevLoc < 10) delta = Math.min(inc, 10 - prevLoc);
       break;
     }
   }
 
   if (delta > 0) {
-    await redis.hset(metaKey, {
-      messages: String(next.messages),
-      quiz: String(next.quiz),
-      mood: String(next.mood),
-      watch: String(next.watch),
-      audio: String(next.audio),
-      location: String(next.location),
-    });
-    await redis.expire(metaKey, 60 * 60 * 48);
     const score = await redis.incrby(scoreKey, delta);
     await redis.expire(scoreKey, 60 * 60 * 48);
     return Number(score);

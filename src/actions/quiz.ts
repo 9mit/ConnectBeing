@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { onboardingProfiles, quizQuestions, quizResponses } from "@/db/schema";
-import { createPartnerNotification } from "@/actions/notifications";
+import { createPartnerNotification } from "@/lib/notifications";
 import { tryUnlockAchievement } from "@/lib/achievements";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
@@ -66,14 +66,21 @@ export async function getDailyQuizAction(): Promise<
       }
 
       const id = createId();
-      await db.insert(quizQuestions).values({
-        id,
-        coupleId: couple.id,
-        date,
-        questions,
-      });
+      await db
+        .insert(quizQuestions)
+        .values({
+          id,
+          coupleId: couple.id,
+          date,
+          questions,
+        })
+        .onConflictDoNothing();
+
       questionSet = await db.query.quizQuestions.findFirst({
-        where: eq(quizQuestions.id, id),
+        where: and(
+          eq(quizQuestions.coupleId, couple.id),
+          eq(quizQuestions.date, date),
+        ),
       });
     } else if (!questions) {
       questions = quizArraySchema.parse(questionSet.questions);
@@ -156,14 +163,18 @@ export async function submitQuizAction(
       }
     });
 
-    await db.insert(quizResponses).values({
-      id: createId(),
-      questionSetId: questionSet.id,
-      coupleId: couple.id,
-      userId: user.id,
-      answers: parsed.answers,
-      score,
-    });
+    try {
+      await db.insert(quizResponses).values({
+        id: createId(),
+        questionSetId: questionSet.id,
+        coupleId: couple.id,
+        userId: user.id,
+        answers: parsed.answers,
+        score,
+      });
+    } catch {
+      throw new AppError("FORBIDDEN", "Quiz already submitted today.", 400);
+    }
 
     await incrementEngagement(couple.id, "quiz");
     await appendRelationshipEvent({

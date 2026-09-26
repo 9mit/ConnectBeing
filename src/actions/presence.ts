@@ -25,6 +25,14 @@ export async function recordHeartbeatAction(
     const { user, couple } = await requireActiveCouple();
     const parsed = statusSchema.parse(status);
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:heartbeat:${user.id}`,
+      limit: 60,
+      windowSeconds: 60,
+      message: "Too many heartbeats.",
+    });
+
     const key = `presence:user:${user.id}`;
     const coupleKey = `presence:couple:${couple.id}:${user.id}`;
 

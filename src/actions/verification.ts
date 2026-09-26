@@ -208,10 +208,20 @@ export async function submitVerificationCodeAction(
     const newUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     await db.transaction(async (tx) => {
-      await tx
+      const updated = await tx
         .update(coupleVerifications)
         .set({ consumedAt: now })
-        .where(eq(coupleVerifications.id, row.id));
+        .where(
+          and(
+            eq(coupleVerifications.id, row.id),
+            isNull(coupleVerifications.consumedAt),
+          ),
+        )
+        .returning({ id: coupleVerifications.id });
+
+      if (updated.length === 0) {
+        throw new AppError("FORBIDDEN", "Verification code has already been consumed.", 403);
+      }
 
       await tx
         .update(couples)

@@ -31,8 +31,14 @@ export async function outboxPut(item: OutboxItem): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
     tx.objectStore(STORE).put(item);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
   });
 }
 
@@ -41,8 +47,14 @@ export async function outboxDelete(clientMsgId: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
     tx.objectStore(STORE).delete(clientMsgId);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
   });
 }
 
@@ -52,12 +64,20 @@ export async function outboxList(coupleId: string): Promise<OutboxItem[]> {
     const tx = db.transaction(STORE, "readonly");
     const req = tx.objectStore(STORE).getAll();
     req.onsuccess = () => {
+      db.close();
       const all = (req.result as OutboxItem[]).filter(
         (x) => x.coupleId === coupleId,
       );
       resolve(all.sort((a, b) => a.createdAt - b.createdAt));
     };
-    req.onerror = () => reject(req.error);
+    req.onerror = () => {
+      db.close();
+      reject(req.error);
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error);
+    };
   });
 }
 

@@ -4,10 +4,9 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { onboardingProfiles } from "@/db/schema";
-import { createPartnerNotification } from "@/actions/notifications";
+import { createPartnerNotification } from "@/lib/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
-import { createId } from "@/lib/ids";
 import { redis } from "@/lib/redis";
 import { rateLimitOrThrow } from "@/lib/security";
 

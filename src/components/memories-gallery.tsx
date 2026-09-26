@@ -6,12 +6,7 @@ import {
   Camera,
   Plus,
   X,
-  Calendar,
-  Tag,
   UploadCloud,
-  Film,
-  Sparkles,
-  Heart,
 } from "lucide-react";
 
 import {
@@ -143,11 +138,17 @@ export function MemoriesGallery() {
                   setError("Upload failed");
                   return;
                 }
+                const rawTaken = fd.get("takenAt");
+                const parsedTaken = rawTaken ? new Date(String(rawTaken)) : new Date();
+                const takenAt = isNaN(parsedTaken.getTime())
+                  ? new Date().toISOString()
+                  : parsedTaken.toISOString();
+
                 const confirm = await confirmMemoryUploadAction({
                   storageKey: presign.data.storageKey,
                   mimeType,
                   caption: String(fd.get("caption") || "") || undefined,
-                  takenAt: new Date(String(fd.get("takenAt") || Date.now())).toISOString(),
+                  takenAt,
                   eventLabel: String(fd.get("eventLabel") || "") || undefined,
                 });
                 if (!confirm.ok) {
@@ -260,7 +261,16 @@ export function MemoriesGallery() {
           {/* Featured Hero Memory (dominant visual scale) */}
           {featuredItem && featuredItem.url && (
             <section
+              role="button"
+              tabIndex={0}
+              aria-label={`View memory: ${featuredItem.title}`}
               onClick={() => setSelectedPhoto(featuredItem)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setSelectedPhoto(featuredItem);
+                }
+              }}
               className="group relative cursor-pointer overflow-hidden rounded-3xl border border-white/[0.08] bg-[#0c0d12] transition-all hover:border-white/20"
             >
               <div className="relative aspect-[16/9] md:aspect-[21/9] w-full overflow-hidden">
@@ -302,7 +312,16 @@ export function MemoriesGallery() {
                 {secondaryItems.map((item) => (
                   <div
                     key={`${item.kind}-${item.id}`}
+                    role={item.url ? "button" : undefined}
+                    tabIndex={item.url ? 0 : undefined}
+                    aria-label={item.url ? `View memory: ${item.title}` : undefined}
                     onClick={() => item.url && setSelectedPhoto(item)}
+                    onKeyDown={(e) => {
+                      if (item.url && (e.key === "Enter" || e.key === " ")) {
+                        e.preventDefault();
+                        setSelectedPhoto(item);
+                      }
+                    }}
                     className={`group relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0e1017] transition-all hover:border-white/20 ${
                       item.url ? "cursor-pointer" : ""
                     }`}

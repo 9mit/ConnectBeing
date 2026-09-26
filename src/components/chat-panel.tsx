@@ -46,7 +46,7 @@ import { isEmojiHeavyMessage } from "@/lib/chat/emoji-data";
 import { createClient } from "@/lib/supabase/client";
 import { EmojiPicker } from "@/components/emoji-picker";
 import Link from "next/link";
-import { Lock, Smile, Camera, Send, Phone, Check, CheckCheck } from "lucide-react";
+import { Lock, Smile, Camera, Send, Phone } from "lucide-react";
 
 type Msg = ChatMessageDTO & { optimistic?: boolean; failed?: boolean };
 
@@ -146,12 +146,25 @@ export function ChatPanel({
     }
   }, []);
 
+  const displayCacheRef = useRef<Record<string, string>>({});
+
+  const isTemporaryDecryptionState = (val?: string) =>
+    !val || val === "🔒 Unable to decrypt" || val === "🔒 Waiting for partner key…";
+
   const refreshDisplay = useCallback(
     async (rows: Msg[]) => {
+      const toDecrypt = rows.filter((m) => {
+        const cached = displayCacheRef.current[m.id];
+        return isTemporaryDecryptionState(cached);
+      });
+      if (toDecrypt.length === 0) return;
+
       const entries = await Promise.all(
-        rows.map(async (m) => [m.id, await decryptMessage(m)] as const),
+        toDecrypt.map(async (m) => [m.id, await decryptMessage(m)] as const),
       );
-      setDisplay((d) => ({ ...d, ...Object.fromEntries(entries) }));
+      const newEntries = Object.fromEntries(entries);
+      Object.assign(displayCacheRef.current, newEntries);
+      setDisplay((d) => ({ ...d, ...newEntries }));
     },
     [decryptMessage],
   );
@@ -288,6 +301,13 @@ export function ChatPanel({
   }, [userId, coupleId, load, flushOutbox]);
 
   useEffect(() => {
+    if (e2eeReady) {
+      for (const key of Object.keys(displayCacheRef.current)) {
+        if (isTemporaryDecryptionState(displayCacheRef.current[key])) {
+          delete displayCacheRef.current[key];
+        }
+      }
+    }
     void refreshDisplay(messages);
   }, [e2eeReady, messages, refreshDisplay]);
 
@@ -437,6 +457,12 @@ export function ChatPanel({
     io.observe(el);
     return () => io.disconnect();
   }, [cursor, load]);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+    };
+  }, []);
 
   const emitTyping = () => {
     void channelRef.current?.send({
@@ -731,6 +757,7 @@ export function ChatPanel({
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
+            e.target.value = "";
             if (file) void sendEphemeral(file);
           }}
         />

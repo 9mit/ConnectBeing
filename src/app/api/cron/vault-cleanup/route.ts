@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { cleanupExpiredVaultRecords } from "@/actions/together";
+import { cleanupExpiredVaultRecords } from "@/lib/cleanup/maintenance";
 import { safeEqualString } from "@/lib/security";
 
 export const runtime = "nodejs";

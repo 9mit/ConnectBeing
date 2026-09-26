@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Check, HelpCircle, Sparkles } from "lucide-react";
+import { Check, Sparkles } from "lucide-react";
 
 import { getDailyQuizAction, submitQuizAction } from "@/actions/quiz";
 
@@ -102,6 +102,7 @@ export function QuizPanel({
                     <button
                       key={opt}
                       type="button"
+                      aria-pressed={isSelected}
                       onClick={() => {
                         const next = [...answers];
                         next[qi] = opt;

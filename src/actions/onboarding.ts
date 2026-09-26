@@ -32,23 +32,25 @@ export async function completeOnboardingAction(
     }
 
 
-    await db.insert(onboardingProfiles).values({
-      id: createId(),
-      userId: user.id,
-      name: parsed.name,
-      age: parsed.age,
-      gender: parsed.gender,
-      countryCode: parsed.countryCode,
-      hobbies: parsed.hobbies,
-      selfDescription: parsed.selfDescription,
-      partnerExpectation: parsed.partnerExpectation,
-      loveLanguages: parsed.loveLanguages,
-    });
+    await db.transaction(async (tx) => {
+      await tx.insert(onboardingProfiles).values({
+        id: createId(),
+        userId: user.id,
+        name: parsed.name,
+        age: parsed.age,
+        gender: parsed.gender,
+        countryCode: parsed.countryCode,
+        hobbies: parsed.hobbies,
+        selfDescription: parsed.selfDescription,
+        partnerExpectation: parsed.partnerExpectation,
+        loveLanguages: parsed.loveLanguages,
+      });
 
-    await db
-      .update(users)
-      .set({ isOnboarded: true, updatedAt: new Date() })
-      .where(eq(users.id, user.id));
+      await tx
+        .update(users)
+        .set({ isOnboarded: true, updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+    });
 
     // Check for pending invite context
     const cookieInvite = getPendingInviteCookie();

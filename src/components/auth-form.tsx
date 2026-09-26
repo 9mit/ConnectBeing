@@ -93,8 +93,26 @@ export function AuthForm({
           return;
         }
 
-        // Seamless redirection
-        window.location.href = data?.redirectTo || data?.redirect || "/dashboard";
+        // Seamless redirection (safely bounded to internal paths)
+        const rawTarget = data?.redirectTo || data?.redirect || "/dashboard";
+        const isSafeInternalUrl = (url: unknown): url is string => {
+          if (
+            typeof url !== "string" ||
+            !url.startsWith("/") ||
+            url.startsWith("//") ||
+            url.startsWith("/\\") ||
+            url.includes("\\")
+          ) {
+            return false;
+          }
+          try {
+            return new URL(url, window.location.origin).origin === window.location.origin;
+          } catch {
+            return false;
+          }
+        };
+        const target = isSafeInternalUrl(rawTarget) ? rawTarget : "/dashboard";
+        window.location.href = target;
       } catch {
         setError("Network connection error. Please try again.");
       }

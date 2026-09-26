@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useState, useTransition } from "react";
-import { Heart, Sparkles, Edit2, Check } from "lucide-react";
+import { Sparkles, Edit2, Check } from "lucide-react";
 
 import { getPetStateAction, renamePetAction } from "@/actions/pet";
 
@@ -104,9 +104,18 @@ export function DigitalPet({
               duration: petInteracted ? 0.6 : 3,
               ease: "easeInOut",
             }}
+            role="button"
+            tabIndex={0}
+            aria-label={`Tap to comfort ${petName || "Buddy"}`}
             onClick={handlePetInteraction}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handlePetInteraction();
+              }
+            }}
             className="cursor-pointer flex h-40 w-40 sm:h-44 sm:w-44 items-center justify-center rounded-full bg-[#141620] border border-white/10 shadow-lg relative mx-auto group hover:border-white/25 transition-all touch-manipulation select-none active:scale-95"
-            title="Tap to comfort Buddy"
+            title={`Tap to comfort ${petName || "Buddy"}`}
           >
             <span className="text-2xl font-serif font-medium text-amber-100 select-none drop-shadow-sm transition-transform group-hover:scale-105">
               {face}

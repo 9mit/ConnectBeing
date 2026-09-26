@@ -23,6 +23,14 @@ function loadRazorpayScript(): Promise<void> {
       resolve();
       return;
     }
+    const existing = document.querySelector('script[src*="checkout.razorpay.com"]');
+    if (existing) {
+      if ((window as unknown as { Razorpay?: unknown }).Razorpay) {
+        resolve();
+        return;
+      }
+      existing.remove();
+    }
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.onload = () => resolve();
@@ -56,7 +64,11 @@ export function BillingPanel() {
           setError(result.error.message);
           return;
         }
-        const rzp = new window.Razorpay!({
+        if (!window.Razorpay) {
+          throw new Error("Razorpay checkout is unavailable. Please check your connection or ad blocker.");
+        }
+        const RazorpayConstructor = window.Razorpay;
+        const rzp = new RazorpayConstructor({
           key: result.data.keyId,
           subscription_id: result.data.subscriptionId,
           name: `${BRAND.name} Support`,

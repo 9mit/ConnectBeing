@@ -138,6 +138,13 @@ export async function confirmEphemeralUploadAction(
     assertCoupleStorageKey(parsed.storageKey, "ephemeral", couple.id);
     cleanupKey = parsed.storageKey;
 
+    await rateLimitOrThrow({
+      key: `rl:ephemeral-confirm:${user.id}`,
+      limit: 20,
+      windowSeconds: 60 * 10,
+      message: "Too many ephemeral confirmations. Try again later.",
+    });
+
     const bytes = await downloadStorageObject(parsed.storageKey);
     const moderation = await getModerationProvider().checkImage(
       bytes,
@@ -158,21 +165,23 @@ export async function confirmEphemeralUploadAction(
     const mediaId = createId();
     const messageId = createId();
 
-    await db.insert(ephemeralMedia).values({
-      id: mediaId,
-      coupleId: couple.id,
-      senderId: user.id,
-      storageKey: parsed.storageKey,
-      mimeType: parsed.mimeType,
-      status: "delivered",
-    });
+    await db.transaction(async (tx) => {
+      await tx.insert(ephemeralMedia).values({
+        id: mediaId,
+        coupleId: couple.id,
+        senderId: user.id,
+        storageKey: parsed.storageKey,
+        mimeType: parsed.mimeType,
+        status: "delivered",
+      });
 
-    await db.insert(messages).values({
-      id: messageId,
-      coupleId: couple.id,
-      senderId: user.id,
-      type: "ephemeral_image",
-      ephemeralMediaId: mediaId,
+      await tx.insert(messages).values({
+        id: messageId,
+        coupleId: couple.id,
+        senderId: user.id,
+        type: "ephemeral_image",
+        ephemeralMediaId: mediaId,
+      });
     });
 
     cleanupKey = undefined;
@@ -251,82 +260,65 @@ export async function getEphemeralSignedUrlAction(
   mediaId: string,
 ): Promise<ActionResult<{ url: string }>> {
   try {
+    const cleanMediaId = z.string().min(1).max(128).parse(mediaId);
     const { user, couple } = await requireActiveCouple();
-    const media = await db.query.ephemeralMedia.findFirst({
-      where: and(
-        eq(ephemeralMedia.id, mediaId),
-        eq(ephemeralMedia.coupleId, couple.id),
-      ),
-    });
 
-    if (!media?.storageKey || media.status === "deleted") {
-      throw new AppError("NOT_FOUND", "Media no longer available.", 404);
+    const lockKey = `lock:ephemeral:${cleanMediaId}`;
+    const acquired = await redis.set(lockKey, "1", { nx: true, ex: 10 });
+    if (!acquired) {
+      throw new AppError("CONFLICT", "Media is currently being opened.", 409);
     }
 
-    // View-once media is strictly recipient-only. Senders cannot re-open.
-    if (media.senderId === user.id) {
-      throw new AppError("FORBIDDEN", "View-once media can only be opened by the recipient.", 403);
+    try {
+      const media = await db.query.ephemeralMedia.findFirst({
+        where: and(
+          eq(ephemeralMedia.id, cleanMediaId),
+          eq(ephemeralMedia.coupleId, couple.id),
+        ),
+      });
+
+      if (!media?.storageKey || media.status === "deleted") {
+        throw new AppError("NOT_FOUND", "Media no longer available.", 404);
+      }
+
+      // View-once media is strictly recipient-only. Senders cannot re-open.
+      if (media.senderId === user.id) {
+        throw new AppError("FORBIDDEN", "View-once media can only be opened by the recipient.", 403);
+      }
+
+      if (media.status !== "delivered") {
+        throw new AppError("FORBIDDEN", "Media has already been viewed or has expired.", 403);
+      }
+
+      const admin = createAdminClient();
+      const { data, error } = await admin.storage
+        .from(MEDIA_BUCKET)
+        .createSignedUrl(media.storageKey, 30);
+
+      if (error || !data) {
+        throw new AppError("INTERNAL_ERROR", "Could not sign media URL.", 500);
+      }
+
+      // Mark as viewed atomically to prevent repeated opens
+      await db
+        .update(ephemeralMedia)
+        .set({ status: "viewed", viewedAt: new Date() })
+        .where(
+          and(
+            eq(ephemeralMedia.id, media.id),
+            eq(ephemeralMedia.status, "delivered"),
+          ),
+        );
+
+      return ok({ url: data.signedUrl });
+    } finally {
+      await redis.del(lockKey);
     }
-
-    if (media.status !== "delivered") {
-      throw new AppError("FORBIDDEN", "Media has already been viewed or has expired.", 403);
-    }
-
-    const admin = createAdminClient();
-    const { data, error } = await admin.storage
-      .from(MEDIA_BUCKET)
-      .createSignedUrl(media.storageKey, 30);
-
-    if (error || !data) {
-      throw new AppError("INTERNAL_ERROR", "Could not sign media URL.", 500);
-    }
-
-    // Mark as viewed immediately to prevent repeated opens
-    await db
-      .update(ephemeralMedia)
-      .set({ status: "viewed", viewedAt: new Date() })
-      .where(eq(ephemeralMedia.id, media.id));
-
-    return ok({ url: data.signedUrl });
   } catch (e) {
     return fail(e);
   }
 }
 
-/**
- * Server-only background cleaner: Deletes expired ephemeral media storage objects
- * (e.g., viewed > 10 mins ago, or unviewed > 24 hours).
- */
-export async function purgeExpiredEphemeralMedia(): Promise<{ purged: number }> {
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-  const expiredRows = await db.query.ephemeralMedia.findMany({
-    where: or(
-      and(eq(ephemeralMedia.status, "viewed"), lt(ephemeralMedia.viewedAt, tenMinutesAgo)),
-      and(eq(ephemeralMedia.status, "delivered"), lt(ephemeralMedia.createdAt, twentyFourHoursAgo)),
-    ),
-    limit: 50,
-  });
-
-  let purged = 0;
-  for (const row of expiredRows) {
-    if (row.storageKey) {
-      try {
-        await removeStorageObject(row.storageKey);
-      } catch {
-        // Storage object may already be removed
-      }
-    }
-    await db
-      .update(ephemeralMedia)
-      .set({ status: "deleted", deletedAt: new Date(), storageKey: null })
-      .where(eq(ephemeralMedia.id, row.id));
-    purged++;
-  }
-
-  return { purged };
-}
 
 export async function confirmMemoryUploadAction(
   input: unknown,
@@ -338,6 +330,13 @@ export async function confirmMemoryUploadAction(
 
     assertCoupleStorageKey(parsed.storageKey, "memories", couple.id);
     cleanupKey = parsed.storageKey;
+
+    await rateLimitOrThrow({
+      key: `rl:memory-confirm:${user.id}`,
+      limit: 30,
+      windowSeconds: 60 * 15,
+      message: "Too many memory upload confirmations. Try again later.",
+    });
 
     const bytes = await downloadStorageObject(parsed.storageKey);
     const moderation = await getModerationProvider().checkImage(

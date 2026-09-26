@@ -283,9 +283,10 @@ export const getAuthenticatedUserContext = safeCache(
         where: eq(onboardingProfiles.userId, partnerId),
       });
 
-      // Keep appUser.coupleId synchronized in background if mismatched
+      // Keep appUser.coupleId synchronized if mismatched
       if (appUser.coupleId !== coupleRow.id) {
-        db.update(users)
+        await db
+          .update(users)
           .set({ coupleId: coupleRow.id, updatedAt: new Date() })
           .where(eq(users.id, appUser.id))
           .catch((e) => console.warn("[getAuthenticatedUserContext] Sync coupleId warning:", e));

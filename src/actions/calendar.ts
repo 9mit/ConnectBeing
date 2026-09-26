@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import { calendarEvents, inAppNotifications, onboardingProfiles } from "@/db/schema";
-import { createPartnerNotification } from "@/actions/notifications";
+import { createPartnerNotification } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
@@ -212,7 +212,12 @@ export async function toggleCalendarEventAction(
     await db
       .update(calendarEvents)
       .set({ completed: nextCompleted })
-      .where(eq(calendarEvents.id, eventId));
+      .where(
+        and(
+          eq(calendarEvents.id, eventId),
+          eq(calendarEvents.coupleId, couple.id),
+        ),
+      );
 
     return ok({ completed: nextCompleted });
   } catch (e) {

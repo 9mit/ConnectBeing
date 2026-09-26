@@ -17,7 +17,7 @@ export async function syncAppUserFromSupabase(input: {
   email: string;
 }): Promise<AppUserRow | null> {
   const normalizedEmail = (input.email || "").trim().toLowerCase();
-  if (!normalizedEmail && !input.supabaseAuthId) return null;
+  if (!normalizedEmail || !input.supabaseAuthId) return null;
 
   // 1. Try to find by supabaseAuthId first
   let appUser = await db.query.users.findFirst({

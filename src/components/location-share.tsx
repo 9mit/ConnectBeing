@@ -83,17 +83,26 @@ export function LocationShare({
     if (!enabled) return;
 
     const tick = () => {
-      if (!navigator.geolocation) return;
-      navigator.geolocation.getCurrentPosition((pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setMyPos({ lat, lng });
-        void channelRef.current?.send({
-          type: "broadcast",
-          event: "location",
-          payload: { userId, lat, lng, timestamp: Date.now() },
-        });
-      });
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        console.warn("[location-share] Geolocation is not supported in this environment");
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          setMyPos({ lat, lng });
+          void channelRef.current?.send({
+            type: "broadcast",
+            event: "location",
+            payload: { userId, lat, lng, timestamp: Date.now() },
+          });
+        },
+        (err) => {
+          console.warn("[location-share] Geolocation error:", err.message);
+        },
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 },
+      );
       uptimeRef.current += 0.5;
       if (uptimeRef.current >= 1) {
         const mins = Math.floor(uptimeRef.current);

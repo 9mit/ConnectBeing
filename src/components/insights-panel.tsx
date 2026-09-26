@@ -1,12 +1,9 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { motion } from "framer-motion";
 import {
   RefreshCw,
   MessageSquare,
-  Sparkles,
-  Heart,
   Compass,
   Lightbulb,
 } from "lucide-react";

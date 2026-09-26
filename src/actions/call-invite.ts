@@ -18,6 +18,13 @@ export async function ringPartnerAction(
   try {
     const parsed = z.object({ callId: z.string().trim().min(1).max(128) }).parse(input);
     const { user, couple } = await requireVerifiedCouple();
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:ring:${user.id}`,
+      limit: 10,
+      windowSeconds: 60,
+      message: "Too many call attempts. Please wait a moment.",
+    });
     await redis.set(
       callKey(couple.id),
       JSON.stringify({
@@ -70,12 +77,18 @@ export async function acceptCallInviteAction(
   callId: string,
 ): Promise<ActionResult<{ accepted: boolean }>> {
   try {
-    const { couple } = await requireVerifiedCouple();
+    const { user, couple } = await requireVerifiedCouple();
     const raw = await redis.get<string | Record<string, unknown>>(callKey(couple.id));
     if (!raw) {
       throw new AppError("NOT_FOUND", "Call invite expired.", 404);
     }
-    const parsed = (typeof raw === "string" ? JSON.parse(raw) : raw) as { callId: string };
+    const parsed = (typeof raw === "string" ? JSON.parse(raw) : raw) as {
+      callId: string;
+      fromUserId?: string;
+    };
+    if (parsed.fromUserId && parsed.fromUserId === user.id) {
+      throw new AppError("FORBIDDEN", "Cannot accept your own call invite.", 403);
+    }
     if (parsed.callId !== callId) {
       throw new AppError("CONFLICT", "Stale call invite.", 409);
     }

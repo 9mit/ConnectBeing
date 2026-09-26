@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, useRef } from "react";
 import Link from "next/link";
 import { Bell, CheckCheck, Sparkles, MessageCircle, Film, Calendar, Trophy, Check, ArrowRight } from "lucide-react";
 
@@ -53,11 +53,22 @@ export function NotificationsPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const { nudgePartner, nudgePending, activeNotification, unreadNotificationsCount: presenceUnreadCount } = usePresence();
+  const { nudgePartner, nudgePending, activeNotification } = usePresence();
   const [nudgeMsg, setNudgeMsg] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+  const nudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    };
+  }, []);
 
   async function loadData() {
     const res = await listNotificationsAction();
+    if (!isMountedRef.current) return;
     if (res.ok) {
       setNotifications(res.data.notifications);
       setUnreadCount(res.data.unreadCount);
@@ -105,8 +116,12 @@ export function NotificationsPanel({
 
   async function handleSendNudge() {
     const res = await nudgePartner();
+    if (!isMountedRef.current) return;
     setNudgeMsg(res.message || (res.ok ? "Partner pinged!" : "Failed"));
-    setTimeout(() => setNudgeMsg(null), 3000);
+    if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    nudgeTimerRef.current = setTimeout(() => {
+      if (isMountedRef.current) setNudgeMsg(null);
+    }, 3000);
   }
 
   const filtered = notifications.filter((n) => {
@@ -248,6 +263,7 @@ export function NotificationsPanel({
                     type="button"
                     onClick={() => handleMarkRead(item.id)}
                     title="Mark as read"
+                    aria-label="Mark notification as read"
                     className="text-xs text-slate-400 hover:text-amber-300 p-1.5 rounded-lg border border-amber-500/20"
                   >
                     <Check className="w-3.5 h-3.5" />

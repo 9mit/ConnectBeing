@@ -61,11 +61,17 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
     e.preventDefault();
     if (!title || !eventDate) return;
 
+    const parsedDate = new Date(eventDate);
+    if (isNaN(parsedDate.getTime())) {
+      setError("Please select a valid event date and time.");
+      return;
+    }
+
     startTransition(async () => {
       const res = await createCalendarEventAction({
         title,
         description: description || undefined,
-        eventDate: new Date(eventDate).toISOString(),
+        eventDate: parsedDate.toISOString(),
         category,
         reminderHours: 24,
       });
@@ -276,6 +282,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                           type="button"
                           onClick={() => handleToggle(event.id)}
                           title="Mark as completed"
+                          aria-label={`Mark ${event.title} as completed`}
                           className="text-zinc-500 hover:text-white transition-colors"
                         >
                           <Circle className="w-4 h-4" />
@@ -306,6 +313,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                       onClick={() => handleDelete(event.id)}
                       className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-rose-400 p-1.5 touch-manipulation min-h-[32px] min-w-[32px] flex items-center justify-center"
                       title="Delete event"
+                      aria-label={`Delete event ${event.title}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -337,6 +345,7 @@ export function CalendarPanel({ initialEvents }: { initialEvents?: CalendarEvent
                   type="button"
                   onClick={() => handleDelete(event.id)}
                   className="text-zinc-500 hover:text-rose-400 p-1.5 touch-manipulation min-h-[32px] min-w-[32px] flex items-center justify-center"
+                  aria-label={`Delete completed event ${event.title}`}
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>

@@ -10,7 +10,7 @@ import {
   watchParticipants,
   watchSessions,
 } from "@/db/schema";
-import { createPartnerNotification } from "@/actions/notifications";
+import { createPartnerNotification } from "@/lib/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireVerifiedCouple } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
@@ -464,22 +464,6 @@ export async function deleteMovieMemoryAction(
   }
 }
 
-export async function cleanupExpiredVaultRecords(): Promise<{ deleted: number }> {
-  try {
-    const now = new Date();
-    // Only delete expired movie_memories records.
-    // NEVER touch watch_sessions, chat, or other memories!
-    const result = await db
-      .delete(movieMemories)
-      .where(lte(movieMemories.expiresAt, now));
-
-    const count = typeof (result as any).rowCount === "number" ? (result as any).rowCount : 0;
-    return { deleted: count };
-  } catch (err) {
-    console.error("[cleanupExpiredVaultRecords] Error:", err);
-    return { deleted: 0 };
-  }
-}
 
 export async function endWatchSessionAction(
   sessionId: string,

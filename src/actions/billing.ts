@@ -143,11 +143,25 @@ export async function cancelPremiumSubscriptionAction(): Promise<
     }
 
     const razorpay = getRazorpay();
-    await razorpay.subscriptions.cancel(sub.razorpaySubscriptionId, true);
+    try {
+      await razorpay.subscriptions.cancel(sub.razorpaySubscriptionId, true);
+    } catch (rzErr: unknown) {
+      const msg = rzErr instanceof Error ? rzErr.message : String(rzErr);
+      if (msg.toLowerCase().includes("cancelled") || msg.toLowerCase().includes("not active")) {
+        // Idempotent: already cancelled with Razorpay
+      } else {
+        console.error("[cancelPremiumSubscription] Razorpay error:", msg);
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Failed to cancel subscription with payment provider. Please try again.",
+          502,
+        );
+      }
+    }
 
     await db
       .update(subscriptions)
-      .set({ cancelAtPeriodEnd: true, updatedAt: new Date() })
+      .set({ cancelAtPeriodEnd: true, status: "cancelled", updatedAt: new Date() })
       .where(eq(subscriptions.id, sub.id));
 
     return ok({ cancelled: true });

@@ -3,10 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef } from "react";
 import { BRAND } from "@/lib/brand";
-
-const AppShellContext = createContext<boolean>(false);
 import {
   Home,
   Film,
@@ -36,6 +34,8 @@ import {
 } from "lucide-react";
 
 import { PresenceProvider, usePresence } from "@/components/presence-provider";
+
+const AppShellContext = createContext<boolean>(false);
 
 const primaryNavItems = [
   { href: "/dashboard", label: "Home", icon: Home },
@@ -84,11 +84,25 @@ const allSecondaryLinks = sanctuaryMenuGroups.flatMap((g) => g.links);
 function HeaderPresenceControl() {
   const { partnerOnline, myStatus, toggleMyStatus, nudgePartner, nudgePending } = usePresence();
   const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   async function handleNudge() {
-    const res = await nudgePartner();
-    setToast(res.message || (res.ok ? "Ping sent" : "Failed"));
-    setTimeout(() => setToast(null), 2800);
+    try {
+      const res = await nudgePartner();
+      setToast(res.message || (res.ok ? "Ping sent" : "Failed"));
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setToast(null), 2800);
+    } catch {
+      setToast("Failed to ping partner");
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setToast(null), 2800);
+    }
   }
 
   return (
@@ -277,7 +291,7 @@ export function AppShell({
           isTheaterMode 
             ? "h-[100dvh] w-full overflow-hidden pb-0 bg-[#050608]" 
             : "min-h-screen pb-24 md:pb-10 bg-[#07080b]"
-        } text-[#f7f6f2] flex flex-col font-sans select-none overflow-x-hidden selection:bg-amber-400/20 selection:text-amber-100`}>
+        } text-[#f7f6f2] flex flex-col font-sans overflow-x-hidden selection:bg-amber-400/20 selection:text-amber-100`}>
           
           {/* Instant Ambient Route Transition Glow Bar */}
           {pendingPath !== null && pendingPath !== pathname && (

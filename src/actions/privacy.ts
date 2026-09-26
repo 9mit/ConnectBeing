@@ -5,6 +5,7 @@ import { count, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
   calendarEvents,
+  coupleMembers,
   couples,
   memories,
   moods,
@@ -69,6 +70,13 @@ export async function exportCoupleDataAction(): Promise<
 > {
   try {
     const { user, couple } = await requireActiveCouple();
+
+    await rateLimitOrThrow({
+      key: `rl:export:${couple.id}`,
+      limit: 5,
+      windowSeconds: 3600,
+      message: "Data export limit reached. Please wait before exporting again.",
+    });
 
     const [memRows, moodRows, movRows, calRows, capRows, quizRows] =
       await Promise.all([
@@ -149,20 +157,29 @@ export async function requestCoupleDataDeletionAction(): Promise<
       message: "Data deletion already requested. Please wait.",
     });
 
-    // 1. Mark couple status as dissolved
-    await db
-      .update(couples)
-      .set({
-        status: "dissolved",
-        dissolvedAt: new Date(),
-      })
-      .where(eq(couples.id, couple.id));
+    // Transactionally dissolve couple, update memberships, and unlink users
+    await db.transaction(async (tx) => {
+      // 1. Mark couple status as dissolved
+      await tx
+        .update(couples)
+        .set({
+          status: "dissolved",
+          dissolvedAt: new Date(),
+        })
+        .where(eq(couples.id, couple.id));
 
-    // 2. Unlink both users so they are not permanently locked to dissolved couple
-    await db
-      .update(users)
-      .set({ coupleId: null, updatedAt: new Date() })
-      .where(or(eq(users.id, couple.userAId), eq(users.id, couple.userBId)));
+      // 2. Mark couple members as dissolved so unique active index is freed
+      await tx
+        .update(coupleMembers)
+        .set({ status: "dissolved" })
+        .where(eq(coupleMembers.coupleId, couple.id));
+
+      // 3. Unlink both users so they are not permanently locked to dissolved couple
+      await tx
+        .update(users)
+        .set({ coupleId: null, updatedAt: new Date() })
+        .where(or(eq(users.id, couple.userAId), eq(users.id, couple.userBId)));
+    });
 
     // 3. Purge couple-level Redis keys
     try {

@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { moods, onboardingProfiles } from "@/db/schema";
-import { createPartnerNotification } from "@/actions/notifications";
+import { createPartnerNotification } from "@/lib/notifications";
 import { tryUnlockAchievement } from "@/lib/achievements";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple, requireVerifiedCouple } from "@/lib/auth";
@@ -20,6 +20,14 @@ export async function setMoodAction(
   try {
     const parsed = moodSchema.parse(input);
     const { user, couple } = await requireVerifiedCouple();
+
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:mood:${user.id}`,
+      limit: 20,
+      windowSeconds: 60 * 10,
+      message: "Too many mood updates. Please slow down.",
+    });
 
     const id = createId();
     await db.insert(moods).values({

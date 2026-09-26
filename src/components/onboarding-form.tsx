@@ -46,8 +46,9 @@ export function OnboardingForm() {
     <form onSubmit={onSubmit} className="mx-auto max-w-xl space-y-6 rounded-3xl glass-panel p-8 border border-amber-500/30 bg-purple-950/50 shadow-[0_0_35px_rgba(212,175,55,0.15)]">
       <div className="grid gap-6 md:grid-cols-2">
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Name</label>
+          <label htmlFor="onboarding-name" className="text-xs font-semibold uppercase tracking-wider text-amber-300">Name</label>
           <input
+            id="onboarding-name"
             name="name"
             type="text"
             required
@@ -56,8 +57,9 @@ export function OnboardingForm() {
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Country (ISO)</label>
+          <label htmlFor="onboarding-country" className="text-xs font-semibold uppercase tracking-wider text-amber-300">Country (ISO)</label>
           <select
+            id="onboarding-country"
             name="countryCode"
             defaultValue="IN"
             className="w-full rounded-xl border border-amber-500/30 bg-purple-950/80 px-4 py-3 text-base text-slate-100 focus:outline-none focus:border-amber-400 focus:bg-purple-900/90 transition-all"
@@ -79,8 +81,9 @@ export function OnboardingForm() {
 
       <div className="grid gap-6 grid-cols-2">
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Age (18+)</label>
+          <label htmlFor="onboarding-age" className="text-xs font-semibold uppercase tracking-wider text-amber-300">Age (18+)</label>
           <input
+            id="onboarding-age"
             name="age"
             type="number"
             min={18}
@@ -91,8 +94,9 @@ export function OnboardingForm() {
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Gender</label>
+          <label htmlFor="onboarding-gender" className="text-xs font-semibold uppercase tracking-wider text-amber-300">Gender</label>
           <input
+            id="onboarding-gender"
             name="gender"
             type="text"
             required
@@ -103,8 +107,9 @@ export function OnboardingForm() {
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Hobbies (comma-separated)</label>
+        <label htmlFor="onboarding-hobbies" className="text-xs font-semibold uppercase tracking-wider text-amber-300">Hobbies (comma-separated)</label>
         <input
+          id="onboarding-hobbies"
           name="hobbies"
           type="text"
           required
@@ -114,8 +119,9 @@ export function OnboardingForm() {
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Love Languages (comma-separated)</label>
+        <label htmlFor="onboarding-love-languages" className="text-xs font-semibold uppercase tracking-wider text-amber-300">Love Languages (comma-separated)</label>
         <input
+          id="onboarding-love-languages"
           name="loveLanguages"
           type="text"
           required
@@ -125,8 +131,9 @@ export function OnboardingForm() {
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">About you</label>
+        <label htmlFor="onboarding-about" className="text-xs font-semibold uppercase tracking-wider text-amber-300">About you</label>
         <textarea
+          id="onboarding-about"
           name="selfDescription"
           required
           maxLength={500}
@@ -137,8 +144,9 @@ export function OnboardingForm() {
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">What you value in a partner</label>
+        <label htmlFor="onboarding-expectations" className="text-xs font-semibold uppercase tracking-wider text-amber-300">What you value in a partner</label>
         <textarea
+          id="onboarding-expectations"
           name="partnerExpectation"
           required
           maxLength={500}

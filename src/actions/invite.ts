@@ -188,6 +188,12 @@ export async function redeemInviteToken(
 ): Promise<ActionResult<{ coupleId: string }>> {
   try {
     const user = await requireAppUser();
+    await rateLimitOrThrow({
+      key: `rl:redeem-invite:${user.id}`,
+      limit: 10,
+      windowSeconds: 60 * 15,
+      message: "Too many invite redemption attempts. Try again later.",
+    });
     const result = await acceptInviteAndJoinCouple({
       rawToken,
       acceptingUserId: user.id,

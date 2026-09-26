@@ -47,9 +47,10 @@ function createDb() {
 
   assertDatabaseUrl(connectionString);
 
+  const isProd = process.env.NODE_ENV === "production";
   const client = postgres(connectionString, {
     prepare: false,
-    max: 10,
+    max: Number(process.env.DB_MAX_CONNECTIONS || (isProd ? 2 : 10)),
     idle_timeout: 20,
     connect_timeout: 15,
   });

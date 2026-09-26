@@ -24,6 +24,12 @@ export async function rateLimitOrThrow(params: {
   const count = await redis.incr(params.key);
   if (count === 1) {
     await redis.expire(params.key, params.windowSeconds);
+  } else {
+    // Defense-in-depth: if key has no TTL, ensure TTL is applied so it doesn't leak
+    const ttl = await redis.ttl(params.key);
+    if (ttl === -1) {
+      await redis.expire(params.key, params.windowSeconds);
+    }
   }
   if (count > params.limit) {
     throw new AppError(
@@ -68,6 +74,6 @@ export function safeInternalPath(
   if (next.includes("://") || next.includes("\\") || next.includes("@")) {
     return fallback;
   }
-  if (!/^\/[a-zA-Z0-9/_-]*$/.test(next)) return fallback;
+  if (!/^\/[a-zA-Z0-9/_-]*(\?[a-zA-Z0-9_=&.-]*)?$/.test(next)) return fallback;
   return next;
 }

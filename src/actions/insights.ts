@@ -141,6 +141,13 @@ export async function refreshInsightsAction(): Promise<
 > {
   try {
     const { couple } = await requireActiveCouple();
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:insights:refresh:${couple.id}`,
+      limit: 6,
+      windowSeconds: 60 * 60,
+      message: "Insights can only be refreshed a few times per hour. Please check back later.",
+    });
     const snapshot = await runRelationshipIntelligence(couple.id);
     const insight = snapshot.persona;
 

@@ -93,10 +93,16 @@ export function ProfilePanel({
     e.preventDefault();
     if (!anniversaryInput) return;
 
+    const parsedDate = new Date(anniversaryInput);
+    if (isNaN(parsedDate.getTime())) {
+      setError("Please select a valid anniversary date.");
+      return;
+    }
+
     startTransition(async () => {
       setError(null);
       const res = await updateAnniversaryAction({
-        anniversaryDate: new Date(anniversaryInput).toISOString(),
+        anniversaryDate: parsedDate.toISOString(),
       });
 
       if (res.ok) {

@@ -77,6 +77,14 @@ export async function confirmAvatarUploadAction(
       .parse(input);
     const user = await requireOnboardedUser();
 
+    const { rateLimitOrThrow } = await import("@/lib/security");
+    await rateLimitOrThrow({
+      key: `rl:avatar-confirm:${user.id}`,
+      limit: 15,
+      windowSeconds: 60 * 15,
+      message: "Too many avatar confirmation attempts. Try again later.",
+    });
+
     if (!isValidAvatarKey(parsed.storageKey, user.id)) {
       throw new AppError("FORBIDDEN", "Invalid avatar storage key.", 403);
     }
@@ -133,6 +141,9 @@ export async function resolveAvatarUrlAction(
     }
 
     const targetUserId = parts[1];
+    if (!isValidAvatarKey(storageKey, targetUserId)) {
+      throw new AppError("VALIDATION_ERROR", "Invalid avatar storage key format.", 400);
+    }
     const isOwnAvatar = targetUserId === user.id;
     const isPartnerAvatar =
       user.couple &&

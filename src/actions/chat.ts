@@ -4,7 +4,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or } from "drizzle-orm
 
 import { db } from "@/db";
 import { messages, onboardingProfiles } from "@/db/schema";
-import { createPartnerNotification } from "@/actions/notifications";
+import { createPartnerNotification } from "@/lib/notifications";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { requireCoupleVerified } from "@/lib/couple-verification";
@@ -12,6 +12,7 @@ import { appendRelationshipEvent } from "@/lib/events";
 import { incrementEngagement } from "@/lib/engagement";
 import { createId } from "@/lib/ids";
 import { tryUnlockAchievement } from "@/lib/achievements";
+import { AppError } from "@/lib/errors";
 import { rateLimitOrThrow } from "@/lib/security";
 import { sendMessageSchema } from "@/lib/validations";
 import { z } from "zod";
@@ -90,15 +91,31 @@ export async function sendMessageAction(
     }
 
     const id = createId();
-    await db.insert(messages).values({
-      id,
-      coupleId: couple.id,
-      senderId: user.id,
-      type: "text",
-      content: parsed.content,
-      clientMsgId: parsed.clientMsgId ?? null,
-      deliveryStatus: "sent",
-    });
+    try {
+      await db.insert(messages).values({
+        id,
+        coupleId: couple.id,
+        senderId: user.id,
+        type: "text",
+        content: parsed.content,
+        clientMsgId: parsed.clientMsgId ?? null,
+        deliveryStatus: "sent",
+      });
+    } catch (insertErr) {
+      if (parsed.clientMsgId) {
+        const existing = await db.query.messages.findFirst({
+          where: and(
+            eq(messages.coupleId, couple.id),
+            eq(messages.clientMsgId, parsed.clientMsgId),
+          ),
+        });
+        if (existing) {
+          return ok({ id: existing.id, clientMsgId: existing.clientMsgId });
+        }
+      }
+      console.error("[sendMessageAction] Message insert failed:", insertErr);
+      throw new AppError("INTERNAL_ERROR", "Failed to send message.", 500);
+    }
 
     await incrementEngagement(couple.id, "message");
     await appendRelationshipEvent({
@@ -227,11 +244,17 @@ export async function ackDeliveredAction(
   messageIds: string[],
 ): Promise<ActionResult<{ count: number }>> {
   try {
+    // Delivery status receipts are allowed even if weekly verification lapsed,
+    // ensuring background network sync receipts do not fail repeatedly.
     const { user, couple } = await requireActiveCouple();
-    await requireCoupleVerified(couple);
-    if (!messageIds.length) return ok({ count: 0 });
+    if (!Array.isArray(messageIds) || messageIds.length === 0) {
+      return ok({ count: 0 });
+    }
 
-    const ids = messageIds.slice(0, 50);
+    const ids = messageIds
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+      .slice(0, 50);
+    if (ids.length === 0) return ok({ count: 0 });
     const now = new Date();
     const updated = await db
       .update(messages)

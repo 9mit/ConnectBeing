@@ -50,6 +50,8 @@ const INPUT_SIZE = 320;
 
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
 
+let modelDownloadPromise: Promise<string> | null = null;
+
 async function ensureModelFile(): Promise<string> {
   const configured = process.env.NUDENET_MODEL_PATH;
   if (configured) {
@@ -64,27 +66,40 @@ async function ensureModelFile(): Promise<string> {
     );
   }
 
-  const tmpDir = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), "tmp");
-  await fs.mkdir(tmpDir, { recursive: true });
-  const hash = createHash("sha256").update(url).digest("hex").slice(0, 16);
-  const dest = path.join(tmpDir, `nudenet-${hash}.onnx`);
-
-  try {
-    await fs.access(dest);
-    return dest;
-  } catch {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        `Failed to download NudeNet model: ${res.status}`,
-        500,
-      );
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    await fs.writeFile(dest, buf);
-    return dest;
+  if (modelDownloadPromise) {
+    return modelDownloadPromise;
   }
+
+  modelDownloadPromise = (async () => {
+    const tmpDir = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), "tmp");
+    await fs.mkdir(tmpDir, { recursive: true });
+    const hash = createHash("sha256").update(url).digest("hex").slice(0, 16);
+    const dest = path.join(tmpDir, `nudenet-${hash}.onnx`);
+
+    try {
+      await fs.access(dest);
+      return dest;
+    } catch {
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          `Failed to download NudeNet model: ${res.status}`,
+          500,
+        );
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      const tempDest = `${dest}.${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`;
+      await fs.writeFile(tempDest, buf);
+      await fs.rename(tempDest, dest);
+      return dest;
+    }
+  })().catch((err) => {
+    modelDownloadPromise = null;
+    throw err;
+  });
+
+  return modelDownloadPromise;
 }
 
 async function getSession(): Promise<ort.InferenceSession> {

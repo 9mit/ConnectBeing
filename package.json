@@ -1,5 +1,5 @@
 {
-  "name": "madlove",
+  "name": "soulnest",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/adversarial_audit.mjs",
+    "test": "tsc --noEmit && next lint",
+    "db:audit": "node scripts/adversarial_audit.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",

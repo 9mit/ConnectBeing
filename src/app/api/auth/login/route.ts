@@ -110,41 +110,6 @@ export async function POST(request: NextRequest) {
       password: parsed.data.password,
     });
 
-    if (
-      (error || !data.user) &&
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    ) {
-      try {
-        const { createAdminClient } = await import("@/lib/supabase/admin");
-        const admin = createAdminClient();
-        let targetUser: { id: string; email_confirmed_at?: string | null } | null | undefined = null;
-
-        if (existing?.supabaseAuthId) {
-          const { data: authData } = await admin.auth.admin.getUserById(existing.supabaseAuthId);
-          targetUser = authData?.user;
-        }
-
-        if (!targetUser) {
-          const { data: authList } = await admin.auth.admin.listUsers();
-          targetUser = authList?.users?.find((u) => u.email?.toLowerCase() === email) ?? null;
-        }
-
-        if (targetUser && !targetUser.email_confirmed_at) {
-          await admin.auth.admin.updateUserById(targetUser.id, {
-            email_confirm: true,
-          });
-
-          const retry = await supabase.auth.signInWithPassword({
-            email,
-            password: parsed.data.password,
-          });
-          data = retry.data;
-          error = retry.error;
-        }
-      } catch (adminErr) {
-        console.error("[login API] Auto-confirm retry failed:", adminErr);
-      }
-    }
 
     if (error || !data.user) {
       if (existing) {

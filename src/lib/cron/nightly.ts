@@ -10,8 +10,10 @@ import {
   quizResponses,
   type Couple,
 } from "@/db/schema";
-import { purgeExpiredEphemeralMedia } from "@/actions/media";
-import { cleanupExpiredVaultRecords } from "@/actions/together";
+import {
+  purgeExpiredEphemeralMedia,
+  cleanupExpiredVaultRecords,
+} from "@/lib/cleanup/maintenance";
 import { rotateCoupleVerifications } from "@/lib/couple-verification";
 import { petStateFromScore } from "@/lib/date-ist";
 import { getEngagementMeta, getEngagementScore } from "@/lib/engagement";
@@ -52,16 +54,12 @@ async function flushCoupleDay(coupleId: string, date: string) {
       engagementScore: Math.min(100, score),
     });
   }
-
-  await db
-    .update(couples)
-    .set({ petState: petStateFromScore(score) })
-    .where(eq(couples.id, coupleId));
 }
 
 async function generateDay16Persona(coupleId: string) {
   const stats = await db.query.coupleStats.findMany({
     where: eq(coupleStats.coupleId, coupleId),
+    orderBy: [asc(coupleStats.date)],
   });
 
   const days = stats.slice(0, 15);

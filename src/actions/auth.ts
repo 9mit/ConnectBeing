@@ -54,7 +54,32 @@ export async function updatePasswordAction(
 ): Promise<ActionResult<{ message: string; redirectTo: string }>> {
   try {
     const parsed = updatePasswordSchema.parse(input);
+    const { rateLimitOrThrow } = await import("@/lib/security");
     const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    let identifier = user?.id;
+    if (!identifier) {
+      try {
+        const { headers } = await import("next/headers");
+        const headerList = headers();
+        identifier =
+          headerList.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+          headerList.get("x-real-ip") ||
+          "anon";
+      } catch {
+        identifier = "anon";
+      }
+    }
+
+    await rateLimitOrThrow({
+      key: `rl:update-pwd:${identifier}`,
+      limit: 10,
+      windowSeconds: 60 * 15,
+      message: "Too many password update attempts. Please try again later.",
+    });
     const { error } = await supabase.auth.updateUser({
       password: parsed.password,
     });

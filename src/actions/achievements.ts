@@ -39,16 +39,19 @@ export async function listAchievementsAction(): Promise<
     let all = await db.select().from(achievementRows);
 
     if (all.length === 0) {
-      // Seed default achievements
-      for (const da of DEFAULT_ACHIEVEMENTS) {
-        await db.insert(achievementRows).values({
-          id: createId(),
-          code: da.code,
-          title: da.title,
-          description: da.description,
-          icon: da.icon,
-        }).onConflictDoNothing();
-      }
+      // Seed default achievements in a single batch
+      await db
+        .insert(achievementRows)
+        .values(
+          DEFAULT_ACHIEVEMENTS.map((da) => ({
+            id: createId(),
+            code: da.code,
+            title: da.title,
+            description: da.description,
+            icon: da.icon,
+          })),
+        )
+        .onConflictDoNothing();
       all = await db.select().from(achievementRows);
     }
 
@@ -74,7 +77,7 @@ export async function listAchievementsAction(): Promise<
         icon: a.icon,
         tier: defaultMeta?.tier || "bronze",
         unlocked: Boolean(row),
-        unlockedAt: row?.unlockedAt.toISOString() ?? null,
+        unlockedAt: row?.unlockedAt ? new Date(row.unlockedAt).toISOString() : null,
       };
     });
 

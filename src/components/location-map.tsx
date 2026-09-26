@@ -1,16 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { MapContainer, Marker, TileLayer } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
-const icon = L.icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
+function createLeafletIcon() {
+  if (typeof window === "undefined") return undefined;
+  return L.icon({
+    iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+    iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+  });
+}
 
 export default function LocationMap({
   myPos,
@@ -19,6 +23,12 @@ export default function LocationMap({
   myPos: { lat: number; lng: number } | null;
   partnerPos: { lat: number; lng: number } | null;
 }) {
+  const [icon, setIcon] = useState<L.Icon | undefined>(undefined);
+
+  useEffect(() => {
+    setIcon(createLeafletIcon());
+  }, []);
+
   const center = partnerPos ?? myPos ?? { lat: 20.5937, lng: 78.9629 };
 
   return (
@@ -32,8 +42,8 @@ export default function LocationMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {myPos ? <Marker position={[myPos.lat, myPos.lng]} icon={icon} /> : null}
-        {partnerPos ? (
+        {myPos && icon ? <Marker position={[myPos.lat, myPos.lng]} icon={icon} /> : null}
+        {partnerPos && icon ? (
           <Marker position={[partnerPos.lat, partnerPos.lng]} icon={icon} />
         ) : null}
       </MapContainer>

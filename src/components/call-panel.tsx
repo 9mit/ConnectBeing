@@ -245,19 +245,27 @@ export function CallPanel({
   }, [status]);
 
   useEffect(() => {
+    let timerId: number | null = null;
+    let disposed = false;
     void import("@/actions/realtime-ice").then(async ({ getTurnCredentialsAction }) => {
+      if (disposed) return;
       const res = await getTurnCredentialsAction();
-      if (res.ok) {
+      if (res.ok && !disposed) {
         setIceServers(res.data.iceServers);
         const expiresAt = res.data.expiresAt;
         const refreshIn = Math.max(30_000, expiresAt - Date.now() - 120_000);
-        window.setTimeout(() => {
+        timerId = window.setTimeout(() => {
+          if (disposed) return;
           void getTurnCredentialsAction().then((r) => {
-            if (r.ok) setIceServers(r.data.iceServers);
+            if (r.ok && !disposed) setIceServers(r.data.iceServers);
           });
         }, refreshIn);
       }
     });
+    return () => {
+      disposed = true;
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
   }, []);
 
   useEffect(() => {
@@ -500,7 +508,7 @@ export function CallPanel({
           </div>
         </div>
       </div>
-      <audio ref={remoteAudioRef} autoPlay />
+      <audio ref={remoteAudioRef} autoPlay playsInline />
       
       <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2.5 sm:gap-3 pt-2">
         <button

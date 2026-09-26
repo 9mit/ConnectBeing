@@ -95,6 +95,7 @@ export function InviteGenerator() {
   // Poll for partner opening link or joining sanctuary
   useEffect(() => {
     let cancelled = false;
+    let redirectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const interval = setInterval(async () => {
       try {
@@ -111,7 +112,7 @@ export function InviteGenerator() {
             partnerName: res.data.partnerName || "Your partner",
           });
           clearInterval(interval);
-          setTimeout(() => {
+          redirectTimer = setTimeout(() => {
             router.push("/dashboard");
             router.refresh();
           }, 3500);
@@ -124,6 +125,7 @@ export function InviteGenerator() {
     return () => {
       cancelled = true;
       clearInterval(interval);
+      if (redirectTimer) clearTimeout(redirectTimer);
     };
   }, [router]);
 

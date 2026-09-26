@@ -155,10 +155,16 @@ export function PlayPanel({
           className="flex flex-col sm:flex-row gap-3 rounded-2xl glass-panel border border-amber-500/30 bg-purple-950/50 p-5 shadow-md"
           onSubmit={(e) => {
             e.preventDefault();
+            if (!title.trim() || !dueAt) return;
+            const parsedDue = new Date(dueAt);
+            if (isNaN(parsedDue.getTime())) {
+              setError("Please select a valid date and time for the reminder.");
+              return;
+            }
             startTransition(async () => {
               const res = await createReminderAction({
-                title,
-                dueAt: new Date(dueAt).toISOString(),
+                title: title.trim(),
+                dueAt: parsedDue.toISOString(),
               });
               if (!res.ok) setError(res.error.message);
               else {

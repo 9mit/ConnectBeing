@@ -1,6 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  transpilePackages: ["three", "@react-three/fiber"],
   experimental: {
     serverComponentsExternalPackages: ["onnxruntime-node", "sharp"],
   },
@@ -12,9 +11,15 @@ const nextConfig = {
     return config;
   },
   async headers() {
-    const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
-      ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
-      : "";
+    let supabaseHost = "";
+    try {
+      if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        supabaseHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin;
+      }
+    } catch {
+      supabaseHost = "";
+    }
+
     const csp = [
       "default-src 'self'",
       "base-uri 'self'",
@@ -26,9 +31,9 @@ const nextConfig = {
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       `connect-src 'self' ${supabaseHost} wss://*.supabase.co https://*.supabase.co https://api.razorpay.com https://lumberjack.razorpay.com https://vitals.vercel-insights.com *.metered.ca *.l.google.com *.cloudflare.com *.twilio.com`,
-      "media-src 'self' blob:",
+      "media-src 'self' blob: https: data:",
       "worker-src 'self' blob:",
-      "frame-src https://api.razorpay.com https://checkout.razorpay.com",
+      "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://www.youtube.com https://www.youtube-nocookie.com",
     ]
       .filter(Boolean)
       .join("; ");

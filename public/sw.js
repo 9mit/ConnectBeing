@@ -1,4 +1,4 @@
-const CACHE = "madlove-shell-v2";
+const CACHE = "soulnest-shell-v1";
 const SHELL = ["/", "/login", "/register", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -27,8 +27,8 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/_next/")) return;
   if (url.pathname.includes("storage") || url.pathname.includes("media")) return;
 
-  const isShell =
-    event.request.mode === "navigate" || SHELL.includes(url.pathname);
+  // Only cache designated static public shell pages, never private dynamic pages
+  const isShell = SHELL.includes(url.pathname);
   if (!isShell) return;
 
   // Network-first so deploys never pair old HTML with new hashed chunks.

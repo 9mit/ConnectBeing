@@ -34,8 +34,13 @@ function calculateAgeScore(
   a: Pick<MatchmakingProfile, "age" | "ageRangeMin" | "ageRangeMax">,
   b: Pick<MatchmakingProfile, "age" | "ageRangeMin" | "ageRangeMax">,
 ): number {
-  const aFitsB = a.age >= b.ageRangeMin && a.age <= b.ageRangeMax;
-  const bFitsA = b.age >= a.ageRangeMin && b.age <= a.ageRangeMax;
+  const bMin = typeof b.ageRangeMin === "number" ? b.ageRangeMin : 18;
+  const bMax = typeof b.ageRangeMax === "number" ? b.ageRangeMax : 99;
+  const aMin = typeof a.ageRangeMin === "number" ? a.ageRangeMin : 18;
+  const aMax = typeof a.ageRangeMax === "number" ? a.ageRangeMax : 99;
+
+  const aFitsB = a.age >= bMin && a.age <= bMax;
+  const bFitsA = b.age >= aMin && b.age <= aMax;
 
   if (aFitsB && bFitsA) return 1.0;
   if (aFitsB || bFitsA) return 0.5;
@@ -138,8 +143,9 @@ export function calculateCompatibility(
 
   const ageScore = calculateAgeScore(profileA, profileB);
 
-  const geographyScore =
-    profileA.countryCode.toUpperCase() === profileB.countryCode.toUpperCase() ? 1.0 : 0.7;
+  const codeA = (profileA.countryCode || "").toUpperCase();
+  const codeB = (profileB.countryCode || "").toUpperCase();
+  const geographyScore = codeA && codeB && codeA === codeB ? 1.0 : 0.7;
 
   const lifestyleScore = 0.75; // Baseline lifestyle overlap
   const behaviorScore = calculateBehavioralScore(
@@ -181,8 +187,9 @@ export function calculateCompatibility(
   const reasons: string[] = [];
 
   // Find shared interests names
+  const setB = new Set((profileB.interests || []).map((x) => x.toLowerCase()));
   const sharedInterests = (profileA.interests || []).filter((i) =>
-    (profileB.interests || []).map((x) => x.toLowerCase()).includes(i.toLowerCase()),
+    setB.has(i.toLowerCase()),
   );
   if (sharedInterests.length > 0) {
     reasons.push(

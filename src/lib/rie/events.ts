@@ -5,7 +5,6 @@ import { relationshipEvents } from "@/db/schema";
 import type { RieEvent, RieEventType } from "./types";
 
 const TYPE_MAP: Partial<Record<string, RieEventType>> = {
-  message_sent: "message_sent",
   mood_logged: "mood_updated",
   quiz_completed: "quiz_completed",
   watch_started: "movie_started",
@@ -30,7 +29,7 @@ export async function collectEvents(coupleId: string): Promise<RieEvent[]> {
   const out: RieEvent[] = [];
   for (const r of rows) {
     const eventType = TYPE_MAP[r.eventType];
-    if (!eventType || eventType === "message_sent") continue;
+    if (!eventType) continue;
     out.push({
       id: r.id,
       coupleId,

@@ -184,7 +184,7 @@ export async function rotateCoupleVerifications(): Promise<{
 
   const active = await db.query.couples.findMany({
     where: eq(couples.status, "active"),
-    limit: 200,
+    limit: 1000,
   });
 
   for (const couple of active) {

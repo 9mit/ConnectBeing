@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { challenges } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
+import { AppError } from "@/lib/errors";
 import {
   bumpChallengeProgress,
   ensureDefaultChallenges,
@@ -65,11 +66,16 @@ export async function bumpChallengeProgressAction(
 ): Promise<ActionResult<{ completed: boolean }>> {
   try {
     const { user, couple } = await requireActiveCouple();
+    const cleanCode = String(code || "").trim().slice(0, 64);
+    if (!cleanCode) {
+      throw new AppError("VALIDATION_ERROR", "Invalid challenge code.", 400);
+    }
+    const cleanAmount = Math.max(1, Math.min(Math.floor(Number(amount) || 1), 10));
     const result = await bumpChallengeProgress({
       coupleId: couple.id,
       actorUserId: user.id,
-      code,
-      amount,
+      code: cleanCode,
+      amount: cleanAmount,
     });
     return ok(result);
   } catch (e) {
