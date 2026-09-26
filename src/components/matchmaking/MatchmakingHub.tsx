@@ -80,6 +80,7 @@ export function MatchmakingHub({ initialStatus }: Props) {
 
   // Feedback notifications
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [respondingAction, setRespondingAction] = useState<string | null>(null);
 
   // Load next candidate when enabled
   const fetchNextCandidate = () => {
@@ -144,22 +145,27 @@ export function MatchmakingHub({ initialStatus }: Props) {
   const handleRespond = (action: "interested" | "passed" | "saved_later") => {
     if (!candidate) return;
     const cid = candidate.candidateId;
+    setRespondingAction(action);
     startTransition(async () => {
-      const res = await respondToCandidateAction({
-        candidateId: cid,
-        action,
-      });
+      try {
+        const res = await respondToCandidateAction({
+          candidateId: cid,
+          action,
+        });
 
-      if (res.ok) {
-        if (res.data.mutualMatch) {
-          setFeedback("❤️ Mutual Match! You both expressed interest. An introduction is open!");
-          fetchConnections();
-        } else if (action === "interested") {
-          setFeedback("Interest noted privately. If they also express interest, you'll be connected.");
-        } else if (action === "passed") {
-          setFeedback("Profile skipped.");
+        if (res.ok) {
+          if (res.data.mutualMatch) {
+            setFeedback("❤️ Mutual Match! You both expressed interest. An introduction is open!");
+            fetchConnections();
+          } else if (action === "interested") {
+            setFeedback("Interest noted privately. If they also express interest, you'll be connected.");
+          } else if (action === "passed") {
+            setFeedback("Profile skipped.");
+          }
+          fetchNextCandidate();
         }
-        fetchNextCandidate();
+      } finally {
+        setRespondingAction(null);
       }
     });
   };
@@ -474,7 +480,7 @@ export function MatchmakingHub({ initialStatus }: Props) {
                   className="py-3.5 px-4 rounded-2xl border border-rose-500/50 bg-gradient-to-r from-rose-500/30 to-amber-500/30 text-white font-bold text-xs uppercase tracking-wider hover:brightness-110 transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(244,63,94,0.25)] disabled:opacity-50"
                 >
                   <Heart className="w-4 h-4 text-rose-400" />
-                  Meet Them ❤️
+                  <span>{respondingAction === "interested" ? "Connecting…" : "Meet Them ❤️"}</span>
                 </button>
 
                 <button
@@ -484,7 +490,7 @@ export function MatchmakingHub({ initialStatus }: Props) {
                   className="py-3.5 px-4 rounded-2xl border border-purple-800/50 bg-purple-950/40 text-slate-300 font-bold text-xs uppercase tracking-wider hover:text-white hover:border-amber-500/40 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Clock className="w-4 h-4 text-amber-400" />
-                  Show Me Later
+                  <span>{respondingAction === "saved_later" ? "Saving…" : "Show Me Later"}</span>
                 </button>
 
                 <button
@@ -493,7 +499,7 @@ export function MatchmakingHub({ initialStatus }: Props) {
                   onClick={() => handleRespond("passed")}
                   className="py-3.5 px-4 rounded-2xl border border-slate-800 bg-slate-950/40 text-slate-400 font-bold text-xs uppercase tracking-wider hover:text-rose-300 hover:border-rose-900 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  Not For Me
+                  <span>{respondingAction === "passed" ? "Passing…" : "Not For Me"}</span>
                 </button>
               </div>
             </motion.div>
@@ -651,8 +657,9 @@ export function MatchmakingHub({ initialStatus }: Props) {
                 </p>
               </div>
               <button
+                disabled={pending}
                 onClick={handleTogglePause}
-                className={`py-2 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                className={`py-2 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50 ${
                   paused
                     ? "border border-amber-500/50 bg-amber-500 text-slate-950"
                     : "border border-amber-500/30 bg-amber-500/15 text-amber-200"
@@ -670,8 +677,9 @@ export function MatchmakingHub({ initialStatus }: Props) {
                 </p>
               </div>
               <button
+                disabled={pending}
                 onClick={() => handleConsent(false)}
-                className="py-2 px-4 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500 hover:text-white transition-all text-xs font-bold uppercase tracking-wider"
+                className="py-2 px-4 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500 hover:text-white transition-all text-xs font-bold uppercase tracking-wider disabled:opacity-50"
               >
                 Disable Matchmaking
               </button>
@@ -729,10 +737,11 @@ export function MatchmakingHub({ initialStatus }: Props) {
               <div className="pt-2 flex gap-3">
                 <button
                   type="button"
+                  disabled={pending}
                   onClick={handleReportAndBlock}
-                  className="flex-1 py-2.5 rounded-xl border border-rose-500 bg-rose-600 text-white font-bold text-xs uppercase tracking-wider hover:bg-rose-500 transition-all"
+                  className="flex-1 py-2.5 rounded-xl border border-rose-500 bg-rose-600 text-white font-bold text-xs uppercase tracking-wider hover:bg-rose-500 transition-all disabled:opacity-50"
                 >
-                  Confirm & Block
+                  {pending ? "Blocking…" : "Confirm & Block"}
                 </button>
                 <button
                   type="button"

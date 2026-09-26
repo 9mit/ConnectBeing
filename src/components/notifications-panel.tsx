@@ -105,11 +105,18 @@ export function NotificationsPanel({
     }
   }, [activeNotification]);
 
+  const [markingId, setMarkingId] = useState<string | null>(null);
+
   function handleMarkRead(id?: string) {
+    if (id) setMarkingId(id);
     startTransition(async () => {
-      const res = await markNotificationReadAction(id);
-      if (res.ok) {
-        await loadData();
+      try {
+        const res = await markNotificationReadAction(id);
+        if (res.ok) {
+          await loadData();
+        }
+      } finally {
+        if (id) setMarkingId(null);
       }
     });
   }
@@ -156,7 +163,7 @@ export function NotificationsPanel({
               className="btn-madlove-subtle px-4 py-2 text-xs flex items-center gap-1.5"
             >
               <CheckCheck className="w-3.5 h-3.5" />
-              <span>Mark All Read</span>
+              <span>{pending ? "Marking…" : "Mark All Read"}</span>
             </button>
           )}
 
@@ -261,12 +268,17 @@ export function NotificationsPanel({
                 {!item.read && (
                   <button
                     type="button"
+                    disabled={pending || markingId === item.id}
                     onClick={() => handleMarkRead(item.id)}
                     title="Mark as read"
                     aria-label="Mark notification as read"
-                    className="text-xs text-slate-400 hover:text-amber-300 p-1.5 rounded-lg border border-amber-500/20"
+                    className="text-xs text-slate-400 hover:text-amber-300 p-1.5 rounded-lg border border-amber-500/20 disabled:opacity-50"
                   >
-                    <Check className="w-3.5 h-3.5" />
+                    {markingId === item.id ? (
+                      <span className="w-3.5 h-3.5 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin block" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
                   </button>
                 )}
               </div>

@@ -108,13 +108,20 @@ export function TimelinePanel() {
     });
   }
 
+  const [unlockingId, setUnlockingId] = useState<string | null>(null);
+
   function handleUnlockCapsule(id: string) {
+    setUnlockingId(id);
     startTransition(async () => {
-      const res = await unlockTimeCapsuleAction(id);
-      if (res.ok) {
-        await loadData();
-      } else {
-        setError(res.error.message);
+      try {
+        const res = await unlockTimeCapsuleAction(id);
+        if (res.ok) {
+          await loadData();
+        } else {
+          setError(res.error.message);
+        }
+      } finally {
+        setUnlockingId(null);
       }
     });
   }
@@ -288,11 +295,12 @@ export function TimelinePanel() {
                     <div className="pt-2 border-t border-white/[0.05]">
                       <button
                         type="button"
+                        disabled={unlockingId === capsule.id}
                         onClick={() => handleUnlockCapsule(capsule.id)}
-                        className="w-full py-2 rounded-xl bg-white/10 text-xs font-semibold text-white hover:bg-white/20 transition-all flex items-center justify-center gap-1.5"
+                        className="w-full py-2 rounded-xl bg-white/10 text-xs font-semibold text-white hover:bg-white/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                       >
-                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                        <span>Unlock Capsule Now</span>
+                        <Sparkles className={`w-3.5 h-3.5 text-amber-300 ${unlockingId === capsule.id ? "animate-spin" : ""}`} />
+                        <span>{unlockingId === capsule.id ? "Unlocking…" : "Unlock Capsule Now"}</span>
                       </button>
                     </div>
                   )}

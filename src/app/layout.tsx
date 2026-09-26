@@ -1,7 +1,9 @@
+import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 
 import { PwaRegister } from "@/components/pwa-register";
+import { RouteProgressBar } from "@/components/route-progress-bar";
 import { Analytics } from "@vercel/analytics/next";
 
 import "./globals.css";
@@ -137,6 +139,9 @@ export default function RootLayout({
         suppressHydrationWarning
         className={`${plusJakartaSans.variable} ${outfit.variable} antialiased bg-[#020106] text-slate-100 min-h-screen selection:bg-amber-500/30 selection:text-amber-200 overflow-x-hidden`}
       >
+        <Suspense fallback={null}>
+          <RouteProgressBar />
+        </Suspense>
         <PwaRegister />
         {children}
         <Analytics />

@@ -31,6 +31,7 @@ export function PlayPanel({
   const [title, setTitle] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [completingId, setCompletingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function refresh() {
@@ -194,7 +195,7 @@ export function PlayPanel({
             disabled={pending}
             className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3 text-sm font-extrabold text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-60 transition-all shadow-[0_0_15px_rgba(212,175,55,0.3)]"
           >
-            Add Task
+            {pending ? "Adding…" : "Add Task"}
           </button>
         </form>
 
@@ -216,15 +217,21 @@ export function PlayPanel({
                 {!r.completed ? (
                   <button
                     type="button"
-                    className="text-xs font-bold uppercase tracking-wider text-amber-300 hover:text-amber-100 transition-colors"
-                    onClick={() =>
+                    disabled={completingId === r.id}
+                    className="text-xs font-bold uppercase tracking-wider text-amber-300 hover:text-amber-100 transition-colors disabled:opacity-50"
+                    onClick={() => {
+                      setCompletingId(r.id);
                       startTransition(async () => {
-                        await completeReminderAction({ id: r.id });
-                        refresh();
-                      })
-                    }
+                        try {
+                          await completeReminderAction({ id: r.id });
+                          refresh();
+                        } finally {
+                          setCompletingId(null);
+                        }
+                      });
+                    }}
                   >
-                    Done ✓
+                    {completingId === r.id ? "Completing…" : "Done ✓"}
                   </button>
                 ) : (
                   <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Completed</span>

@@ -30,6 +30,7 @@ import {
   CheckCircle,
   Radio,
   LogOut,
+  Loader2,
   X,
 } from "lucide-react";
 
@@ -270,6 +271,7 @@ export function AppShell({
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Close drawer and reset pending navigation state when route arrives
   useEffect(() => {
@@ -292,18 +294,6 @@ export function AppShell({
             ? "h-[100dvh] w-full overflow-hidden pb-0 bg-[#050608]" 
             : "min-h-screen pb-24 md:pb-10 bg-[#07080b]"
         } text-[#f7f6f2] flex flex-col font-sans overflow-x-hidden selection:bg-amber-400/20 selection:text-amber-100`}>
-          
-          {/* Instant Ambient Route Transition Glow Bar */}
-          {pendingPath !== null && pendingPath !== pathname && (
-            <div className="fixed top-0 left-0 right-0 h-[2.5px] z-50 overflow-hidden pointer-events-none">
-              <motion.div
-                initial={{ x: "-100%" }}
-                animate={{ x: "0%" }}
-                transition={{ duration: 0.35, ease: "easeOut" }}
-                className="h-full w-full bg-gradient-to-r from-amber-500 via-amber-300 to-rose-400 shadow-[0_0_10px_rgba(245,158,11,0.9)]"
-              />
-            </div>
-          )}
 
           {/* Subtle Ambient Background Gradient */}
           <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" aria-hidden>
@@ -405,14 +395,15 @@ export function AppShell({
                     </div>
                   ) : null}
 
-                  <form action="/api/auth/logout" method="POST" className="hidden lg:block">
+                  <form action="/api/auth/logout" method="POST" onSubmit={() => setIsLoggingOut(true)} className="hidden lg:block">
                     <button 
                       type="submit" 
-                      className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
+                      disabled={isLoggingOut}
+                      className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors disabled:opacity-50"
                       title="Sign out"
                       aria-label="Sign out"
                     >
-                      <LogOut className="w-4 h-4" />
+                      {isLoggingOut ? <Loader2 className="w-4 h-4 animate-spin text-amber-300" /> : <LogOut className="w-4 h-4" />}
                     </button>
                   </form>
                 </div>
@@ -543,13 +534,23 @@ export function AppShell({
 
                   {/* Drawer Footer Actions */}
                   <div className="border-t border-white/[0.08] pt-4 flex gap-3">
-                    <form action="/api/auth/logout" method="POST" className="w-full">
+                    <form action="/api/auth/logout" method="POST" onSubmit={() => setIsLoggingOut(true)} className="w-full">
                       <button
                         type="submit"
-                        className="w-full py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.02] text-xs font-medium text-zinc-300 hover:text-rose-200 hover:border-rose-400/30 hover:bg-rose-500/10 transition-all flex items-center justify-center gap-2"
+                        disabled={isLoggingOut}
+                        className="w-full py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.02] text-xs font-medium text-zinc-300 hover:text-rose-200 hover:border-rose-400/30 hover:bg-rose-500/10 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                       >
-                        <LogOut className="w-3.5 h-3.5" />
-                        <span>Sign Out</span>
+                        {isLoggingOut ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Signing Out…</span>
+                          </>
+                        ) : (
+                          <>
+                            <LogOut className="w-3.5 h-3.5" />
+                            <span>Sign Out</span>
+                          </>
+                        )}
                       </button>
                     </form>
                   </div>

@@ -115,7 +115,7 @@ export function VerifyPanel() {
             onClick={onReveal}
             className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-5 py-3 text-xs font-extrabold uppercase tracking-wider text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,175,55,0.35)] active:scale-[0.98]"
           >
-            Show this week’s code
+            {pending ? "Revealing…" : "Show this week’s code"}
           </button>
           {code ? (
             <p className="font-mono text-3xl font-extrabold tracking-[0.3em] text-amber-300 bg-purple-950/80 px-6 py-3.5 rounded-xl border border-amber-500/40 inline-block select-all shadow-[0_0_20px_rgba(212,175,55,0.25)]">
@@ -143,7 +143,7 @@ export function VerifyPanel() {
             disabled={pending || input.length !== 8}
             className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-5 py-3 text-xs font-extrabold uppercase tracking-wider text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,175,55,0.35)] active:scale-[0.98]"
           >
-            Verify
+            {pending ? "Verifying…" : "Verify"}
           </button>
         </form>
       ) : null}

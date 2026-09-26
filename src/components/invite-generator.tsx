@@ -18,6 +18,7 @@ export function InviteGenerator() {
   const [copied, setCopied] = useState(false);
   const [partnerOpened, setPartnerOpened] = useState(false);
   const [loadingActive, setLoadingActive] = useState(true);
+  const [entering, setEntering] = useState(false);
   const [partnerJoined, setPartnerJoined] = useState<{
     partnerName: string;
   } | null>(null);
@@ -152,13 +153,15 @@ export function InviteGenerator() {
         <div className="pt-2">
           <button
             type="button"
+            disabled={entering}
             onClick={() => {
+              setEntering(true);
               router.push("/dashboard");
               router.refresh();
             }}
-            className="w-full sm:w-auto py-4 px-9 rounded-2xl border border-amber-400/80 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-extrabold text-xs uppercase tracking-widest hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2.5 mx-auto shadow-[0_0_30px_rgba(212,175,55,0.4)]"
+            className="w-full sm:w-auto py-4 px-9 rounded-2xl border border-amber-400/80 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-extrabold text-xs uppercase tracking-widest hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2.5 mx-auto shadow-[0_0_30px_rgba(212,175,55,0.4)] disabled:opacity-75"
           >
-            <span>Enter Sanctuary With {partnerJoined.partnerName}</span>
+            <span>{entering ? "Entering Sanctuary…" : `Enter Sanctuary With ${partnerJoined.partnerName}`}</span>
             <Heart className="w-4 h-4 fill-current text-rose-800" />
           </button>
           <p className="text-[11px] text-slate-400 mt-3 font-medium animate-pulse">

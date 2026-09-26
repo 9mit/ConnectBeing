@@ -146,16 +146,16 @@ export function BillingPanel() {
             onClick={subscribe}
             className="rounded-xl btn-cta-primary px-6 py-3 text-xs font-bold text-black disabled:opacity-50 transition-all hover:scale-105"
           >
-            Send Optional Community Tip
+            {pending ? "Preparing Checkout…" : "Send Optional Community Tip"}
           </button>
         ) : (
           <button
             type="button"
             disabled={pending || data.cancelAtPeriodEnd}
             onClick={cancel}
-            className="rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-xs font-bold text-zinc-300 hover:bg-white/10 transition-colors active:scale-95"
+            className="rounded-xl border border-white/20 bg-white/5 px-6 py-3 text-xs font-bold text-zinc-300 hover:bg-white/10 transition-colors active:scale-95 disabled:opacity-50"
           >
-            Cancel recurring tip
+            {pending ? "Canceling…" : data.cancelAtPeriodEnd ? "Tip Ending at Period End" : "Cancel recurring tip"}
           </button>
         )}
       </div>

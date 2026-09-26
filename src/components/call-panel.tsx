@@ -514,11 +514,11 @@ export function CallPanel({
         <button
           type="button"
           onClick={() => void startCall()}
-          disabled={!subscribed}
+          disabled={!subscribed || status === "calling"}
           aria-label="Start video call"
           className="rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-4 sm:px-6 py-3.5 min-h-[46px] text-xs font-extrabold uppercase tracking-wider text-purple-950 hover:from-amber-300 hover:to-amber-500 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,175,55,0.35)] active:scale-[0.98] flex items-center justify-center gap-1.5"
         >
-          📞 Start Call
+          {status === "calling" ? "Calling…" : "📞 Start Call"}
         </button>
         <button
           type="button"
