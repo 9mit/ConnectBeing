@@ -16,6 +16,7 @@ export default function robots(): MetadataRoute.Robots {
           "/settings/",
           "/together/room/",
           "/invite/",
+          "/doodle/",
         ],
       },
     ],

@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Smile,
   Clock,
+  Palette,
 } from "lucide-react";
 
 import { SITE } from "@/content/site";
@@ -375,7 +376,7 @@ export function DashboardClient({ data }: DashboardProps) {
           </Link>
         </div>
 
-        <div className="grid gap-6 sm:grid-cols-2 items-stretch">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 items-stretch">
           {/* Companion Buddy (living expression, not a statistics card) */}
           <Link
             href="/pet"
@@ -395,6 +396,26 @@ export function DashboardClient({ data }: DashboardProps) {
               </div>
               <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
                 {getPetReactionText(petState, petName)}
+              </p>
+            </div>
+          </Link>
+
+          {/* Shared Sketchbook & Doodle */}
+          <Link
+            href="/doodle"
+            className="p-5 rounded-2xl bg-[#0e1015] border border-white/[0.06] hover:border-white/[0.14] transition-all flex items-center gap-4 group"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center shrink-0 text-xl group-hover:scale-105 transition-transform">
+              <Palette className="w-6 h-6 text-amber-200/80" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-medium text-[#f7f6f2]">
+                  Shared Canvas
+                </h3>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                Draw silly notes, sketches, and midnight doodles together.
               </p>
             </div>
           </Link>

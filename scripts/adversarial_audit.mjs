@@ -74,7 +74,7 @@ async function runAdversarialAudit() {
 
     // 4. Realtime Signaling Channel Scoping
     console.log("\n--- TEST 4: Realtime Channel Authorization Scoping ---");
-    const COUPLE_TOPIC = /^couple:([a-zA-Z0-9_-]+):(chat|call|location|presence|moods)$/;
+    const COUPLE_TOPIC = /^couple:([a-zA-Z0-9_-]+):(chat|call|location|presence|moods|doodle)$/;
     const ROOM_TOPIC = /^(?:room:([a-zA-Z0-9_-]+)(?::[a-zA-Z0-9_-]+)?|room-(?:signaling|chat|presence|reactions):([a-zA-Z0-9_-]+))$/;
 
     function authorizeTopic(topic, userCoupleId, authorizedSessions) {
@@ -93,11 +93,79 @@ async function runAdversarialAudit() {
     const coupleASessions = ["session_a1"];
     assert("Couple A can subscribe to couple:c_alpha_1111:chat", authorizeTopic("couple:c_alpha_1111:chat", coupleA, coupleASessions));
     assert("Couple A CANNOT subscribe to couple:c_bravo_2222:chat (Cross-Couple Leak Blocked)", !authorizeTopic("couple:c_bravo_2222:chat", coupleA, coupleASessions));
+    assert("Couple A can subscribe to couple:c_alpha_1111:doodle", authorizeTopic("couple:c_alpha_1111:doodle", coupleA, coupleASessions));
+    assert("Couple A CANNOT subscribe to couple:c_bravo_2222:doodle (Cross-Couple Leak Blocked)", !authorizeTopic("couple:c_bravo_2222:doodle", coupleA, coupleASessions));
     assert("Couple A can subscribe to their own room signaling room-signaling:session_a1", authorizeTopic("room-signaling:session_a1", coupleA, coupleASessions));
     assert("Couple A CANNOT subscribe to Couple B room signaling room-signaling:session_b1", !authorizeTopic("room-signaling:session_b1", coupleA, coupleASessions));
 
-    // 5. Verification Period Protection & Couple State Invariant
-    console.log("\n--- TEST 5: Active Couples and Verification Table Integrity ---");
+    // 5. Doodle Canvas Database Integrity & RLS Audit
+    console.log("\n--- TEST 5: Doodle Canvas Database Schema & RLS Audit ---");
+    const doodleTables = await sql`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_name = 'doodle_canvases';
+    `;
+    assert("Table doodle_canvases exists in PostgreSQL public schema", doodleTables.length > 0);
+
+    const doodleIndexes = await sql`
+      SELECT indexname, indexdef 
+      FROM pg_indexes 
+      WHERE tablename = 'doodle_canvases';
+    `;
+    const hasCoupleUnique = doodleIndexes.some(
+      (idx) => (idx.indexname === "doodle_canvases_couple_uidx" || idx.indexname.includes("couple_id")) && idx.indexdef.includes("UNIQUE")
+    );
+    assert("doodle_canvases enforces unique constraint on couple_id", hasCoupleUnique);
+
+    const doodlePolicies = await sql`
+      SELECT policyname, cmd 
+      FROM pg_policies 
+      WHERE tablename = 'doodle_canvases';
+    `;
+    const hasDoodlePolicy = doodlePolicies.some(
+      (p) => p.policyname === "doodle_canvases_select_couple"
+    );
+    assert("doodle_canvases Row Level Security policy doodle_canvases_select_couple exists", hasDoodlePolicy);
+
+    // 6. Doodle Adversarial Input & Validation Defense
+    console.log("\n--- TEST 6: Doodle Adversarial Input & Validation Defense ---");
+    const { doodleStrokeSchema, saveDoodleCanvasSchema, clearDoodleCanvasSchema } = await import("../src/lib/validations.js").catch(async () => {
+      // In case ESM loader runs typescript via tsx or dynamic
+      return await import("../src/lib/validations.ts");
+    });
+
+    const validStroke = {
+      id: "stroke_test_123",
+      userId: "u_test_1",
+      tool: "pen",
+      color: "#f7f6f2",
+      width: 6,
+      points: [{ x: 0.25, y: 0.5 }, { x: 0.3, y: 0.55 }],
+    };
+
+    assert("Valid stroke passes schema validation", doodleStrokeSchema.safeParse(validStroke).success);
+
+    // Adversarial tests
+    const attackCoords = { ...validStroke, points: [{ x: 1.5, y: 0.5 }] };
+    assert("Malformed point coordinate (x > 1) is rejected", !doodleStrokeSchema.safeParse(attackCoords).success);
+
+    const attackNegative = { ...validStroke, points: [{ x: -0.1, y: 0.5 }] };
+    assert("Malformed point coordinate (x < 0) is rejected", !doodleStrokeSchema.safeParse(attackNegative).success);
+
+    const attackColorInjection = { ...validStroke, color: "javascript:alert(1)" };
+    assert("Color injection / invalid color is rejected", !doodleStrokeSchema.safeParse(attackColorInjection).success);
+
+    const attackInvalidTool = { ...validStroke, tool: "spray_paint" };
+    assert("Unsupported tool is rejected", !doodleStrokeSchema.safeParse(attackInvalidTool).success);
+
+    const attackHugeWidth = { ...validStroke, width: 9999 };
+    assert("Excessive stroke width is rejected", !doodleStrokeSchema.safeParse(attackHugeWidth).success);
+
+    const attackClearUnconfirmed = { confirmed: false };
+    assert("Unconfirmed clear payload is rejected", !clearDoodleCanvasSchema.safeParse(attackClearUnconfirmed).success);
+
+    // 7. Verification Period Protection & Couple State Invariant
+    console.log("\n--- TEST 7: Active Couples and Verification Table Integrity ---");
     const activeCouples = await sql`
       SELECT id, user_a_id, user_b_id, status 
       FROM couples 

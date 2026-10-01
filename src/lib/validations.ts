@@ -153,3 +153,38 @@ export const watchEventSchema = z.object({
   eventType: z.enum(["play", "pause", "seek"]),
   playbackPosition: z.number().min(0), // Can be float for precise sync
 });
+
+// ---------------------------------------------------------------------------
+// Doodle schemas
+// ---------------------------------------------------------------------------
+
+const HEX_COLOR_REGEX = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+export const doodlePointSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+});
+
+export const doodleStrokeSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  userId: z.string().trim().min(1).max(64),
+  tool: z.enum(["pen", "highlighter", "eraser"]),
+  color: z
+    .string()
+    .trim()
+    .regex(HEX_COLOR_REGEX, "Color must be a valid hex string (e.g. #f7f6f2)"),
+  width: z.number().min(1).max(100),
+  points: z.array(doodlePointSchema).min(1).max(5000),
+  createdAt: z.number().optional(),
+});
+
+export const saveDoodleCanvasSchema = z.object({
+  strokes: z.array(doodleStrokeSchema).max(2000),
+  snapshot: z.string().max(1000000).optional().nullable(),
+});
+
+export const clearDoodleCanvasSchema = z.object({
+  confirmed: z.literal(true),
+});
+
+

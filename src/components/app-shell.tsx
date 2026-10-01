@@ -24,6 +24,7 @@ import {
   Trophy,
   Phone,
   MapPin,
+  Palette,
   Settings,
   Lock,
   Shield,
@@ -62,6 +63,7 @@ const sanctuaryMenuGroups = [
   {
     title: "Shared Space & Tools",
     links: [
+      { href: "/doodle", label: "Doodle Canvas", icon: Palette },
       { href: "/call", label: "Voice Room", icon: Phone },
       { href: "/location", label: "Location", icon: MapPin },
       { href: "/search", label: "Archive Search", icon: Search },

@@ -9,7 +9,7 @@ import { requireActiveCouple } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 
 const COUPLE_TOPIC =
-  /^couple:([a-zA-Z0-9_-]+):(chat|call|location|presence|moods)$/;
+  /^couple:([a-zA-Z0-9_-]+):(chat|call|location|presence|moods|doodle)$/;
 const ROOM_TOPIC =
   /^(?:room:([a-zA-Z0-9_-]+)(?::[a-zA-Z0-9_-]+)?|room-(?:signaling|chat|presence|reactions):([a-zA-Z0-9_-]+))$/;
 

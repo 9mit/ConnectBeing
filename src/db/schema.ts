@@ -1121,8 +1121,57 @@ export const matchmakingReports = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// doodle_canvases — lightweight persistent shared sketchbook for couples
+// ---------------------------------------------------------------------------
+
+export interface DoodlePoint {
+  x: number;
+  y: number;
+}
+
+export interface DoodleStroke {
+  id: string;
+  userId: string;
+  tool: "pen" | "highlighter" | "eraser";
+  color: string;
+  width: number;
+  points: DoodlePoint[];
+  createdAt?: number;
+}
+
+export const doodleCanvases = pgTable(
+  "doodle_canvases",
+  {
+    id: text("id").primaryKey(),
+    coupleId: text("couple_id")
+      .notNull()
+      .unique()
+      .references(() => couples.id, { onDelete: "cascade" }),
+    strokes: jsonb("strokes")
+      .$type<DoodleStroke[]>()
+      .notNull()
+      .default([]),
+    snapshot: text("snapshot"),
+    version: integer("version").notNull().default(1),
+    lastDrawnById: text("last_drawn_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("doodle_canvases_couple_uidx").on(table.coupleId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
+
 
 export const usersRelations = relations(users, ({ one, many }) => ({
   couple: one(couples, {
@@ -1212,6 +1261,21 @@ export const couplesRelations = relations(couples, ({ one, many }) => ({
   aiInsight: one(aiInsights, {
     fields: [couples.id],
     references: [aiInsights.coupleId],
+  }),
+  doodleCanvas: one(doodleCanvases, {
+    fields: [couples.id],
+    references: [doodleCanvases.coupleId],
+  }),
+}));
+
+export const doodleCanvasesRelations = relations(doodleCanvases, ({ one }) => ({
+  couple: one(couples, {
+    fields: [doodleCanvases.coupleId],
+    references: [couples.id],
+  }),
+  lastDrawnBy: one(users, {
+    fields: [doodleCanvases.lastDrawnById],
+    references: [users.id],
   }),
 }));
 
@@ -1508,4 +1572,5 @@ export type NewMatchmakingReport = typeof matchmakingReports.$inferInsert;
 export type CoupleMember = typeof coupleMembers.$inferSelect;
 export type NewCoupleMember = typeof coupleMembers.$inferInsert;
 
-
+export type DoodleCanvas = typeof doodleCanvases.$inferSelect;
+export type NewDoodleCanvas = typeof doodleCanvases.$inferInsert;
