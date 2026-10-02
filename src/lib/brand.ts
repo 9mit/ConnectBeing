@@ -13,7 +13,10 @@
  */
 
 const RAW_BRAND_NAME = process.env.NEXT_PUBLIC_BRAND_NAME?.trim() || "SoulNest";
-const RAW_APP_URL = process.env.NEXT_PUBLIC_APP_URL?.trim() || "https://soulnest.app";
+const RAW_APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+  process.env.APP_URL?.trim() ||
+  "https://soulnest.app";
 
 export const BRAND = {
   /** Canonical display name */
