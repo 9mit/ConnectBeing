@@ -36,6 +36,7 @@ import {
   Bookmark,
   CheckCircle2,
   LogOut,
+  Activity,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
@@ -59,6 +60,7 @@ import {
 import {
   useTheaterWebRTC,
 } from "@/features/together/webrtc/useTheaterWebRTC";
+import { WebRTCDiagnosticInspector } from "@/components/together/WebRTCDiagnosticInspector";
 
 type Reaction = { id: string; emoji: string; x: number; y: number };
 type WatchMsg = {
@@ -103,7 +105,11 @@ export function VirtualRoom({
   const cinemaContainerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteMovieAudioRef = useRef<HTMLAudioElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Diagnostic modal state
+  const [showDiagModal, setShowDiagModal] = useState(false);
 
   // Device & browser capabilities
   const deviceCaps = useMemo(() => getDeviceCapabilities(), []);
@@ -129,6 +135,8 @@ export function VirtualRoom({
     partnerPresence,
     streamSourceType,
     errorMessage,
+    webrtcDiagStats,
+    partnerDiagStats,
     updateState,
     startScreenShare,
     stopScreenShare,
@@ -250,15 +258,15 @@ export function VirtualRoom({
     }
   }, [localStream]);
 
-  // Attach remote media stream to remote video element (Viewer) with robust autoplay mitigation
-  // IMPORTANT: This effect depends ONLY on remoteStream to avoid re-running on mute toggles.
-  // Mute state is synced in a separate effect below to prevent mobile autoplay rejection loops.
+  // Attach remote media stream to remote video element (Viewer) with robust autoplay mitigation.
+  // Video element is kept PERMANENTLY muted so that mobile Safari and Android Chrome NEVER block
+  // video rendering or pause the stream due to audio policies.
   useEffect(() => {
     const videoEl = remoteVideoRef.current;
     if (!videoEl) return;
 
     if (remoteStream) {
-      // 1. Critical for mobile Safari & Android: configure attributes BEFORE assigning srcObject
+      // Configure critical attributes BEFORE assigning srcObject
       videoEl.playsInline = true;
       videoEl.defaultMuted = true;
       videoEl.muted = true;
@@ -282,11 +290,10 @@ export function VirtualRoom({
       const tryPlay = async () => {
         try {
           videoEl.muted = true;
-          setIsAutoplayMuted(true);
           await videoEl.play();
           updateRenderingState();
         } catch (err) {
-          console.warn("[VirtualRoom] Autoplay play() attempt:", err);
+          console.warn("[VirtualRoom] Video play() attempt:", err);
           setIsVideoActuallyPlaying(false);
           setIsMediaRendering(false);
         }
@@ -329,11 +336,26 @@ export function VirtualRoom({
       videoEl.addEventListener("resize", onResize);
       videoEl.addEventListener("timeupdate", updateRenderingState);
 
+      // Fast detection via requestVideoFrameCallback on supported mobile browsers
+      let rVfcId: number | null = null;
+      if ("requestVideoFrameCallback" in videoEl) {
+        const onFrame = () => {
+          updateRenderingState();
+          if (videoEl && !videoEl.paused) {
+            rVfcId = (videoEl as any).requestVideoFrameCallback(onFrame);
+          }
+        };
+        rVfcId = (videoEl as any).requestVideoFrameCallback(onFrame);
+      }
+
       void tryPlay();
 
       return () => {
         if (newVideoTrack) {
           newVideoTrack.removeEventListener("unmute", onTrackUnmute);
+        }
+        if (rVfcId !== null && "cancelVideoFrameCallback" in videoEl) {
+          (videoEl as any).cancelVideoFrameCallback(rVfcId);
         }
         videoEl.removeEventListener("playing", onPlaying);
         videoEl.removeEventListener("pause", onPause);
@@ -345,33 +367,56 @@ export function VirtualRoom({
       };
     } else {
       videoEl.srcObject = null;
-      setIsAutoplayMuted(false);
       setIsVideoActuallyPlaying(false);
       setIsMediaRendering(false);
     }
   }, [remoteStream]);
 
-  // Sync video mute state separately from stream attachment to avoid
-  // re-triggering play() outside user gesture on mobile browsers.
+  // Dedicated movie audio element for remote stream.
+  // Mobile browsers permit muted video autoplay unconditionally, but restrict unmuted audio autoplay.
+  // By permanently keeping remoteVideoRef muted and directing audio tracks to remoteMovieAudioRef,
+  // video rendering is never blocked, paused, or reset by audio permission state changes.
   useEffect(() => {
-    const videoEl = remoteVideoRef.current;
-    if (!videoEl || !remoteStream) return;
-    videoEl.muted = isVideoMuted || isAutoplayMuted;
-  }, [isVideoMuted, isAutoplayMuted, remoteStream]);
+    const audioEl = remoteMovieAudioRef.current;
+    if (!audioEl || !remoteStream) return;
+
+    if (audioEl.srcObject !== remoteStream) {
+      audioEl.srcObject = remoteStream;
+    }
+
+    const hasAudio = remoteStream.getAudioTracks().length > 0;
+    if (hasAudio) {
+      audioEl.play().then(() => {
+        setIsAutoplayMuted(false);
+      }).catch((err) => {
+        console.log("[VirtualRoom] Movie audio autoplay deferred pending gesture:", err?.name);
+        setIsAutoplayMuted(true);
+      });
+    } else {
+      setIsAutoplayMuted(false);
+    }
+  }, [remoteStream]);
+
+  // Sync mute state to remoteMovieAudioRef (leaving remoteVideoRef permanently muted)
+  useEffect(() => {
+    const audioEl = remoteMovieAudioRef.current;
+    if (!audioEl) return;
+    audioEl.muted = isVideoMuted || isAutoplayMuted;
+  }, [isVideoMuted, isAutoplayMuted]);
 
   const handleUnmuteRemote = useCallback(() => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.muted = false;
+    const audioEl = remoteMovieAudioRef.current;
+    if (audioEl) {
+      audioEl.muted = false;
       setIsAutoplayMuted(false);
       setIsVideoMuted(false);
-      void remoteVideoRef.current.play().then(() => {
-        if (remoteVideoRef.current && remoteVideoRef.current.videoWidth > 0) {
-          setIsMediaRendering(true);
-        }
-        setIsVideoActuallyPlaying(true);
-      }).catch((err) => {
-        console.warn("[VirtualRoom] User gesture unmute failed:", err);
+      void audioEl.play().catch((err) => {
+        console.warn("[VirtualRoom] User gesture movie audio unmute failed:", err);
       });
+    }
+    // Verify remote video is playing smoothly
+    if (remoteVideoRef.current && remoteVideoRef.current.paused) {
+      void remoteVideoRef.current.play().catch(() => {});
     }
   }, []);
 
@@ -1114,6 +1159,8 @@ export function VirtualRoom({
     >
       {/* Hidden audio element for remote partner voice call */}
       <audio ref={remoteVoiceAudioRef} autoPlay playsInline />
+      {/* Dedicated decoupled audio element for remote movie stream */}
+      <audio ref={remoteMovieAudioRef} autoPlay playsInline className="hidden" />
 
       {/* TOP CINEMA HEADER (Rendered in regular/portrait view; in OTT Fullscreen, the floating auto-hiding HUD handles header controls) */}
       {!isCinemaFullscreen && (
@@ -1165,6 +1212,30 @@ export function VirtualRoom({
                   <Film size={10} /> Cinema
                 </span>
               )}
+
+              {/* WebRTC Diagnostics Chip */}
+              <button
+                type="button"
+                onClick={() => setShowDiagModal(true)}
+                className={`inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full border transition-all ${
+                  webrtcDiagStats?.failureMatrixCase === "HEALTHY_STREAMING"
+                    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20"
+                    : webrtcDiagStats?.failureMatrixCase?.startsWith("CASE_")
+                    ? "text-rose-300 bg-rose-500/20 border-rose-500/40 animate-pulse hover:bg-rose-500/30"
+                    : "text-zinc-400 bg-white/[0.04] border-white/[0.08] hover:text-white"
+                }`}
+                title="Open WebRTC Diagnostics Inspector"
+                aria-label="Open WebRTC Diagnostics Inspector"
+              >
+                <Activity size={10} className={webrtcDiagStats?.failureMatrixCase === "HEALTHY_STREAMING" ? "text-emerald-400" : "text-amber-400"} />
+                <span>
+                  {webrtcDiagStats?.failureMatrixCase === "HEALTHY_STREAMING"
+                    ? `${isHost ? (webrtcDiagStats?.outboundVideo?.fps || 0) : (webrtcDiagStats?.inboundVideo?.fps || 0)} fps`
+                    : webrtcDiagStats?.failureMatrixCase === "CONNECTING"
+                    ? "Connecting"
+                    : webrtcDiagStats?.failureMatrixCase?.replace("CASE_", "") || "Diag"}
+                </span>
+              </button>
             </div>
           </div>
 
@@ -1479,6 +1550,20 @@ export function VirtualRoom({
                       <Lock size={16} />
                     </button>
 
+                    {/* WebRTC Diagnostics Button in Cinema HUD */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowDiagModal(true);
+                      }}
+                      className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-300 hover:text-white transition-colors"
+                      title="Open WebRTC Diagnostics Inspector"
+                      aria-label="Open WebRTC Diagnostics Inspector"
+                    >
+                      <Activity size={16} />
+                    </button>
+
                     {/* Voice Call Mic Toggle */}
                     {voiceActive && (
                       <button
@@ -1780,6 +1865,12 @@ export function VirtualRoom({
                       console.warn("[VirtualRoom] Manual play error:", err);
                     }
                   }
+                  if (remoteMovieAudioRef.current) {
+                    remoteMovieAudioRef.current.muted = false;
+                    void remoteMovieAudioRef.current.play().then(() => {
+                      setIsAutoplayMuted(false);
+                    }).catch(() => {});
+                  }
                 }}
                 className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm cursor-pointer p-6 text-center select-none"
               >
@@ -1795,6 +1886,18 @@ export function VirtualRoom({
                 <span className="text-[10px] text-zinc-400 mt-2 max-w-xs">
                   Mobile browsers require one screen tap to initiate streaming video playback
                 </span>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowDiagModal(true);
+                  }}
+                  className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono text-zinc-300 bg-white/10 hover:bg-white/20 border border-white/20 transition-all pointer-events-auto"
+                >
+                  <Activity size={12} className="text-amber-400" />
+                  <span>Inspect WebRTC Diagnostics</span>
+                </button>
               </div>
             )}
 
@@ -3003,6 +3106,16 @@ export function VirtualRoom({
           </div>
         )}
       </AnimatePresence>
+
+      {/* WebRTC Media Pipeline Diagnostics Modal */}
+      <WebRTCDiagnosticInspector
+        isOpen={showDiagModal}
+        onClose={() => setShowDiagModal(false)}
+        localDiag={webrtcDiagStats}
+        partnerDiag={partnerDiagStats}
+        onRefreshStream={sendViewerReady}
+        isHost={isHost}
+      />
       </div>
     </div>
   );

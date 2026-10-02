@@ -20,6 +20,89 @@ export type TheaterRoomState =
   | "FALLBACK_MODE"
   | "ENDED";
 
+export type FailureMatrixCase =
+  | "CASE_A_TRANSPORT_FAILURE"
+  | "CASE_B_CODEC_DECODE_FAILURE"
+  | "CASE_C_RENDERING_OR_DRM_BLACK"
+  | "CASE_D_SOURCE_CAPTURE_FAILURE"
+  | "CASE_E_NEGOTIATION_FAILURE"
+  | "CONNECTING"
+  | "HEALTHY_STREAMING"
+  | "IDLE";
+
+export interface WebRTCDiagnosticData {
+  timestamp: number;
+  role: "host" | "viewer";
+  pcId: number;
+  connectionState: RTCPeerConnectionState | "none";
+  iceConnectionState: RTCIceConnectionState | "none";
+  iceGatheringState: RTCIceGatheringState | "none";
+  signalingState: RTCSignalingState | "none";
+  failureMatrixCase: FailureMatrixCase;
+  failureMatrixSummary: string;
+  localVideoTrack?: {
+    id: string;
+    readyState: MediaStreamTrackState;
+    enabled: boolean;
+    muted: boolean;
+    settings?: MediaTrackSettings;
+  } | null;
+  remoteVideoTrack?: {
+    id: string;
+    readyState: MediaStreamTrackState;
+    enabled: boolean;
+    muted: boolean;
+  } | null;
+  outboundVideo?: {
+    bytesSent: number;
+    packetsSent: number;
+    framesEncoded: number;
+    keyFramesEncoded?: number;
+    frameWidth?: number;
+    frameHeight?: number;
+    fps?: number;
+    bitrateKbps?: number;
+  };
+  inboundVideo?: {
+    bytesReceived: number;
+    packetsReceived: number;
+    framesReceived: number;
+    framesDecoded: number;
+    framesDropped: number;
+    frameWidth?: number;
+    frameHeight?: number;
+    fps?: number;
+    bitrateKbps?: number;
+  };
+  ice: {
+    candidatesGathered: { host: number; srflx: number; relay: number };
+    selectedPair?: {
+      state: string;
+      localType: string;
+      remoteType: string;
+      localAddress: string;
+      remoteAddress: string;
+      currentRoundTripTime?: number;
+      bytesSent: number;
+      bytesReceived: number;
+      relayActive: boolean;
+    } | null;
+  };
+  negotiatedCodec?: {
+    mimeType?: string;
+    payloadType?: number;
+    sdpFmtpLine?: string;
+  } | null;
+  videoElement?: {
+    videoWidth: number;
+    videoHeight: number;
+    readyState: number;
+    paused: boolean;
+    muted: boolean;
+    currentTime: number;
+  } | null;
+}
+
 export interface TheaterWebRTCProps {
   sessionId: string;
   userId: string;
@@ -66,8 +149,7 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 
 /**
  * Reorders video payload types in SDP so mobile-friendly codecs (H.264 Baseline & VP8)
- * are listed ahead of VP9/AV1. This prevents iOS Safari and Android hardware decoders
- * from stalling or failing silently when PC Chrome negotiates high-profile VP9.
+ * are listed ahead of VP9/AV1, while strictly preserving RFC 4588 RTX associations.
  * Note: Only apply to OFFER sdp. Do NOT munge answer sdp per RFC 8829 §5.4.
  */
 function prioritizeCodecsInSdp(sdp: string): string {
@@ -106,6 +188,17 @@ function prioritizeCodecsInSdp(sdp: string): string {
     const prefix = mTokens.slice(0, 3);
     const payloadTypes = mTokens.slice(3);
 
+    // Map each primary codec to its RTX payload type (RFC 4588 apt=<primary-pt>)
+    const rtxForPrimary = new Map<string, string>();
+    const isRtxPt = new Set<string>();
+    fmtpMap.forEach((fmtp, pt) => {
+      const match = fmtp.match(/apt=(\d+)/);
+      if (match && rtpMap.get(pt) === "RTX") {
+        rtxForPrimary.set(match[1], pt);
+        isRtxPt.add(pt);
+      }
+    });
+
     const getScore = (pt: string): number => {
       const codec = rtpMap.get(pt) || "";
       const fmtp = fmtpMap.get(pt) || "";
@@ -131,8 +224,28 @@ function prioritizeCodecsInSdp(sdp: string): string {
       return 10;
     };
 
-    const sortedPayloads = [...payloadTypes].sort((a, b) => getScore(b) - getScore(a));
-    lines[videoMediaLineIndex] = `${prefix.join(" ")} ${sortedPayloads.join(" ")}`;
+    // Filter out RTX payload types when sorting primary codecs
+    const primaryPayloads = payloadTypes.filter((pt) => !isRtxPt.has(pt));
+    primaryPayloads.sort((a, b) => getScore(b) - getScore(a));
+
+    // Reconstruct list keeping each primary codec immediately followed by its RTX codec
+    const finalPayloads: string[] = [];
+    for (const pt of primaryPayloads) {
+      finalPayloads.push(pt);
+      const rtxPt = rtxForPrimary.get(pt);
+      if (rtxPt && payloadTypes.includes(rtxPt)) {
+        finalPayloads.push(rtxPt);
+      }
+    }
+
+    // Append any leftover unmapped payload types
+    for (const pt of payloadTypes) {
+      if (!finalPayloads.includes(pt)) {
+        finalPayloads.push(pt);
+      }
+    }
+
+    lines[videoMediaLineIndex] = `${prefix.join(" ")} ${finalPayloads.join(" ")}`;
     return isCrlf ? lines.join("\r\n") : lines.join("\n");
   } catch (err) {
     console.warn("[WebRTC] SDP codec prioritization fallback:", err);
@@ -142,6 +255,7 @@ function prioritizeCodecsInSdp(sdp: string): string {
 
 /**
  * Configure RTCRtpTransceiver codec preferences API (modern WebRTC standard)
+ * Preserves secondary codecs (RTX/RED/FEC) without breaking associations.
  */
 function prioritizeMobileSafeCodecs(transceiver: RTCRtpTransceiver) {
   if (
@@ -159,8 +273,22 @@ function prioritizeMobileSafeCodecs(transceiver: RTCRtpTransceiver) {
       return;
     }
 
-    const codecs = [...capabilities.codecs];
-    codecs.sort((a, b) => {
+    const primaryCodecs: any[] = [];
+    const rtxCodecs: any[] = [];
+    const otherCodecs: any[] = [];
+
+    for (const c of capabilities.codecs) {
+      const mime = (c.mimeType || "").toLowerCase();
+      if (mime === "video/rtx") {
+        rtxCodecs.push(c);
+      } else if (mime === "video/red" || mime === "video/ulpfec") {
+        otherCodecs.push(c);
+      } else {
+        primaryCodecs.push(c);
+      }
+    }
+
+    primaryCodecs.sort((a, b) => {
       const aMime = (a.mimeType || "").toLowerCase();
       const bMime = (b.mimeType || "").toLowerCase();
       const aIsH264 = aMime === "video/h264";
@@ -186,7 +314,8 @@ function prioritizeMobileSafeCodecs(transceiver: RTCRtpTransceiver) {
       return 0;
     });
 
-    transceiver.setCodecPreferences(codecs);
+    const orderedCodecs = [...primaryCodecs, ...rtxCodecs, ...otherCodecs];
+    transceiver.setCodecPreferences(orderedCodecs);
   } catch (e) {
     console.warn("[WebRTC] setCodecPreferences notice:", e);
   }
@@ -216,7 +345,14 @@ export function useTheaterWebRTC({
   const [streamSourceType, setStreamSourceType] = useState<"tab" | "window" | "screen" | "none">("none");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Diagnostic states
+  const [webrtcDiagStats, setWebrtcDiagStats] = useState<WebRTCDiagnosticData | null>(null);
+  const [partnerDiagStats, setPartnerDiagStats] = useState<WebRTCDiagnosticData | null>(null);
+  const [, setRemoteTrackRevision] = useState(0);
+
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const pcCountRef = useRef(0);
+  const currentPcIdRef = useRef(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const isSubscribedRef = useRef(false);
   const pendingSignalsRef = useRef<Array<{ event: string; payload: Record<string, unknown> }>>([]);
@@ -234,6 +370,26 @@ export function useTheaterWebRTC({
   const remoteVoiceStreamIdRef = useRef<string | null>(null);
   const streamSourceTypeRef = useRef<"tab" | "window" | "screen" | "none">(streamSourceType);
   streamSourceTypeRef.current = streamSourceType;
+
+  const gatheredCandidatesRef = useRef<{ host: number; srflx: number; relay: number }>({
+    host: 0,
+    srflx: 0,
+    relay: 0,
+  });
+
+  const prevStatsRef = useRef<{
+    timestamp: number;
+    bytesSent: number;
+    bytesReceived: number;
+    framesEncoded: number;
+    framesDecoded: number;
+  }>({
+    timestamp: Date.now(),
+    bytesSent: 0,
+    bytesReceived: 0,
+    framesEncoded: 0,
+    framesDecoded: 0,
+  });
 
   const renegotiateRef = useRef<(id?: string) => Promise<void>>();
   const sendViewerReadyRef = useRef<() => void>();
@@ -303,6 +459,7 @@ export function useTheaterWebRTC({
 
     if (pcRef.current) {
       try {
+        console.log(`[WebRTC PC #${currentPcIdRef.current}] Closing previous RTCPeerConnection cleanly`);
         pcRef.current.onicecandidate = null;
         pcRef.current.ontrack = null;
         pcRef.current.onconnectionstatechange = null;
@@ -313,11 +470,20 @@ export function useTheaterWebRTC({
       pcRef.current = null;
     }
 
+    const pcId = ++pcCountRef.current;
+    currentPcIdRef.current = pcId;
+    gatheredCandidatesRef.current = { host: 0, srflx: 0, relay: 0 };
+    console.log(`[WebRTC PC #${pcId}] Initialized fresh RTCPeerConnection (role=${isHost ? "HOST" : "VIEWER"}, forceFresh=${forceFresh})`);
+
     // Clear stale remote media state so dead tracks from old PC don't contaminate new streams
     if (forceFresh) {
+      if (remoteStreamRef.current) {
+        remoteStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
       remoteStreamRef.current = null;
       remoteMovieStreamIdRef.current = null;
       remoteVoiceStreamIdRef.current = null;
+      setRemoteStream(null);
     }
 
     const pc = new RTCPeerConnection({
@@ -327,14 +493,15 @@ export function useTheaterWebRTC({
     });
     pcRef.current = pc;
 
-    // Viewer: DO NOT call pc.addTransceiver() proactively!
-    // Per W3C WebRTC 1.0 Spec §5.1.1, transceivers created proactively with addTransceiver
-    // DO NOT fire ontrack when setRemoteDescription runs!
-    // Letting setRemoteDescription(offer) instantiate transceivers guarantees pc.ontrack
-    // fires reliably on both mobile WebKit (Safari) and Chromium.
-
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
+        const cType = ev.candidate.type;
+        if (cType === "host") gatheredCandidatesRef.current.host++;
+        else if (cType === "srflx") gatheredCandidatesRef.current.srflx++;
+        else if (cType === "relay") gatheredCandidatesRef.current.relay++;
+
+        console.log(`[WebRTC PC #${pcId} ICE] Candidate gathered (${cType}):`, ev.candidate.candidate);
+
         sendSignal("theater:ice-candidate", {
           candidate: ev.candidate.toJSON(),
           offerId: activeOfferIdRef.current,
@@ -347,8 +514,7 @@ export function useTheaterWebRTC({
       const associatedStream = ev.streams[0];
       const streamId = associatedStream?.id;
 
-      // === MANDATORY DIAGNOSTIC: ontrack event details ===
-      console.log("[WebRTC] ontrack fired:", {
+      console.log(`[WebRTC PC #${pcId}] ontrack fired:`, {
         kind: track.kind,
         trackId: track.id,
         readyState: track.readyState,
@@ -374,16 +540,17 @@ export function useTheaterWebRTC({
           rStream.addTrack(track);
         }
 
-        // Always create a new MediaStream instance so React state updates reliably across renders
-        setRemoteStream(new MediaStream(rStream.getTracks()));
+        // CRITICAL: Stable MediaStream identity!
+        // Do NOT create new MediaStream instances on every packet or onunmute.
+        // A single stable MediaStream reference prevents mobile hardware decoders
+        // from resetting and staying black.
+        setRemoteStream(rStream);
         updateState("LIVE");
 
         track.onunmute = () => {
-          console.log("[WebRTC] Video track unmuted (media packets flowing):", track.id);
+          console.log(`[WebRTC PC #${pcId}] Video track unmuted (media packets flowing):`, track.id);
           updateState("LIVE");
-          if (remoteStreamRef.current) {
-            setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
-          }
+          setRemoteTrackRevision((c) => c + 1);
         };
 
         track.onended = () => {
@@ -395,11 +562,10 @@ export function useTheaterWebRTC({
             setRemoteStream(null);
             updateState("STREAM_ENDED");
           } else {
-            setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+            setRemoteTrackRevision((c) => c + 1);
           }
         };
       } else if (track.kind === "audio") {
-        // Disambiguate movie tab audio vs voice microphone audio
         const isMovieAudio =
           (remoteMovieStreamIdRef.current && streamId === remoteMovieStreamIdRef.current) ||
           (associatedStream && associatedStream.getVideoTracks().length > 0) ||
@@ -422,112 +588,23 @@ export function useTheaterWebRTC({
           if (!rStream.getAudioTracks().some((t) => t.id === track.id)) {
             rStream.addTrack(track);
           }
-          setRemoteStream(new MediaStream(rStream.getTracks()));
+          setRemoteStream(rStream);
+          setRemoteTrackRevision((c) => c + 1);
         }
       }
     };
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
-      // === MANDATORY DIAGNOSTIC: connection state change ===
-      console.log("[WebRTC] connectionStateChange:", {
+      console.log(`[WebRTC PC #${pcId}] connectionStateChange:`, {
         connectionState: state,
         iceConnectionState: pc.iceConnectionState,
         iceGatheringState: pc.iceGatheringState,
         signalingState: pc.signalingState,
         senderCount: pc.getSenders().length,
         receiverCount: pc.getReceivers().length,
-        videoSenderTrack: pc.getSenders().find(s => s.track?.kind === "video")?.track
-          ? { readyState: pc.getSenders().find(s => s.track?.kind === "video")!.track!.readyState, enabled: pc.getSenders().find(s => s.track?.kind === "video")!.track!.enabled }
-          : null,
-        remoteVideoTracks: remoteStreamRef.current?.getVideoTracks().map(t => ({ id: t.id, readyState: t.readyState, enabled: t.enabled })) ?? [],
         isHost,
       });
-
-      // Expose diagnostic function on window for DevTools access
-      if (typeof window !== "undefined") {
-        (window as any).__WEBRTC_DIAG = async () => {
-          const currentPc = pcRef.current || pc;
-          const stats: Record<string, any> = {
-            connectionState: currentPc.connectionState,
-            iceConnectionState: currentPc.iceConnectionState,
-            signalingState: currentPc.signalingState,
-            senders: currentPc.getSenders().map(s => ({
-              kind: s.track?.kind,
-              readyState: s.track?.readyState,
-              enabled: s.track?.enabled,
-              id: s.track?.id,
-              settings: s.track?.getSettings(),
-            })),
-            receivers: currentPc.getReceivers().map(r => ({
-              kind: r.track?.kind,
-              readyState: r.track?.readyState,
-              enabled: r.track?.enabled,
-              id: r.track?.id,
-            })),
-            localStream: localStreamRef.current ? {
-              videoTracks: localStreamRef.current.getVideoTracks().map(t => ({ readyState: t.readyState, enabled: t.enabled, settings: t.getSettings() })),
-              audioTracks: localStreamRef.current.getAudioTracks().length,
-            } : null,
-            remoteStream: remoteStreamRef.current ? {
-              videoTracks: remoteStreamRef.current.getVideoTracks().map(t => ({ id: t.id, readyState: t.readyState, enabled: t.enabled, muted: t.muted })),
-              audioTracks: remoteStreamRef.current.getAudioTracks().length,
-            } : null,
-            iceServers: iceServersRef.current.map(s => ({ urls: s.urls, hasCredential: !!s.credential })),
-          };
-
-          // Collect RTP stats
-          const rtpStats = await currentPc.getStats();
-          const rtp: Record<string, any>[] = [];
-          const ice: Record<string, any>[] = [];
-          rtpStats.forEach((report: any) => {
-            if (report.type === "outbound-rtp" && report.kind === "video") {
-              rtp.push({ direction: "outbound-video", bytesSent: report.bytesSent, packetsSent: report.packetsSent, framesEncoded: report.framesEncoded, keyFramesEncoded: report.keyFramesEncoded, frameWidth: report.frameWidth, frameHeight: report.frameHeight, framesPerSecond: report.framesPerSecond });
-            }
-            if (report.type === "inbound-rtp" && report.kind === "video") {
-              rtp.push({ direction: "inbound-video", bytesReceived: report.bytesReceived, packetsReceived: report.packetsReceived, framesReceived: report.framesReceived, framesDecoded: report.framesDecoded, framesDropped: report.framesDropped, frameWidth: report.frameWidth, frameHeight: report.frameHeight, framesPerSecond: report.framesPerSecond });
-            }
-            if (report.type === "candidate-pair" && report.state === "succeeded") {
-              ice.push({ state: report.state, localCandidateId: report.localCandidateId, remoteCandidateId: report.remoteCandidateId, nominated: report.nominated, bytesSent: report.bytesSent, bytesReceived: report.bytesReceived, currentRoundTripTime: report.currentRoundTripTime });
-            }
-          });
-          // Resolve candidate types
-          for (const pair of ice) {
-            rtpStats.forEach((report: any) => {
-              if (report.id === pair.localCandidateId) {
-                pair.localType = report.candidateType;
-                pair.localProtocol = report.protocol;
-                pair.localAddress = report.address ? `${report.address}:${report.port}` : "hidden";
-              }
-              if (report.id === pair.remoteCandidateId) {
-                pair.remoteType = report.candidateType;
-                pair.remoteProtocol = report.protocol;
-              }
-            });
-          }
-          stats.rtp = rtp;
-          stats.ice = ice;
-
-          // Video element state
-          const videoEl = document.querySelector("video");
-          if (videoEl) {
-            stats.videoElement = {
-              srcObject: !!videoEl.srcObject,
-              srcObjectTrackCount: (videoEl.srcObject as MediaStream)?.getTracks().length ?? 0,
-              videoWidth: videoEl.videoWidth,
-              videoHeight: videoEl.videoHeight,
-              readyState: videoEl.readyState,
-              networkState: videoEl.networkState,
-              paused: videoEl.paused,
-              muted: videoEl.muted,
-              currentTime: videoEl.currentTime,
-            };
-          }
-
-          console.log("[WebRTC DIAGNOSTIC DUMP]", JSON.stringify(stats, null, 2));
-          return stats;
-        };
-      }
 
       if (state === "connected") {
         restartAttemptsRef.current = 0;
@@ -536,7 +613,6 @@ export function useTheaterWebRTC({
           updateState("LIVE");
         }
       } else if (state === "disconnected" || state === "failed") {
-        // If host is actively capturing tab, do not demote host to RECONNECTING or FALLBACK_MODE
         if (isHost && localStreamRef.current?.getVideoTracks().some((t) => t.readyState === "live")) {
           return;
         }
@@ -547,7 +623,6 @@ export function useTheaterWebRTC({
             restartAttemptsRef.current += 1;
             void renegotiateRef.current?.();
           } else if (!isHost) {
-            // Mobile Viewer: ping host to renegotiate fresh connection without dropping to FALLBACK_MODE
             setTimeout(() => {
               sendViewerReadyRef.current?.();
             }, 1200);
@@ -991,7 +1066,7 @@ export function useTheaterWebRTC({
               const rStream = remoteStreamRef.current;
               if (!rStream.getVideoTracks().some((t) => t.id === rTrack.id)) {
                 rStream.addTrack(rTrack);
-                setRemoteStream(new MediaStream(rStream.getTracks()));
+                setRemoteStream(rStream);
                 updateState("LIVE");
               }
             }
@@ -1006,12 +1081,6 @@ export function useTheaterWebRTC({
               }
             }
           }
-
-          pc.getTransceivers().forEach((transceiver) => {
-            if (transceiver.receiver.track?.kind === "video" || transceiver.sender.track?.kind === "video") {
-              prioritizeMobileSafeCodecs(transceiver);
-            }
-          });
 
           const answer = await pc.createAnswer();
           // CRITICAL: DO NOT munge answer SDP per RFC 8829 §5.4!
@@ -1165,6 +1234,11 @@ export function useTheaterWebRTC({
       .on("broadcast", { event: "theater:partner_leave" }, ({ payload }: { payload: any }) => {
         if (payload.senderUserId !== userId) {
           setPartnerPresence("left");
+        }
+      })
+      .on("broadcast", { event: "theater:diag-stats" }, ({ payload }: { payload: any }) => {
+        if (payload && payload.role && payload.role !== (isHost ? "host" : "viewer")) {
+          setPartnerDiagStats(payload as WebRTCDiagnosticData);
         }
       });
 
@@ -1321,6 +1395,248 @@ export function useTheaterWebRTC({
     };
   }, [isHost, sendViewerReady]);
 
+  // Continuous WebRTC Media Pipeline Diagnostic Engine (Runs every 1000ms)
+  useEffect(() => {
+    let disposed = false;
+    let lastBroadcastTime = 0;
+
+    const diagInterval = setInterval(async () => {
+      const pc = pcRef.current;
+      const pcId = currentPcIdRef.current;
+      const now = Date.now();
+      const prev = prevStatsRef.current;
+      const deltaTimeSec = Math.max(0.2, (now - prev.timestamp) / 1000);
+
+      const localVTrack = localStreamRef.current?.getVideoTracks()[0];
+      const remoteVTrack = remoteStreamRef.current?.getVideoTracks()[0];
+
+      const gatheredStats: {
+        outboundVideo?: WebRTCDiagnosticData["outboundVideo"];
+        inboundVideo?: WebRTCDiagnosticData["inboundVideo"];
+        selectedPair: WebRTCDiagnosticData["ice"]["selectedPair"];
+        negotiatedCodec: WebRTCDiagnosticData["negotiatedCodec"];
+      } = {
+        selectedPair: null,
+        negotiatedCodec: null,
+      };
+
+      if (pc && pc.signalingState !== "closed") {
+        try {
+          const stats = await pc.getStats();
+          const codecMap = new Map<string, any>();
+
+          stats.forEach((report: any) => {
+            if (report.type === "codec") {
+              codecMap.set(report.id, report);
+            }
+            if (report.type === "outbound-rtp" && report.kind === "video") {
+              const bytes = report.bytesSent || 0;
+              const frames = report.framesEncoded || 0;
+              const bitrate = Math.max(0, Math.round(((bytes - prev.bytesSent) * 8) / (deltaTimeSec * 1000)));
+              const fps = Math.max(0, Math.round((frames - prev.framesEncoded) / deltaTimeSec));
+              prev.bytesSent = bytes;
+              prev.framesEncoded = frames;
+
+              gatheredStats.outboundVideo = {
+                bytesSent: bytes,
+                packetsSent: report.packetsSent || 0,
+                framesEncoded: frames,
+                keyFramesEncoded: report.keyFramesEncoded,
+                frameWidth: report.frameWidth,
+                frameHeight: report.frameHeight,
+                fps,
+                bitrateKbps: bitrate,
+              };
+
+              if (report.codecId && codecMap.has(report.codecId)) {
+                const c = codecMap.get(report.codecId);
+                gatheredStats.negotiatedCodec = {
+                  mimeType: c.mimeType,
+                  payloadType: c.payloadType,
+                  sdpFmtpLine: c.sdpFmtpLine,
+                };
+              }
+            }
+            if (report.type === "inbound-rtp" && report.kind === "video") {
+              const bytes = report.bytesReceived || 0;
+              const frames = report.framesDecoded || 0;
+              const bitrate = Math.max(0, Math.round(((bytes - prev.bytesReceived) * 8) / (deltaTimeSec * 1000)));
+              const fps = Math.max(0, Math.round((frames - prev.framesDecoded) / deltaTimeSec));
+              prev.bytesReceived = bytes;
+              prev.framesDecoded = frames;
+
+              gatheredStats.inboundVideo = {
+                bytesReceived: bytes,
+                packetsReceived: report.packetsReceived || 0,
+                framesReceived: report.framesReceived || 0,
+                framesDecoded: frames,
+                framesDropped: report.framesDropped || 0,
+                frameWidth: report.frameWidth,
+                frameHeight: report.frameHeight,
+                fps,
+                bitrateKbps: bitrate,
+              };
+
+              if (report.codecId && codecMap.has(report.codecId)) {
+                const c = codecMap.get(report.codecId);
+                gatheredStats.negotiatedCodec = {
+                  mimeType: c.mimeType,
+                  payloadType: c.payloadType,
+                  sdpFmtpLine: c.sdpFmtpLine,
+                };
+              }
+            }
+            if (report.type === "candidate-pair" && (report.state === "succeeded" || report.nominated)) {
+              const pairInfo: NonNullable<WebRTCDiagnosticData["ice"]["selectedPair"]> = {
+                state: report.state,
+                localType: "unknown",
+                remoteType: "unknown",
+                localAddress: "hidden",
+                remoteAddress: "hidden",
+                currentRoundTripTime: report.currentRoundTripTime ? Math.round(report.currentRoundTripTime * 1000) : undefined,
+                bytesSent: report.bytesSent || 0,
+                bytesReceived: report.bytesReceived || 0,
+                relayActive: false,
+              };
+              stats.forEach((cand: any) => {
+                if (cand.id === report.localCandidateId) {
+                  pairInfo.localType = cand.candidateType || "unknown";
+                  pairInfo.localAddress = cand.address ? `${cand.address}:${cand.port}` : cand.ip || "hidden";
+                }
+                if (cand.id === report.remoteCandidateId) {
+                  pairInfo.remoteType = cand.candidateType || "unknown";
+                  pairInfo.remoteAddress = cand.address ? `${cand.address}:${cand.port}` : cand.ip || "hidden";
+                }
+              });
+              pairInfo.relayActive = pairInfo.localType === "relay" || pairInfo.remoteType === "relay";
+              gatheredStats.selectedPair = pairInfo;
+            }
+          });
+        } catch {
+          // ignore stats gathering error during pc transitions
+        }
+      }
+
+      const outboundVideo = gatheredStats.outboundVideo;
+      const inboundVideo = gatheredStats.inboundVideo;
+      const selectedPair = gatheredStats.selectedPair;
+      const negotiatedCodec = gatheredStats.negotiatedCodec;
+
+      prev.timestamp = now;
+
+      // Video element metrics
+      let videoElementStats: WebRTCDiagnosticData["videoElement"] = null;
+      if (typeof document !== "undefined") {
+        const vEl = document.querySelector("video");
+        if (vEl) {
+          videoElementStats = {
+            videoWidth: vEl.videoWidth || 0,
+            videoHeight: vEl.videoHeight || 0,
+            readyState: vEl.readyState || 0,
+            paused: vEl.paused,
+            muted: vEl.muted,
+            currentTime: Math.round(vEl.currentTime || 0),
+          };
+        }
+      }
+
+      // Hard Failure Matrix Classification
+      let matrixCase: FailureMatrixCase = "IDLE";
+      let matrixSummary = "Idle";
+
+      if (isHost) {
+        if (localStreamRef.current) {
+          if (outboundVideo && outboundVideo.framesEncoded === 0) {
+            matrixCase = "CASE_D_SOURCE_CAPTURE_FAILURE";
+            matrixSummary = "CASE D: Host screen capture active but 0 frames encoded (source track stalled)";
+          } else if (outboundVideo && outboundVideo.framesEncoded > 0) {
+            matrixCase = "HEALTHY_STREAMING";
+            matrixSummary = `Host encoding ${outboundVideo.fps || 0} fps (${outboundVideo.frameWidth || 0}x${outboundVideo.frameHeight || 0})`;
+          } else {
+            matrixCase = "CONNECTING";
+            matrixSummary = "Host preparing stream transmission...";
+          }
+        }
+      } else {
+        const connState = pc?.connectionState;
+        if (!pc || connState === "new" || connState === "connecting") {
+          matrixCase = "CONNECTING";
+          matrixSummary = "WebRTC peer connection establishing...";
+        } else if (!remoteVTrack) {
+          matrixCase = "CASE_E_NEGOTIATION_FAILURE";
+          matrixSummary = "CASE E: WebRTC peer connection established but remote video track never received (ontrack never fired)";
+        } else if (inboundVideo && inboundVideo.bytesReceived === 0 && (partnerDiagStats?.outboundVideo?.bytesSent || 0) > 0) {
+          matrixCase = "CASE_A_TRANSPORT_FAILURE";
+          matrixSummary = "CASE A: Host is transmitting RTP, but Viewer bytesReceived is 0 (NAT/TURN/Firewall blockage)";
+        } else if (inboundVideo && inboundVideo.bytesReceived > 0 && inboundVideo.framesReceived > 0 && inboundVideo.framesDecoded === 0) {
+          matrixCase = "CASE_B_CODEC_DECODE_FAILURE";
+          matrixSummary = "CASE B: Inbound RTP packets arriving, but 0 frames decoded (Codec / SDP payload mismatch)";
+        } else if (inboundVideo && inboundVideo.framesDecoded > 0 && videoElementStats && videoElementStats.videoWidth > 0) {
+          matrixCase = "HEALTHY_STREAMING";
+          matrixSummary = `Decoded ${inboundVideo.framesDecoded} frames (${inboundVideo.fps || 0} fps, ${inboundVideo.frameWidth || 0}x${inboundVideo.frameHeight || 0})`;
+        } else {
+          matrixCase = "CONNECTING";
+          matrixSummary = "Awaiting media decoding...";
+        }
+      }
+
+      const diag: WebRTCDiagnosticData = {
+        timestamp: now,
+        role: isHost ? "host" : "viewer",
+        pcId,
+        connectionState: pc?.connectionState || "none",
+        iceConnectionState: pc?.iceConnectionState || "none",
+        iceGatheringState: pc?.iceGatheringState || "none",
+        signalingState: pc?.signalingState || "none",
+        failureMatrixCase: matrixCase,
+        failureMatrixSummary: matrixSummary,
+        localVideoTrack: localVTrack ? {
+          id: localVTrack.id,
+          readyState: localVTrack.readyState,
+          enabled: localVTrack.enabled,
+          muted: localVTrack.muted,
+          settings: typeof localVTrack.getSettings === "function" ? localVTrack.getSettings() : undefined,
+        } : null,
+        remoteVideoTrack: remoteVTrack ? {
+          id: remoteVTrack.id,
+          readyState: remoteVTrack.readyState,
+          enabled: remoteVTrack.enabled,
+          muted: remoteVTrack.muted,
+        } : null,
+        outboundVideo,
+        inboundVideo,
+        ice: {
+          candidatesGathered: { ...gatheredCandidatesRef.current },
+          selectedPair,
+        },
+        negotiatedCodec,
+        videoElement: videoElementStats,
+      };
+
+      if (!disposed) {
+        setWebrtcDiagStats(diag);
+        if (typeof window !== "undefined") {
+          (window as any).__WEBRTC_STATS = diag;
+          (window as any).__WEBRTC_DIAG = () => diag;
+        }
+
+        if (now - lastBroadcastTime > 2500 && channelRef.current && isSubscribedRef.current) {
+          lastBroadcastTime = now;
+          void channelRef.current.send({
+            type: "broadcast",
+            event: "theater:diag-stats",
+            payload: diag,
+          });
+        }
+      }
+    }, 1000);
+
+    return () => {
+      disposed = true;
+      clearInterval(diagInterval);
+    };
+  }, [isHost, partnerDiagStats]);
+
   const notifyPartnerLeaving = useCallback(async () => {
     try {
       sendSignal("theater:partner_leave", {});
@@ -1343,6 +1659,8 @@ export function useTheaterWebRTC({
     partnerPresence,
     streamSourceType,
     errorMessage,
+    webrtcDiagStats,
+    partnerDiagStats,
     updateState,
     startScreenShare,
     stopScreenShare,
