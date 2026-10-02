@@ -116,6 +116,10 @@ encoderImplementation: ${hostDiag?.outboundVideo?.encoderImplementation ?? "N/A"
 qualityLimitationReason: ${hostDiag?.outboundVideo?.qualityLimitationReason ?? "none"}
 qualityLimitationDurations: ${hostDiag?.outboundVideo?.qualityLimitationDurations ? JSON.stringify(hostDiag.outboundVideo.qualityLimitationDurations) : "N/A"}
 qualityLimitationResolutionChanges: ${hostDiag?.outboundVideo?.qualityLimitationResolutionChanges ?? 0}
+adaptiveProfile: ${hostDiag?.adaptiveQuality?.currentProfile ?? "HIGH"}
+adaptiveTarget: ${hostDiag?.adaptiveQuality?.targetProfile ?? "none"}
+appliedScaleDown: ${hostDiag?.adaptiveQuality?.appliedScaleDown ?? 1.0}
+appliedMaxBitrate: ${hostDiag?.adaptiveQuality?.appliedMaxBitrate ? `${Math.round(hostDiag.adaptiveQuality.appliedMaxBitrate / 1000)} kbps` : "N/A"}
 contentHint: ${hostDiag?.localVideoTrack?.contentHint ?? "N/A"}
 captureSettings: ${hostDiag?.localVideoTrack?.settings ? `${hostDiag.localVideoTrack.settings.width ?? "N/A"}x${hostDiag.localVideoTrack.settings.height ?? "N/A"} @ ${hostDiag.localVideoTrack.settings.frameRate ?? "N/A"}fps (${hostDiag.localVideoTrack.settings.displaySurface ?? "browser"})` : "N/A"}
 
@@ -679,6 +683,38 @@ export function WebRTCDiagnosticInspector({
                     </span>
                   </div>
                 </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Adaptive Profile</span>
+                    <span className={`font-mono block font-bold ${
+                      localDiag?.adaptiveQuality?.currentProfile === "ULTRA" ? "text-purple-400" :
+                      localDiag?.adaptiveQuality?.currentProfile === "HIGH" ? "text-emerald-400" :
+                      localDiag?.adaptiveQuality?.currentProfile === "MEDIUM" ? "text-cyan-400" :
+                      localDiag?.adaptiveQuality?.currentProfile === "LOW" ? "text-amber-400" : "text-rose-400"
+                    }`}>
+                      {localDiag?.adaptiveQuality?.currentProfile || "HIGH"}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Scale Down</span>
+                    <span className="font-mono text-zinc-300 block">
+                      {localDiag?.adaptiveQuality?.appliedScaleDown ? `${localDiag.adaptiveQuality.appliedScaleDown.toFixed(1)}x` : "1.0x"}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Max Bitrate Cap</span>
+                    <span className="font-mono text-zinc-300 block">
+                      {localDiag?.adaptiveQuality?.appliedMaxBitrate ? `${Math.round(localDiag.adaptiveQuality.appliedMaxBitrate / 1000)} kbps` : "2500 kbps"}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Source Capture</span>
+                    <span className="font-mono text-zinc-300 block">
+                      {localDiag?.adaptiveQuality?.sourceWidth ? `${localDiag.adaptiveQuality.sourceWidth}x${localDiag.adaptiveQuality.sourceHeight}` : "N/A"}
+                    </span>
+                  </div>
+                </div>
               </>
             )}
 
@@ -744,6 +780,35 @@ export function WebRTCDiagnosticInspector({
                     </span>
                   </div>
                 </div>
+
+                {partnerDiag?.adaptiveQuality && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                    <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                      <span className="text-[10px] text-zinc-500 block">Host Adaptive Profile</span>
+                      <span className="font-mono text-emerald-400 font-bold block">
+                        {partnerDiag.adaptiveQuality.currentProfile}
+                      </span>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                      <span className="text-[10px] text-zinc-500 block">Host Scale Factor</span>
+                      <span className="font-mono text-zinc-300 block">
+                        {partnerDiag.adaptiveQuality.appliedScaleDown ? `${partnerDiag.adaptiveQuality.appliedScaleDown.toFixed(1)}x` : "1.0x"}
+                      </span>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                      <span className="text-[10px] text-zinc-500 block">Host Max Bitrate</span>
+                      <span className="font-mono text-zinc-300 block">
+                        {partnerDiag.adaptiveQuality.appliedMaxBitrate ? `${Math.round(partnerDiag.adaptiveQuality.appliedMaxBitrate / 1000)} kbps` : "N/A"}
+                      </span>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                      <span className="text-[10px] text-zinc-500 block">Host Source</span>
+                      <span className="font-mono text-zinc-300 block">
+                        {partnerDiag.adaptiveQuality.sourceWidth ? `${partnerDiag.adaptiveQuality.sourceWidth}x${partnerDiag.adaptiveQuality.sourceHeight}` : "N/A"}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

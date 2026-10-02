@@ -169,7 +169,21 @@ export interface WebRTCDiagnosticData {
     muted: boolean;
     currentTime: number;
   } | null;
+  adaptiveQuality?: {
+    currentProfile: string;
+    targetProfile: string | null;
+    consecutiveUpgradeMeasurements: number;
+    sourceWidth: number;
+    sourceHeight: number;
+    measuredBandwidthKbps: number;
+    measuredRttMs: number;
+    appliedMaxBitrate: number;
+    appliedMaxFramerate: number;
+    appliedScaleDown: number;
+  };
 }
+
+export type AdaptiveQualityProfile = "ULTRA" | "HIGH" | "MEDIUM" | "LOW" | "MINIMUM";
 
 export interface TheaterWebRTCProps {
   sessionId: string;
@@ -618,6 +632,18 @@ export function useTheaterWebRTC({
   const forceRelayRef = useRef(forceRelay);
   forceRelayRef.current = forceRelay;
 
+  const adaptiveQualityRef = useRef<{
+    currentProfile: AdaptiveQualityProfile;
+    consecutiveUpgradeMeasurements: number;
+    lastProfileChangeTime: number;
+    targetProfile: AdaptiveQualityProfile | null;
+  }>({
+    currentProfile: "HIGH",
+    consecutiveUpgradeMeasurements: 0,
+    lastProfileChangeTime: 0,
+    targetProfile: null,
+  });
+
   const gatheredCandidatesRef = useRef<{ host: number; srflx: number; relay: number }>({
     host: 0,
     srflx: 0,
@@ -675,7 +701,7 @@ export function useTheaterWebRTC({
   }, [userId]);
 
   // Apply bitrate and motion cadence optimization for movie screen sharing
-  const applyBitrateCap = useCallback(async (pc: RTCPeerConnection, maxKbps = 3500) => {
+  const applyBitrateCap = useCallback(async (pc: RTCPeerConnection, maxKbps = 2500) => {
     try {
       const sender = pc.getSenders().find((s) => s.track?.kind === "video");
       if (!sender) return;
@@ -690,7 +716,7 @@ export function useTheaterWebRTC({
       }
       params.encodings[0]!.maxBitrate = maxKbps * 1000;
       params.encodings[0]!.maxFramerate = 30;
-      params.encodings[0]!.scaleResolutionDownBy = 1.5;
+      params.encodings[0]!.scaleResolutionDownBy = 1.0;
       await sender.setParameters(params);
     } catch {
       // Fallback 1: try setting with framerate cap and degradationPreference without scaleResolutionDownBy if rejected
@@ -2600,6 +2626,112 @@ export function useTheaterWebRTC({
         }
       }
 
+      let adaptiveDiagStats: WebRTCDiagnosticData["adaptiveQuality"] = undefined;
+      
+      if (isHost && pc && pc.signalingState !== "closed") {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        const bwKbps = selectedPair?.availableOutgoingBitrate ?? 0;
+        const rttMs = selectedPair?.currentRoundTripTime ?? 0;
+        
+        const settings = localVTrack?.getSettings();
+        const srcWidth = settings?.width ?? 0;
+        const srcHeight = settings?.height ?? 0;
+
+        if (sender && bwKbps > 0 && srcWidth > 0) {
+          let candidate: AdaptiveQualityProfile = "MINIMUM";
+          if (bwKbps >= 2500 && rttMs < 150) candidate = "ULTRA";
+          else if (bwKbps >= 1200 && rttMs < 300) candidate = "HIGH";
+          else if (bwKbps >= 600 && rttMs < 500) candidate = "MEDIUM";
+          else if (bwKbps >= 250 && rttMs < 800) candidate = "LOW";
+          else candidate = "MINIMUM";
+
+          const profileOrder: Record<AdaptiveQualityProfile, number> = { "MINIMUM": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "ULTRA": 4 };
+          const state = adaptiveQualityRef.current;
+          
+          if (candidate !== state.currentProfile) {
+            const isUpgrade = profileOrder[candidate] > profileOrder[state.currentProfile];
+            
+            if (isUpgrade) {
+              if (candidate === state.targetProfile) {
+                state.consecutiveUpgradeMeasurements++;
+              } else {
+                state.targetProfile = candidate;
+                state.consecutiveUpgradeMeasurements = 1;
+              }
+            } else {
+              state.targetProfile = candidate;
+              state.consecutiveUpgradeMeasurements = 3; 
+            }
+
+            if (state.consecutiveUpgradeMeasurements >= 3 && now - state.lastProfileChangeTime >= 5000) {
+              const params = sender.getParameters();
+              if (params.encodings && params.encodings.length > 0) {
+                const enc = params.encodings[0]!;
+                
+                let scaleDown = 1.0;
+                let maxBitrate = 2500;
+                let maxFramerate = 30;
+                let degPref = "maintain-framerate";
+
+                if (state.targetProfile === "ULTRA") {
+                  maxBitrate = 2500;
+                  maxFramerate = 30;
+                } else if (state.targetProfile === "HIGH") {
+                  maxBitrate = 1800;
+                  maxFramerate = 30;
+                } else if (state.targetProfile === "MEDIUM") {
+                  maxBitrate = 1200;
+                  maxFramerate = 24;
+                  scaleDown = srcWidth <= 1280 ? 1.0 : 1.5;
+                  degPref = "balanced";
+                } else if (state.targetProfile === "LOW") {
+                  maxBitrate = 600;
+                  maxFramerate = 20;
+                  scaleDown = srcWidth > 1280 ? 1.5 : (srcWidth > 640 ? 1.5 : 1.0);
+                } else {
+                  maxBitrate = 300;
+                  maxFramerate = 15;
+                  scaleDown = srcWidth > 1280 ? 2.0 : (srcWidth > 640 ? 2.0 : 1.0);
+                }
+                
+                if (srcWidth / scaleDown < 320 && srcWidth >= 320) {
+                  scaleDown = srcWidth / 320;
+                } else if (srcWidth < 320) {
+                  scaleDown = 1.0;
+                }
+
+                try { (params as any).degradationPreference = degPref; } catch {}
+                enc.maxBitrate = maxBitrate * 1000;
+                enc.maxFramerate = maxFramerate;
+                enc.scaleResolutionDownBy = Math.max(1.0, scaleDown);
+
+                sender.setParameters(params).catch(() => {});
+
+                state.currentProfile = state.targetProfile;
+                state.lastProfileChangeTime = now;
+              }
+            }
+          } else {
+            state.consecutiveUpgradeMeasurements = 0;
+            state.targetProfile = null;
+          }
+          
+          const currentParams = sender.getParameters();
+          adaptiveDiagStats = {
+            currentProfile: state.currentProfile,
+            targetProfile: state.targetProfile,
+            consecutiveUpgradeMeasurements: state.consecutiveUpgradeMeasurements,
+            sourceWidth: srcWidth,
+            sourceHeight: srcHeight,
+            measuredBandwidthKbps: bwKbps,
+            measuredRttMs: rttMs,
+            appliedMaxBitrate: currentParams.encodings?.[0]?.maxBitrate ?? 0,
+            appliedMaxFramerate: currentParams.encodings?.[0]?.maxFramerate ?? 0,
+            appliedScaleDown: currentParams.encodings?.[0]?.scaleResolutionDownBy ?? 1.0,
+          };
+        }
+      }
+
       const diag: WebRTCDiagnosticData = {
         timestamp: now,
         role: isHost ? "host" : "viewer",
@@ -2638,6 +2770,7 @@ export function useTheaterWebRTC({
         inboundVideo,
         negotiatedCodec,
         videoElement: videoElementStats,
+        adaptiveQuality: adaptiveDiagStats,
       };
 
       webrtcDiagStatsRef.current = diag;
@@ -2714,5 +2847,6 @@ export function useTheaterWebRTC({
     sendViewerReady,
     forceRelay,
     toggleForceRelay,
+    currentAdaptiveProfile: adaptiveQualityRef.current.currentProfile,
   };
 }
