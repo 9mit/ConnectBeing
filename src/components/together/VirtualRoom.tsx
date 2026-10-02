@@ -152,6 +152,7 @@ export function VirtualRoom({
     errorMessage,
     webrtcDiagStats,
     partnerDiagStats,
+    webrtcDiagStatsRef,
     updateState,
     startScreenShare,
     stopScreenShare,
@@ -170,6 +171,9 @@ export function VirtualRoom({
     initialHostStreamActive,
     isDiagOpen: showDiagModal,
   });
+
+  // Real-time track dimension state for host preview (updates immediately on resize event)
+  const [hostCaptureDimensions, setHostCaptureDimensions] = useState<{ width: number; height: number } | null>(null);
 
   // Theater Session & Playback States
   const [playbackState, setPlaybackState] = useState<"playing" | "paused">(() => {
@@ -267,14 +271,59 @@ export function VirtualRoom({
   }, [sessionId]);
 
   // Attach local media stream to local video element (Host - visual preview only, permanently muted)
+  // and attach real-time resize listener to immediately reflect host window minimize/maximize
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-      localVideoRef.current.muted = true;
-      localVideoRef.current.defaultMuted = true;
-      void localVideoRef.current.play().catch(() => {});
+    const video = localVideoRef.current;
+    if (!video || !localStream) {
+      setHostCaptureDimensions(null);
+      return;
     }
-  }, [localStream]);
+
+    video.srcObject = localStream;
+    video.muted = true;
+    video.defaultMuted = true;
+    void video.play().catch(() => {});
+
+    const updateDimensions = () => {
+      const vTrack = localStream.getVideoTracks()[0];
+      const settings = typeof vTrack?.getSettings === "function" ? vTrack.getSettings() : undefined;
+      const width = (video.videoWidth > 0 ? video.videoWidth : settings?.width) || 0;
+      const height = (video.videoHeight > 0 ? video.videoHeight : settings?.height) || 0;
+      if (width > 0 && height > 0) {
+        setHostCaptureDimensions({ width, height });
+        if (webrtcDiagStatsRef?.current?.localVideoTrack) {
+          webrtcDiagStatsRef.current.localVideoTrack.settings = {
+            ...webrtcDiagStatsRef.current.localVideoTrack.settings,
+            width,
+            height,
+          };
+        }
+      }
+    };
+
+    updateDimensions();
+
+    video.addEventListener("resize", updateDimensions);
+    video.addEventListener("loadedmetadata", updateDimensions);
+
+    const handleEnded = () => setHostCaptureDimensions(null);
+    const vTrack = localStream.getVideoTracks()[0];
+    if (vTrack) {
+      vTrack.addEventListener?.("ended", handleEnded);
+      vTrack.addEventListener?.("mute", updateDimensions);
+      vTrack.addEventListener?.("unmute", updateDimensions);
+    }
+
+    return () => {
+      video.removeEventListener("resize", updateDimensions);
+      video.removeEventListener("loadedmetadata", updateDimensions);
+      if (vTrack) {
+        vTrack.removeEventListener?.("ended", handleEnded);
+        vTrack.removeEventListener?.("mute", updateDimensions);
+        vTrack.removeEventListener?.("unmute", updateDimensions);
+      }
+    };
+  }, [localStream, webrtcDiagStatsRef, isHost]);
 
   // Attach remote media stream to remote video element (Viewer) with robust autoplay mitigation.
   // Video element is kept PERMANENTLY muted so that mobile Safari and Android Chrome NEVER block
@@ -1105,6 +1154,18 @@ export function VirtualRoom({
     : !!remoteStream &&
       remoteStream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled);
 
+  // Effective host source resolution: combines immediate element resize detection with WebRTC diagnostic stats
+  const sourceWidth = hostCaptureDimensions?.width ?? webrtcDiagStats?.localVideoTrack?.settings?.width;
+  const sourceHeight = hostCaptureDimensions?.height ?? webrtcDiagStats?.localVideoTrack?.settings?.height;
+  const isSourceResolutionLow = Boolean(
+    isHost &&
+    isHostCapturing &&
+    !directMediaUrl &&
+    typeof sourceWidth === "number" &&
+    sourceWidth > 0 &&
+    sourceWidth < 1280
+  );
+
   // DRM Black Screen Detector for PC screen sharing Hotstar/Netflix
   // Strictly restricted to Host: running getImageData canvas polling on mobile hardware-decoded remote video
   // triggers synchronous GPU-to-CPU texture readbacks from MediaCodec, causing main-thread stutter.
@@ -1820,11 +1881,11 @@ export function VirtualRoom({
             </AnimatePresence>
 
             {/* Host source resolution banner if captured window is smaller than 720p */}
-            {isHost && isHostCapturing && (webrtcDiagStats?.localVideoTrack?.settings?.width ?? 1920) < 1280 && !directMediaUrl && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] shadow-lg backdrop-blur-md pointer-events-none">
+            {isSourceResolutionLow && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] shadow-lg backdrop-blur-md pointer-events-none max-w-[92vw] text-center">
                 <AlertTriangle size={13} className="text-amber-400 shrink-0" />
                 <span>
-                  Source tab is {webrtcDiagStats?.localVideoTrack?.settings?.width}x{webrtcDiagStats?.localVideoTrack?.settings?.height}. Maximize window for 1080p HD.
+                  ⚠️ Movie Window Minimized/Shrunk ({sourceWidth}x{sourceHeight || Math.round((sourceWidth! * 9) / 16)}): Keep your movie window (Netflix/Hotstar/tab) OPEN and MAXIMIZED behind this screen. Do NOT minimize it to the taskbar! (Minimizing kills resolution to 226x108).
                 </span>
               </div>
             )}
@@ -1839,6 +1900,18 @@ export function VirtualRoom({
                 playsInline
                 webkit-playsinline="true"
                 x5-playsinline="true"
+                onResize={() => {
+                  const video = localVideoRef.current;
+                  if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+                    setHostCaptureDimensions({ width: video.videoWidth, height: video.videoHeight });
+                  }
+                }}
+                onLoadedMetadata={() => {
+                  const video = localVideoRef.current;
+                  if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+                    setHostCaptureDimensions({ width: video.videoWidth, height: video.videoHeight });
+                  }
+                }}
                 className={`h-full w-full object-contain ${
                   isHostCapturing && !directMediaUrl ? "block" : "hidden"
                 }`}
@@ -2053,9 +2126,9 @@ export function VirtualRoom({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
                     <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 space-y-1">
                       <span className="text-[10px] font-mono text-zinc-400">STEP 1</span>
-                      <p className="text-xs font-medium text-white">Open {providerName}</p>
+                      <p className="text-xs font-medium text-white">Open {providerName} (New Window)</p>
                       <p className="text-[11px] text-zinc-400">
-                        Launch the movie in a dedicated tab and press play.
+                        Launch the movie in a separate window and keep it maximized behind CoupleConnect.
                       </p>
                     </div>
                     <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 space-y-1">
@@ -2074,7 +2147,7 @@ export function VirtualRoom({
                     <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 space-y-1 col-span-1 sm:col-span-2 text-left">
                       <span className="text-[10px] font-mono text-sky-400 font-bold">1080P HD QUALITY TIP</span>
                       <p className="text-[11px] text-zinc-300 leading-relaxed">
-                        To stream in maximum 1080p HD sharpness, maximize or full-screen your movie tab in Chrome. If the shared window is resized small, Chrome captures fewer pixels. For YouTube, use Direct Movie Sync below for native 1080p quality!
+                        Tip: Keep the movie in its own maximized window. Do NOT click minimize (_) on it. Minimizing the movie window forces Chrome to shrink capture to a 226x108 blurry thumbnail. Keep the movie window open behind this browser window. For YouTube, use Direct Movie Sync below for native 1080p quality!
                       </p>
                     </div>
                   </div>
@@ -2085,10 +2158,26 @@ export function VirtualRoom({
                       href={providerSearchUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      onClick={() => updateState("OTT_OPEN")}
+                      onClick={(e) => {
+                        updateState("OTT_OPEN");
+                        try {
+                          const newWin = window.open(
+                            providerSearchUrl,
+                            "_blank",
+                            "width=1280,height=800,menubar=yes,toolbar=yes,location=yes,resizable=yes"
+                          );
+                          if (newWin) {
+                            e.preventDefault();
+                            newWin.focus();
+                          }
+                        } catch {
+                          // Allow standard anchor fallback if popup was blocked
+                        }
+                      }}
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs font-semibold text-zinc-900 bg-white hover:bg-zinc-200 transition-all shadow-md active:scale-95"
+                      title="Tip: Keep the movie in its own maximized window. Do NOT click minimize (_) on it."
                     >
-                      <ExternalLink size={13} /> 1. Open {providerName} ↗
+                      <ExternalLink size={13} /> 1. Open {providerName} (New Window) ↗
                     </a>
 
                     <button
@@ -2107,6 +2196,11 @@ export function VirtualRoom({
                       <Film size={13} /> Direct / YouTube Sync 🎬
                     </button>
                   </div>
+
+                  {/* Window Guidance Instruction */}
+                  <p className="text-[11px] text-amber-300/90 text-center font-medium">
+                    💡 Tip: Keep the movie in its own maximized window. Do NOT click minimize (_) on it.
+                  </p>
 
                   {/* Fallback to Companion Mode option */}
                   <div className="pt-2 border-t border-white/[0.06]">
