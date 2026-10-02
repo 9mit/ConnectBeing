@@ -19,6 +19,7 @@ import {
   Compass,
   Film,
   AlertCircle,
+  AlertTriangle,
   RefreshCw,
   Loader2,
   Volume2,
@@ -72,6 +73,20 @@ type WatchMsg = {
 };
 
 const THEATER_REACTIONS = ["❤️", "😂", "🔥", "😱", "👏", "🍿"] as const;
+
+export function extractYouTubeId(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const str = url.trim();
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+    /[?&]v=([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const regex of patterns) {
+    const match = str.match(regex);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
 
 export function VirtualRoom({
   sessionId,
@@ -1804,6 +1819,16 @@ export function VirtualRoom({
               )}
             </AnimatePresence>
 
+            {/* Host source resolution banner if captured window is smaller than 720p */}
+            {isHost && isHostCapturing && (webrtcDiagStats?.localVideoTrack?.settings?.width ?? 1920) < 1280 && !directMediaUrl && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] shadow-lg backdrop-blur-md pointer-events-none">
+                <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+                <span>
+                  Source tab is {webrtcDiagStats?.localVideoTrack?.settings?.width}x{webrtcDiagStats?.localVideoTrack?.settings?.height}. Maximize window for 1080p HD.
+                </span>
+              </div>
+            )}
+
             {/* A. HOST VIEW: LOCAL SHARED TAB STREAM (VISUAL PREVIEW ONLY - PERMANENTLY MUTED TO PREVENT ECHO) */}
             {isHost && (
               <video
@@ -1839,27 +1864,46 @@ export function VirtualRoom({
 
             {/* C. SYNCHRONIZED DIRECT MEDIA PLAYER (Direct Movie Link / Open-Source / YouTube) */}
             {directMediaUrl && (
-              <video
-                ref={directVideoRef}
-                src={directMediaUrl}
-                playsInline
-                webkit-playsinline="true"
-                x5-playsinline="true"
-                className="h-full w-full object-contain block z-10"
-                style={{ maxHeight: "100%", maxWidth: "100%" }}
-                onTimeUpdate={(e) => {
-                  if (isHost) {
-                    setPositionSeconds(Math.floor(e.currentTarget.currentTime));
-                  }
-                }}
-                onLoadedMetadata={(e) => {
-                  if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
-                    setEstimatedDuration(Math.floor(e.currentTarget.duration));
-                  }
-                }}
-                onPlay={() => setPlaybackState("playing")}
-                onPause={() => setPlaybackState("paused")}
-              />
+              (() => {
+                const ytId = extractYouTubeId(directMediaUrl);
+                if (ytId) {
+                  return (
+                    <div className="relative h-full w-full flex items-center justify-center bg-black z-10">
+                      <iframe
+                        src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&enablejsapi=1&playsinline=1&rel=0&iv_load_policy=3&controls=1`}
+                        title="Synchronized YouTube Player"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                        className="h-full w-full aspect-video max-h-full max-w-full rounded-lg shadow-2xl"
+                        style={{ border: "none" }}
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <video
+                    ref={directVideoRef}
+                    src={directMediaUrl}
+                    playsInline
+                    webkit-playsinline="true"
+                    x5-playsinline="true"
+                    className="h-full w-full object-contain block z-10"
+                    style={{ maxHeight: "100%", maxWidth: "100%" }}
+                    onTimeUpdate={(e) => {
+                      if (isHost) {
+                        setPositionSeconds(Math.floor(e.currentTarget.currentTime));
+                      }
+                    }}
+                    onLoadedMetadata={(e) => {
+                      if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
+                        setEstimatedDuration(Math.floor(e.currentTarget.duration));
+                      }
+                    }}
+                    onPlay={() => setPlaybackState("playing")}
+                    onPause={() => setPlaybackState("paused")}
+                  />
+                );
+              })()
             )}
 
             {/* MOBILE TAP TO START VIDEO OVERLAY (When remote stream is ready but mobile browser requires user tap to play) */}
@@ -2027,6 +2071,12 @@ export function VirtualRoom({
                         If sharing Hotstar or Netflix and your partner sees audio but black video, turn off Hardware Acceleration in Chrome (Settings &rarr; System &rarr; toggle off &ldquo;Use graphics acceleration when available&rdquo; and restart Chrome) or test with YouTube to verify.
                       </p>
                     </div>
+                    <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 space-y-1 col-span-1 sm:col-span-2 text-left">
+                      <span className="text-[10px] font-mono text-sky-400 font-bold">1080P HD QUALITY TIP</span>
+                      <p className="text-[11px] text-zinc-300 leading-relaxed">
+                        To stream in maximum 1080p HD sharpness, maximize or full-screen your movie tab in Chrome. If the shared window is resized small, Chrome captures fewer pixels. For YouTube, use Direct Movie Sync below for native 1080p quality!
+                      </p>
+                    </div>
                   </div>
 
                   {/* Actions */}
@@ -2054,7 +2104,7 @@ export function VirtualRoom({
                       onClick={() => setShowDirectMediaModal(true)}
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-xs font-semibold text-zinc-200 bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.1] transition-all active:scale-95"
                     >
-                      <Film size={13} /> Direct Movie Player 🎬
+                      <Film size={13} /> Direct / YouTube Sync 🎬
                     </button>
                   </div>
 
@@ -3008,16 +3058,16 @@ export function VirtualRoom({
               </div>
 
               <p className="text-xs text-zinc-300 leading-relaxed">
-                Stream any direct video link (MP4, WebM, HLS) in 100% sync on both PC and Mobile without screen recording or DRM black screens.
+                Stream any YouTube link (e.g. youtube.com/watch?v=...) or direct video link (MP4, WebM, HLS) in 100% native HD sync on both PC and Mobile without screen recording blur or DRM black screens.
               </p>
 
               <div className="space-y-2">
                 <label className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
-                  Video / Movie Stream URL
+                  YouTube or Video Stream URL
                 </label>
                 <input
                   type="url"
-                  placeholder="https://example.com/movie.mp4"
+                  placeholder="https://www.youtube.com/watch?v=... or .mp4"
                   value={directMediaInput}
                   onChange={(e) => setDirectMediaInput(e.target.value)}
                   className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500"
@@ -3027,9 +3077,18 @@ export function VirtualRoom({
               {/* Quick sample open-source free movie links */}
               <div className="space-y-1.5 pt-1">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
-                  Or pick a free open-source movie:
+                  Or pick a sample stream:
                 </span>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
+                    }}
+                    className="p-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-left hover:border-rose-500/60 hover:bg-rose-500/20 text-rose-200 transition-colors"
+                  >
+                    ▶️ YouTube 4K/1080p Sync
+                  </button>
                   <button
                     type="button"
                     onClick={() => {

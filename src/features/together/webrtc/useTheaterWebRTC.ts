@@ -406,13 +406,19 @@ function prioritizeCodecsInSdp(sdp: string): string {
       const fmtp = fmtpMap.get(pt) || "";
 
       if (codec === "H264") {
-        if (fmtp.includes("42e01f") || fmtp.includes("42001f")) {
+        // High Profile (6400xx / 640cxx): Hardware NVENC/Intel/Apple acceleration + CABAC 8x8 DCT transform
+        if (fmtp.includes("6400") || fmtp.includes("640c")) {
           return 100;
         }
-        if (fmtp.includes("4d001f") || fmtp.includes("4d002a")) {
+        // Main Profile (4d00xx / 4d0cxx): Hardware acceleration + CABAC
+        if (fmtp.includes("4d00") || fmtp.includes("4d0c")) {
           return 90;
         }
-        return 80;
+        // Baseline Profile (42e0xx / 4200xx): Universal mobile fallback
+        if (fmtp.includes("42e0") || fmtp.includes("4200") || fmtp.includes("4210")) {
+          return 80;
+        }
+        return 75;
       }
       if (codec === "VP8") {
         return 70;
@@ -504,8 +510,18 @@ function prioritizeMobileSafeCodecs(transceiver: RTCRtpTransceiver) {
       if (aIsH264 && bIsH264) {
         const aFmtp = (a.sdpFmtpLine || "").toLowerCase();
         const bFmtp = (b.sdpFmtpLine || "").toLowerCase();
-        const aBaseline = aFmtp.includes("42e01f") || aFmtp.includes("42001f");
-        const bBaseline = bFmtp.includes("42e01f") || bFmtp.includes("42001f");
+        const aHigh = aFmtp.includes("6400") || aFmtp.includes("640c");
+        const bHigh = bFmtp.includes("6400") || bFmtp.includes("640c");
+        if (aHigh && !bHigh) return -1;
+        if (!aHigh && bHigh) return 1;
+
+        const aMain = aFmtp.includes("4d00") || aFmtp.includes("4d0c");
+        const bMain = bFmtp.includes("4d00") || bFmtp.includes("4d0c");
+        if (aMain && !bMain) return -1;
+        if (!aMain && bMain) return 1;
+
+        const aBaseline = aFmtp.includes("42e0") || aFmtp.includes("4200");
+        const bBaseline = bFmtp.includes("42e0") || bFmtp.includes("4200");
         if (aBaseline && !bBaseline) return -1;
         if (!aBaseline && bBaseline) return 1;
       }
@@ -1401,27 +1417,37 @@ export function useTheaterWebRTC({
 
       updateState("AWAITING_SCREEN_SHARE");
 
-      // Prefer tab sharing with audio, constrained to 1080p @ 30fps to prevent overloading mobile decoders
+      // Request native browser/tab stream at 1080p target resolution @ 30 FPS without forced downscale limits
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getDisplayMedia({
           video: {
             displaySurface: "browser",
             frameRate: { ideal: 30, max: 30 },
-            width: { ideal: 1920, max: 1920 },
-            height: { ideal: 1080, max: 1080 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
           audio: true,
-        });
+          selfBrowserSurface: "exclude",
+          surfaceSwitching: "include",
+          systemAudio: "include",
+        } as any);
       } catch {
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            frameRate: { ideal: 30, max: 30 },
-            width: { max: 1920 },
-            height: { max: 1080 },
-          },
-          audio: true,
-        });
+        try {
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              frameRate: { ideal: 30, max: 30 },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+            audio: true,
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true,
+          });
+        }
       }
 
       const videoTrack = stream.getVideoTracks()[0];
@@ -2632,18 +2658,29 @@ export function useTheaterWebRTC({
         const sender = pc.getSenders().find((s) => s.track?.kind === "video");
         const bwKbps = selectedPair?.availableOutgoingBitrate ?? 0;
         const rttMs = selectedPair?.currentRoundTripTime ?? 0;
+        const remoteLoss = outboundVideo?.remoteInbound?.packetsLost ?? 0;
+        const packetsSent = outboundVideo?.packetsSent ?? 0;
+        const lossRatio = packetsSent > 50 ? Math.min(1, remoteLoss / packetsSent) : 0;
         
         const settings = localVTrack?.getSettings();
         const srcWidth = settings?.width ?? 0;
         const srcHeight = settings?.height ?? 0;
 
-        if (sender && bwKbps > 0 && srcWidth > 0) {
-          let candidate: AdaptiveQualityProfile = "MINIMUM";
-          if (bwKbps >= 2500 && rttMs < 150) candidate = "ULTRA";
-          else if (bwKbps >= 1200 && rttMs < 300) candidate = "HIGH";
-          else if (bwKbps >= 600 && rttMs < 500) candidate = "MEDIUM";
-          else if (bwKbps >= 250 && rttMs < 800) candidate = "LOW";
-          else candidate = "MINIMUM";
+        if (sender && srcWidth > 0) {
+          let candidate: AdaptiveQualityProfile = "HIGH";
+          if (bwKbps >= 2200 && lossRatio < 0.02 && rttMs < 800) {
+            candidate = "ULTRA";
+          } else if ((bwKbps >= 1300 || (bwKbps === 0 && lossRatio < 0.03)) && lossRatio < 0.04 && rttMs < 950) {
+            candidate = "HIGH";
+          } else if ((bwKbps >= 700 || (bwKbps === 0 && lossRatio < 0.05)) && lossRatio < 0.06 && rttMs < 1100) {
+            candidate = "MEDIUM";
+          } else if (bwKbps >= 350 && lossRatio < 0.10) {
+            candidate = "LOW";
+          } else if (bwKbps > 0 || lossRatio >= 0.10 || rttMs >= 1200) {
+            candidate = "MINIMUM";
+          } else {
+            candidate = "HIGH";
+          }
 
           const profileOrder: Record<AdaptiveQualityProfile, number> = { "MINIMUM": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "ULTRA": 4 };
           const state = adaptiveQualityRef.current;
@@ -2671,29 +2708,34 @@ export function useTheaterWebRTC({
                 let scaleDown = 1.0;
                 let maxBitrate = 2500;
                 let maxFramerate = 30;
-                let degPref = "maintain-framerate";
+                const degPref = "maintain-framerate";
 
                 if (state.targetProfile === "ULTRA") {
-                  maxBitrate = 2500;
+                  maxBitrate = 3000;
                   maxFramerate = 30;
+                  scaleDown = 1.0;
                 } else if (state.targetProfile === "HIGH") {
-                  maxBitrate = 1800;
+                  maxBitrate = 2000;
                   maxFramerate = 30;
+                  scaleDown = 1.0;
                 } else if (state.targetProfile === "MEDIUM") {
-                  maxBitrate = 1200;
-                  maxFramerate = 24;
-                  scaleDown = srcWidth <= 1280 ? 1.0 : 1.5;
-                  degPref = "balanced";
+                  maxBitrate = 1300;
+                  maxFramerate = 30;
+                  // Only apply mild downscale if source is larger than 720p
+                  scaleDown = srcWidth <= 1280 ? 1.0 : 1.25;
                 } else if (state.targetProfile === "LOW") {
-                  maxBitrate = 600;
-                  maxFramerate = 20;
-                  scaleDown = srcWidth > 1280 ? 1.5 : (srcWidth > 640 ? 1.5 : 1.0);
+                  maxBitrate = 750;
+                  maxFramerate = 24;
+                  // Never downscale sources <= 720p (prevents blur on 492px or 720p capture)
+                  scaleDown = srcWidth <= 720 ? 1.0 : 1.5;
                 } else {
-                  maxBitrate = 300;
-                  maxFramerate = 15;
-                  scaleDown = srcWidth > 1280 ? 2.0 : (srcWidth > 640 ? 2.0 : 1.0);
+                  maxBitrate = 350;
+                  maxFramerate = 20;
+                  // Never downscale sources <= 480p
+                  scaleDown = srcWidth <= 480 ? 1.0 : 1.5;
                 }
                 
+                // Never reduce resolution below 320px
                 if (srcWidth / scaleDown < 320 && srcWidth >= 320) {
                   scaleDown = srcWidth / 320;
                 } else if (srcWidth < 320) {
