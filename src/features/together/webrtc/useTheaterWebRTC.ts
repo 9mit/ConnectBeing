@@ -74,6 +74,8 @@ export interface WebRTCIceDiag {
     currentRoundTripTime?: number;
     bytesSent: number;
     bytesReceived: number;
+    availableOutgoingBitrate?: number;
+    availableIncomingBitrate?: number;
     relayActive: boolean;
   } | null;
 }
@@ -97,6 +99,7 @@ export interface WebRTCDiagnosticData {
     enabled: boolean;
     muted: boolean;
     settings?: MediaTrackSettings;
+    contentHint?: string;
   } | null;
   remoteVideoTrack?: {
     id: string;
@@ -109,21 +112,49 @@ export interface WebRTCDiagnosticData {
     packetsSent: number;
     framesEncoded: number;
     keyFramesEncoded?: number;
+    framesSent?: number;
+    retransmittedPacketsSent?: number;
+    nackCount?: number;
+    pliCount?: number;
+    firCount?: number;
     frameWidth?: number;
     frameHeight?: number;
     fps?: number;
+    nativeFps?: number;
     bitrateKbps?: number;
+    qpSum?: number;
+    totalEncodeTime?: number;
+    encoderImplementation?: string;
+    qualityLimitationReason?: string;
+    qualityLimitationDurations?: Record<string, number>;
+    qualityLimitationResolutionChanges?: number;
+    remoteInbound?: {
+      packetsLost?: number;
+      jitter?: number;
+      roundTripTime?: number;
+    };
   };
   inboundVideo?: {
     bytesReceived: number;
     packetsReceived: number;
+    packetsLost?: number;
     framesReceived: number;
     framesDecoded: number;
     framesDropped: number;
+    keyFramesDecoded?: number;
     frameWidth?: number;
     frameHeight?: number;
     fps?: number;
+    nativeFps?: number;
     bitrateKbps?: number;
+    jitter?: number;
+    jitterBufferDelay?: number;
+    jitterBufferEmittedCount?: number;
+    jitterBufferDelayAvgMs?: number;
+    totalDecodeTime?: number;
+    freezeCount?: number;
+    totalFreezesDuration?: number;
+    decoderImplementation?: string;
   };
   negotiatedCodec?: {
     mimeType?: string;
@@ -147,6 +178,7 @@ export interface TheaterWebRTCProps {
   initialHostStreamActive?: boolean;
   onStateChange?: (state: TheaterRoomState) => void;
   onDriftCorrect?: (remotePos: number) => void;
+  isDiagOpen?: boolean;
 }
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
@@ -483,6 +515,7 @@ export function useTheaterWebRTC({
   isHost,
   initialHostStreamActive = false,
   onStateChange,
+  isDiagOpen = false,
 }: TheaterWebRTCProps) {
   const [roomState, setRoomState] = useState<TheaterRoomState>(() => {
     if (!isHost && initialHostStreamActive) return "STREAM_CONNECTING";
@@ -501,9 +534,24 @@ export function useTheaterWebRTC({
   const [streamSourceType, setStreamSourceType] = useState<"tab" | "window" | "screen" | "none">("none");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Diagnostic states
+  // Diagnostic states & refs for low-frequency UI decoupling
   const [webrtcDiagStats, setWebrtcDiagStats] = useState<WebRTCDiagnosticData | null>(null);
+  const webrtcDiagStatsRef = useRef<WebRTCDiagnosticData | null>(null);
   const [partnerDiagStats, setPartnerDiagStats] = useState<WebRTCDiagnosticData | null>(null);
+  const partnerDiagStatsRef = useRef<WebRTCDiagnosticData | null>(null);
+  const lastPartnerStatsUpdateTimeRef = useRef<number>(0);
+  const lastUiUpdateTimeRef = useRef<number>(0);
+  const lastMatrixCaseRef = useRef<FailureMatrixCase | null>(null);
+  const isDiagOpenRef = useRef(isDiagOpen);
+
+  useEffect(() => {
+    isDiagOpenRef.current = isDiagOpen;
+    if (isDiagOpen) {
+      if (webrtcDiagStatsRef.current) setWebrtcDiagStats(webrtcDiagStatsRef.current);
+      if (partnerDiagStatsRef.current) setPartnerDiagStats(partnerDiagStatsRef.current);
+    }
+  }, [isDiagOpen]);
+
   const [, setRemoteTrackRevision] = useState(0);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -626,19 +674,52 @@ export function useTheaterWebRTC({
     });
   }, [userId]);
 
-  // Apply bitrate optimization for movie screen sharing
+  // Apply bitrate and motion cadence optimization for movie screen sharing
   const applyBitrateCap = useCallback(async (pc: RTCPeerConnection, maxKbps = 3500) => {
     try {
       const sender = pc.getSenders().find((s) => s.track?.kind === "video");
       if (!sender) return;
       const params = sender.getParameters();
       if (!params.encodings || params.encodings.length === 0) {
-        params.encodings = [{}];
+        return;
+      }
+      try {
+        (params as any).degradationPreference = "maintain-framerate";
+      } catch {
+        // ignore if degradationPreference not supported
       }
       params.encodings[0]!.maxBitrate = maxKbps * 1000;
+      params.encodings[0]!.maxFramerate = 30;
+      params.encodings[0]!.scaleResolutionDownBy = 1.5;
       await sender.setParameters(params);
     } catch {
-      // Bitrate parameter setting unsupported or renegotiating
+      // Fallback 1: try setting with framerate cap and degradationPreference without scaleResolutionDownBy if rejected
+      try {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (!sender) return;
+        const params = sender.getParameters();
+        if (params.encodings && params.encodings.length > 0) {
+          try {
+            (params as any).degradationPreference = "maintain-framerate";
+          } catch {}
+          params.encodings[0]!.maxBitrate = maxKbps * 1000;
+          params.encodings[0]!.maxFramerate = 30;
+          await sender.setParameters(params);
+        }
+      } catch {
+        // Fallback 2: try setting just bitrate if advanced parameters rejected by browser
+        try {
+          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+          if (!sender) return;
+          const params = sender.getParameters();
+          if (params.encodings && params.encodings.length > 0) {
+            params.encodings[0]!.maxBitrate = maxKbps * 1000;
+            await sender.setParameters(params);
+          }
+        } catch {
+          // Bitrate parameter setting unsupported or renegotiating
+        }
+      }
     }
   }, []);
 
@@ -806,6 +887,10 @@ export function useTheaterWebRTC({
       });
 
       if (track.kind === "video") {
+        if ("contentHint" in track) {
+          (track as any).contentHint = "motion";
+        }
+
         if (streamId) {
           remoteMovieStreamIdRef.current = streamId;
         }
@@ -929,6 +1014,9 @@ export function useTheaterWebRTC({
     if (!isHost || !localStreamRef.current) return;
     const videoTrack = localStreamRef.current.getVideoTracks()[0];
     if (!videoTrack || videoTrack.readyState !== "live") return;
+    if ("contentHint" in videoTrack) {
+      (videoTrack as any).contentHint = "motion";
+    }
 
     const pc = pcRef.current;
 
@@ -948,6 +1036,7 @@ export function useTheaterWebRTC({
         state: "LIVE",
         surface: streamSourceTypeRef.current || "tab",
       });
+      void applyBitrateCap(pc);
       return;
     }
 
@@ -1060,6 +1149,8 @@ export function useTheaterWebRTC({
           }
         }
       }
+
+      void applyBitrateCap(activePc);
 
       const offerId = `off_${sessionId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       activeOfferIdRef.current = offerId;
@@ -1181,7 +1272,7 @@ export function useTheaterWebRTC({
         }
       }
     }
-  }, [getOrCreatePc, isHost, sendSignal, sessionId]);
+  }, [applyBitrateCap, getOrCreatePc, isHost, sendSignal, sessionId]);
 
   // Viewer announces readiness to host
   const sendViewerReady = useCallback(() => {
@@ -1285,19 +1376,37 @@ export function useTheaterWebRTC({
       updateState("AWAITING_SCREEN_SHARE");
 
       // Prefer tab sharing with audio, constrained to 1080p @ 30fps to prevent overloading mobile decoders
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: "browser",
-          frameRate: { ideal: 30, max: 30 },
-          width: { ideal: 1920, max: 1920 },
-          height: { ideal: 1080, max: 1080 },
-        },
-        audio: true,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: "browser",
+            frameRate: { ideal: 30, max: 30 },
+            width: { ideal: 1920, max: 1920 },
+            height: { ideal: 1080, max: 1080 },
+          },
+          audio: true,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            frameRate: { ideal: 30, max: 30 },
+            width: { max: 1920 },
+            height: { max: 1080 },
+          },
+          audio: true,
+        });
+      }
 
       const videoTrack = stream.getVideoTracks()[0];
       if (!videoTrack || videoTrack.readyState !== "live") {
         throw new Error("Captured stream does not contain a live video track.");
+      }
+
+      // CRITICAL: Set contentHint = 'motion' to switch Chromium from kScreenshare to kRealtimeVideo.
+      // This enables motion pacer smoothing and maintains stable 30 FPS clock instead of damage-rect throttling.
+      if ("contentHint" in videoTrack) {
+        (videoTrack as any).contentHint = "motion";
       }
 
       // Detect display surface type if available
@@ -1335,6 +1444,9 @@ export function useTheaterWebRTC({
           pc.addTrack(vTrack, localVoiceRef.current);
         }
       }
+
+      // Pre-configure sender bitrate, 30 FPS cap, and downscaling
+      void applyBitrateCap(pc);
 
       // Create offer
       makingOfferRef.current = true;
@@ -1445,7 +1557,7 @@ export function useTheaterWebRTC({
         updateState("IDLE");
       }
     }
-  }, [getOrCreatePc, sendSignal, sessionId, stopScreenShare, updateState]);
+  }, [applyBitrateCap, getOrCreatePc, sendSignal, sessionId, stopScreenShare, updateState]);
 
   // Toggle voice call in-theater
   const startVoiceCall = useCallback(async () => {
@@ -1826,6 +1938,7 @@ export function useTheaterWebRTC({
               });
 
               await flushPendingIce(pc);
+              void applyBitrateCap(pc);
             }
           } else {
             const stateMsg = `Host PC not in have-local-offer (current: ${pc?.signalingState || "no-pc"})`;
@@ -2039,7 +2152,12 @@ export function useTheaterWebRTC({
       })
       .on("broadcast", { event: "theater:diag-stats" }, ({ payload }: { payload: any }) => {
         if (payload && payload.role && payload.role !== (isHost ? "host" : "viewer")) {
-          setPartnerDiagStats(payload as WebRTCDiagnosticData);
+          partnerDiagStatsRef.current = payload as WebRTCDiagnosticData;
+          const now = Date.now();
+          if (isDiagOpenRef.current || now - lastPartnerStatsUpdateTimeRef.current >= 3500) {
+            lastPartnerStatsUpdateTimeRef.current = now;
+            setPartnerDiagStats(payload as WebRTCDiagnosticData);
+          }
         }
       });
 
@@ -2160,6 +2278,7 @@ export function useTheaterWebRTC({
       void supabase.removeChannel(channel);
     };
   }, [
+    applyBitrateCap,
     flushPendingIce,
     getOrCreatePc,
     isHost,
@@ -2259,94 +2378,158 @@ export function useTheaterWebRTC({
         try {
           const stats = await pc.getStats();
           const codecMap = new Map<string, any>();
+          const remoteInboundList: any[] = [];
+          const candidatePairs: any[] = [];
+          let selectedCandidatePairId: string | null = null;
+          let outboundVideoReport: any = null;
+          let inboundVideoReport: any = null;
 
           stats.forEach((report: any) => {
-            if (report.type === "codec") {
+            if (report.type === "transport" && report.selectedCandidatePairId) {
+              selectedCandidatePairId = report.selectedCandidatePairId;
+            } else if (report.type === "codec") {
               codecMap.set(report.id, report);
-            }
-            if (report.type === "outbound-rtp" && report.kind === "video") {
-              const bytes = report.bytesSent || 0;
-              const frames = report.framesEncoded || 0;
-              const bitrate = Math.max(0, Math.round(((bytes - prev.bytesSent) * 8) / (deltaTimeSec * 1000)));
-              const fps = Math.max(0, Math.round((frames - prev.framesEncoded) / deltaTimeSec));
-              prev.bytesSent = bytes;
-              prev.framesEncoded = frames;
-
-              gatheredStats.outboundVideo = {
-                bytesSent: bytes,
-                packetsSent: report.packetsSent || 0,
-                framesEncoded: frames,
-                keyFramesEncoded: report.keyFramesEncoded,
-                frameWidth: report.frameWidth,
-                frameHeight: report.frameHeight,
-                fps,
-                bitrateKbps: bitrate,
-              };
-
-              if (report.codecId && codecMap.has(report.codecId)) {
-                const c = codecMap.get(report.codecId);
-                gatheredStats.negotiatedCodec = {
-                  mimeType: c.mimeType,
-                  payloadType: c.payloadType,
-                  sdpFmtpLine: c.sdpFmtpLine,
-                };
-              }
-            }
-            if (report.type === "inbound-rtp" && report.kind === "video") {
-              const bytes = report.bytesReceived || 0;
-              const frames = report.framesDecoded || 0;
-              const bitrate = Math.max(0, Math.round(((bytes - prev.bytesReceived) * 8) / (deltaTimeSec * 1000)));
-              const fps = Math.max(0, Math.round((frames - prev.framesDecoded) / deltaTimeSec));
-              prev.bytesReceived = bytes;
-              prev.framesDecoded = frames;
-
-              gatheredStats.inboundVideo = {
-                bytesReceived: bytes,
-                packetsReceived: report.packetsReceived || 0,
-                framesReceived: report.framesReceived || 0,
-                framesDecoded: frames,
-                framesDropped: report.framesDropped || 0,
-                frameWidth: report.frameWidth,
-                frameHeight: report.frameHeight,
-                fps,
-                bitrateKbps: bitrate,
-              };
-
-              if (report.codecId && codecMap.has(report.codecId)) {
-                const c = codecMap.get(report.codecId);
-                gatheredStats.negotiatedCodec = {
-                  mimeType: c.mimeType,
-                  payloadType: c.payloadType,
-                  sdpFmtpLine: c.sdpFmtpLine,
-                };
-              }
-            }
-            if (report.type === "candidate-pair" && (report.state === "succeeded" || report.nominated)) {
-              const pairInfo: NonNullable<WebRTCDiagnosticData["ice"]["selectedPair"]> = {
-                state: report.state,
-                localType: "unknown",
-                remoteType: "unknown",
-                localAddress: "hidden",
-                remoteAddress: "hidden",
-                currentRoundTripTime: report.currentRoundTripTime ? Math.round(report.currentRoundTripTime * 1000) : undefined,
-                bytesSent: report.bytesSent || 0,
-                bytesReceived: report.bytesReceived || 0,
-                relayActive: false,
-              };
-              stats.forEach((cand: any) => {
-                if (cand.id === report.localCandidateId) {
-                  pairInfo.localType = cand.candidateType || "unknown";
-                  pairInfo.localAddress = cand.address ? `${cand.address}:${cand.port}` : cand.ip || "hidden";
-                }
-                if (cand.id === report.remoteCandidateId) {
-                  pairInfo.remoteType = cand.candidateType || "unknown";
-                  pairInfo.remoteAddress = cand.address ? `${cand.address}:${cand.port}` : cand.ip || "hidden";
-                }
-              });
-              pairInfo.relayActive = pairInfo.localType === "relay" || pairInfo.remoteType === "relay";
-              gatheredStats.selectedPair = pairInfo;
+            } else if (report.type === "remote-inbound-rtp" && (report.kind === "video" || !report.kind)) {
+              remoteInboundList.push(report);
+            } else if (report.type === "outbound-rtp" && report.kind === "video") {
+              outboundVideoReport = report;
+            } else if (report.type === "inbound-rtp" && report.kind === "video") {
+              inboundVideoReport = report;
+            } else if (report.type === "candidate-pair") {
+              candidatePairs.push(report);
             }
           });
+
+          if (outboundVideoReport) {
+            const report = outboundVideoReport;
+            const bytes = report.bytesSent || 0;
+            const frames = report.framesEncoded || 0;
+            const bitrate = Math.max(0, Math.round(((bytes - prev.bytesSent) * 8) / (deltaTimeSec * 1000)));
+            const fps = Math.max(0, Math.round((frames - prev.framesEncoded) / deltaTimeSec));
+            prev.bytesSent = bytes;
+            prev.framesEncoded = frames;
+
+            const remoteInbound = report.remoteId
+              ? remoteInboundList.find((r) => r.id === report.remoteId)
+              : remoteInboundList[0];
+
+            gatheredStats.outboundVideo = {
+              bytesSent: bytes,
+              packetsSent: report.packetsSent || 0,
+              framesEncoded: frames,
+              keyFramesEncoded: report.keyFramesEncoded,
+              framesSent: report.framesSent ?? frames,
+              retransmittedPacketsSent: report.retransmittedPacketsSent ?? 0,
+              nackCount: report.nackCount ?? 0,
+              pliCount: report.pliCount ?? 0,
+              firCount: report.firCount ?? 0,
+              frameWidth: report.frameWidth,
+              frameHeight: report.frameHeight,
+              fps,
+              nativeFps: report.framesPerSecond !== undefined ? Math.round(report.framesPerSecond * 10) / 10 : undefined,
+              bitrateKbps: bitrate,
+              qpSum: report.qpSum,
+              totalEncodeTime: report.totalEncodeTime !== undefined ? Math.round(report.totalEncodeTime * 1000) / 1000 : undefined,
+              encoderImplementation: report.encoderImplementation,
+              qualityLimitationReason: report.qualityLimitationReason || "none",
+              qualityLimitationDurations: report.qualityLimitationDurations,
+              qualityLimitationResolutionChanges: report.qualityLimitationResolutionChanges,
+              remoteInbound: remoteInbound ? {
+                packetsLost: remoteInbound.packetsLost,
+                jitter: remoteInbound.jitter !== undefined ? Math.round(remoteInbound.jitter * 1000) / 1000 : undefined,
+                roundTripTime: remoteInbound.roundTripTime !== undefined ? Math.round(remoteInbound.roundTripTime * 1000) : undefined,
+              } : undefined,
+            };
+
+            if (report.codecId && codecMap.has(report.codecId)) {
+              const c = codecMap.get(report.codecId);
+              gatheredStats.negotiatedCodec = {
+                mimeType: c.mimeType,
+                payloadType: c.payloadType,
+                sdpFmtpLine: c.sdpFmtpLine,
+              };
+            }
+          }
+
+          if (inboundVideoReport) {
+            const report = inboundVideoReport;
+            const bytes = report.bytesReceived || 0;
+            const frames = report.framesDecoded || 0;
+            const bitrate = Math.max(0, Math.round(((bytes - prev.bytesReceived) * 8) / (deltaTimeSec * 1000)));
+            const fps = Math.max(0, Math.round((frames - prev.framesDecoded) / deltaTimeSec));
+            prev.bytesReceived = bytes;
+            prev.framesDecoded = frames;
+
+            const jbDelay = report.jitterBufferDelay || 0;
+            const jbEmitted = report.jitterBufferEmittedCount || 0;
+            const jbAvgMs = jbEmitted > 0 ? Math.round((jbDelay / jbEmitted) * 1000) : undefined;
+
+            gatheredStats.inboundVideo = {
+              bytesReceived: bytes,
+              packetsReceived: report.packetsReceived || 0,
+              packetsLost: report.packetsLost ?? 0,
+              framesReceived: report.framesReceived ?? ((report.framesDecoded || 0) + (report.framesDropped || 0)),
+              framesDecoded: frames,
+              framesDropped: report.framesDropped || 0,
+              keyFramesDecoded: report.keyFramesDecoded,
+              frameWidth: report.frameWidth,
+              frameHeight: report.frameHeight,
+              fps,
+              nativeFps: report.framesPerSecond !== undefined ? Math.round(report.framesPerSecond * 10) / 10 : undefined,
+              bitrateKbps: bitrate,
+              jitter: report.jitter !== undefined ? Math.round(report.jitter * 1000) / 1000 : undefined,
+              jitterBufferDelay: report.jitterBufferDelay !== undefined ? Math.round(report.jitterBufferDelay * 1000) / 1000 : undefined,
+              jitterBufferEmittedCount: jbEmitted,
+              jitterBufferDelayAvgMs: jbAvgMs,
+              totalDecodeTime: report.totalDecodeTime !== undefined ? Math.round(report.totalDecodeTime * 1000) / 1000 : undefined,
+              freezeCount: report.freezeCount,
+              totalFreezesDuration: report.totalFreezesDuration !== undefined ? Math.round(report.totalFreezesDuration * 1000) / 1000 : undefined,
+              decoderImplementation: report.decoderImplementation,
+            };
+
+            if (report.codecId && codecMap.has(report.codecId)) {
+              const c = codecMap.get(report.codecId);
+              gatheredStats.negotiatedCodec = {
+                mimeType: c.mimeType,
+                payloadType: c.payloadType,
+                sdpFmtpLine: c.sdpFmtpLine,
+              };
+            }
+          }
+
+          const activePair =
+            (selectedCandidatePairId ? candidatePairs.find((p) => p.id === selectedCandidatePairId) : null) ||
+            candidatePairs.find((p) => p.state === "succeeded" && p.nominated) ||
+            candidatePairs.find((p) => p.state === "succeeded") ||
+            candidatePairs.find((p) => p.nominated) ||
+            candidatePairs[0];
+          if (activePair) {
+            const pairInfo: NonNullable<WebRTCDiagnosticData["ice"]["selectedPair"]> = {
+              state: activePair.state,
+              localType: "unknown",
+              remoteType: "unknown",
+              localAddress: "hidden",
+              remoteAddress: "hidden",
+              currentRoundTripTime: typeof activePair.currentRoundTripTime === "number" ? Math.round(activePair.currentRoundTripTime * 1000) : undefined,
+              bytesSent: activePair.bytesSent || 0,
+              bytesReceived: activePair.bytesReceived || 0,
+              availableOutgoingBitrate: typeof activePair.availableOutgoingBitrate === "number" ? Math.round(activePair.availableOutgoingBitrate / 1000) : undefined,
+              availableIncomingBitrate: typeof activePair.availableIncomingBitrate === "number" ? Math.round(activePair.availableIncomingBitrate / 1000) : undefined,
+              relayActive: false,
+            };
+            stats.forEach((cand: any) => {
+              if (cand.id === activePair.localCandidateId) {
+                pairInfo.localType = cand.candidateType || "unknown";
+                pairInfo.localAddress = cand.address ? `${cand.address}:${cand.port}` : cand.ip || "hidden";
+              }
+              if (cand.id === activePair.remoteCandidateId) {
+                pairInfo.remoteType = cand.candidateType || "unknown";
+                pairInfo.remoteAddress = cand.address ? `${cand.address}:${cand.port}` : cand.ip || "hidden";
+              }
+            });
+            pairInfo.relayActive = pairInfo.localType === "relay" || pairInfo.remoteType === "relay";
+            gatheredStats.selectedPair = pairInfo;
+          }
         } catch {
           // ignore stats gathering error during pc transitions
         }
@@ -2362,7 +2545,9 @@ export function useTheaterWebRTC({
       // Video element metrics
       let videoElementStats: WebRTCDiagnosticData["videoElement"] = null;
       if (typeof document !== "undefined") {
-        const vEl = document.querySelector("video");
+        const vEl = (isHost
+          ? document.querySelector('video[data-webrtc-role="local"], video')
+          : document.querySelector('video[data-webrtc-role="remote"], video')) as HTMLVideoElement | null;
         if (vEl) {
           videoElementStats = {
             videoWidth: vEl.videoWidth || 0,
@@ -2400,7 +2585,7 @@ export function useTheaterWebRTC({
         } else if (!remoteVTrack) {
           matrixCase = "CASE_E_NEGOTIATION_FAILURE";
           matrixSummary = "CASE E: WebRTC peer connection established but remote video track never received (ontrack never fired)";
-        } else if (inboundVideo && inboundVideo.bytesReceived === 0 && (partnerDiagStats?.outboundVideo?.bytesSent || 0) > 0) {
+        } else if (inboundVideo && inboundVideo.bytesReceived === 0 && (partnerDiagStatsRef.current?.outboundVideo?.bytesSent || 0) > 0) {
           matrixCase = "CASE_A_TRANSPORT_FAILURE";
           matrixSummary = "CASE A: Host is transmitting RTP, but Viewer bytesReceived is 0 (NAT/TURN/Firewall blockage)";
         } else if (inboundVideo && inboundVideo.bytesReceived > 0 && inboundVideo.framesReceived > 0 && inboundVideo.framesDecoded === 0) {
@@ -2441,6 +2626,7 @@ export function useTheaterWebRTC({
           enabled: localVTrack.enabled,
           muted: localVTrack.muted,
           settings: typeof localVTrack.getSettings === "function" ? localVTrack.getSettings() : undefined,
+          contentHint: (localVTrack as any).contentHint || undefined,
         } : null,
         remoteVideoTrack: remoteVTrack ? {
           id: remoteVTrack.id,
@@ -2454,11 +2640,24 @@ export function useTheaterWebRTC({
         videoElement: videoElementStats,
       };
 
+      webrtcDiagStatsRef.current = diag;
+      if (typeof window !== "undefined") {
+        (window as any).__WEBRTC_STATS = diag;
+        (window as any).__WEBRTC_DIAG = () => diag;
+      }
+
       if (!disposed) {
-        setWebrtcDiagStats(diag);
-        if (typeof window !== "undefined") {
-          (window as any).__WEBRTC_STATS = diag;
-          (window as any).__WEBRTC_DIAG = () => diag;
+        // UI render throttling:
+        // Update React state immediately on matrix case transition or when diag inspector is open;
+        // during normal background playback, update every 3 seconds to avoid main-thread jank.
+        const matrixChanged = matrixCase !== lastMatrixCaseRef.current;
+        const timeSinceLastUiUpdate = now - lastUiUpdateTimeRef.current;
+        const shouldUpdateUi = isDiagOpenRef.current || matrixChanged || timeSinceLastUiUpdate >= 3000;
+
+        if (shouldUpdateUi) {
+          lastUiUpdateTimeRef.current = now;
+          lastMatrixCaseRef.current = matrixCase;
+          setWebrtcDiagStats(diag);
         }
 
         if (now - lastBroadcastTime > 2500 && channelRef.current && isSubscribedRef.current) {
@@ -2476,7 +2675,7 @@ export function useTheaterWebRTC({
       disposed = true;
       clearInterval(diagInterval);
     };
-  }, [isHost, partnerDiagStats]);
+  }, [isHost]);
 
   const notifyPartnerLeaving = useCallback(async () => {
     try {
@@ -2502,6 +2701,8 @@ export function useTheaterWebRTC({
     errorMessage,
     webrtcDiagStats,
     partnerDiagStats,
+    webrtcDiagStatsRef,
+    partnerDiagStatsRef,
     updateState,
     startScreenShare,
     stopScreenShare,

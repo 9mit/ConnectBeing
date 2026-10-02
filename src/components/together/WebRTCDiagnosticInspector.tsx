@@ -38,12 +38,13 @@ function formatSection12Report(
   const hostDiag = isHost ? localDiag : partnerDiag;
   const viewerDiag = !isHost ? localDiag : partnerDiag;
 
-  const hostCandidate = hostDiag?.ice?.selectedPair?.localAddress
-    ? `${hostDiag.ice.selectedPair.localType} (${hostDiag.ice.selectedPair.localAddress})`
-    : hostDiag?.ice?.selectedPair?.localType || "none";
-  const remoteCandidate = hostDiag?.ice?.selectedPair?.remoteAddress
-    ? `${hostDiag.ice.selectedPair.remoteType} (${hostDiag.ice.selectedPair.remoteAddress})`
-    : hostDiag?.ice?.selectedPair?.remoteType || "none";
+  const hostSelectedPair = hostDiag?.ice?.selectedPair ?? viewerDiag?.ice?.selectedPair;
+  const hostCandidate = hostSelectedPair?.localAddress
+    ? `${hostSelectedPair.localType} (${hostSelectedPair.localAddress})`
+    : hostSelectedPair?.localType || "none";
+  const remoteCandidate = hostSelectedPair?.remoteAddress
+    ? `${hostSelectedPair.remoteType} (${hostSelectedPair.remoteAddress})`
+    : hostSelectedPair?.remoteType || "none";
 
   return `SIGNALING
 
@@ -78,40 +79,74 @@ remoteCandidatesReceived: ${viewerDiag?.ice?.remoteCandidatesReceived?.total ?? 
 Selected pair:
 host candidate: ${hostCandidate}
 remote candidate: ${remoteCandidate}
-state: ${hostDiag?.ice?.selectedPair?.state ?? viewerDiag?.ice?.selectedPair?.state ?? "null"}
+state: ${hostSelectedPair?.state ?? "null"}
+roundTripTime: ${hostSelectedPair?.currentRoundTripTime !== undefined ? `${hostSelectedPair.currentRoundTripTime} ms` : "N/A"}
+availableOutgoingBitrate: ${hostSelectedPair?.availableOutgoingBitrate ? `${hostSelectedPair.availableOutgoingBitrate} kbps` : "N/A"}
+availableIncomingBitrate: ${hostSelectedPair?.availableIncomingBitrate ? `${hostSelectedPair.availableIncomingBitrate} kbps` : "N/A"}
 
 TURN:
-
-TURN configured server-side:
-${(localDiag?.turn?.turnConfiguredServerSide || partnerDiag?.turn?.turnConfiguredServerSide) ? "YES" : "NO"}
-
-TURN config delivered to browser:
-${(localDiag?.turn?.turnConfigDeliveredToBrowser || partnerDiag?.turn?.turnConfigDeliveredToBrowser) ? "YES" : "NO"}
-
-TURN candidates:
-${(localDiag?.ice?.candidatesGathered?.relay ?? 0) + (partnerDiag?.ice?.candidatesGathered?.relay ?? 0)}
+TURN configured server-side: ${(localDiag?.turn?.turnConfiguredServerSide || partnerDiag?.turn?.turnConfiguredServerSide) ? "YES" : "NO"}
+TURN config delivered to browser: ${(localDiag?.turn?.turnConfigDeliveredToBrowser || partnerDiag?.turn?.turnConfigDeliveredToBrowser) ? "YES" : "NO"}
+TURN candidates: ${(localDiag?.ice?.candidatesGathered?.relay ?? 0) + (partnerDiag?.ice?.candidatesGathered?.relay ?? 0)}
 
 CONNECTION:
+signalingState: ${localDiag?.signalingState ?? "none"}
+iceConnectionState: ${localDiag?.iceConnectionState ?? "none"}
+connectionState: ${localDiag?.connectionState ?? "none"}
 
-signalingState:
-${localDiag?.signalingState ?? "none"}
-iceConnectionState:
-${localDiag?.iceConnectionState ?? "none"}
-connectionState:
-${localDiag?.connectionState ?? "none"}
+HOST MEDIA (OUTBOUND):
+framesEncoded: ${hostDiag?.outboundVideo?.framesEncoded ?? 0}
+framesSent: ${hostDiag?.outboundVideo?.framesSent ?? hostDiag?.outboundVideo?.framesEncoded ?? 0}
+bytesSent: ${hostDiag?.outboundVideo?.bytesSent ?? 0}
+packetsSent: ${hostDiag?.outboundVideo?.packetsSent ?? 0}
+packetsLost: ${hostDiag?.outboundVideo?.remoteInbound?.packetsLost ?? 0}
+retransmittedPacketsSent: ${hostDiag?.outboundVideo?.retransmittedPacketsSent ?? 0}
+nackCount: ${hostDiag?.outboundVideo?.nackCount ?? 0}
+pliCount: ${hostDiag?.outboundVideo?.pliCount ?? 0}
+firCount: ${hostDiag?.outboundVideo?.firCount ?? 0}
+frameWidth: ${hostDiag?.outboundVideo?.frameWidth ?? "N/A"}
+frameHeight: ${hostDiag?.outboundVideo?.frameHeight ?? "N/A"}
+fps: ${hostDiag?.outboundVideo?.fps ?? 0}
+framesPerSecond: ${hostDiag?.outboundVideo?.nativeFps ?? hostDiag?.outboundVideo?.fps ?? 0}
+resolution: ${hostDiag?.outboundVideo?.frameWidth && hostDiag?.outboundVideo?.frameHeight ? `${hostDiag.outboundVideo.frameWidth}x${hostDiag.outboundVideo.frameHeight}` : "N/A"}
+bitrateKbps: ${hostDiag?.outboundVideo?.bitrateKbps ?? 0}
+qpSum: ${hostDiag?.outboundVideo?.qpSum ?? "N/A"}
+totalEncodeTime: ${hostDiag?.outboundVideo?.totalEncodeTime !== undefined ? `${hostDiag.outboundVideo.totalEncodeTime} s` : "N/A"}
+encoderImplementation: ${hostDiag?.outboundVideo?.encoderImplementation ?? "N/A"}
+qualityLimitationReason: ${hostDiag?.outboundVideo?.qualityLimitationReason ?? "none"}
+qualityLimitationDurations: ${hostDiag?.outboundVideo?.qualityLimitationDurations ? JSON.stringify(hostDiag.outboundVideo.qualityLimitationDurations) : "N/A"}
+qualityLimitationResolutionChanges: ${hostDiag?.outboundVideo?.qualityLimitationResolutionChanges ?? 0}
+contentHint: ${hostDiag?.localVideoTrack?.contentHint ?? "N/A"}
+captureSettings: ${hostDiag?.localVideoTrack?.settings ? `${hostDiag.localVideoTrack.settings.width ?? "N/A"}x${hostDiag.localVideoTrack.settings.height ?? "N/A"} @ ${hostDiag.localVideoTrack.settings.frameRate ?? "N/A"}fps (${hostDiag.localVideoTrack.settings.displaySurface ?? "browser"})` : "N/A"}
 
-MEDIA:
+VIEWER MEDIA (INBOUND):
+framesReceived: ${viewerDiag?.inboundVideo?.framesReceived ?? 0}
+framesDecoded: ${viewerDiag?.inboundVideo?.framesDecoded ?? 0}
+framesDropped: ${viewerDiag?.inboundVideo?.framesDropped ?? 0}
+bytesReceived: ${viewerDiag?.inboundVideo?.bytesReceived ?? 0}
+packetsReceived: ${viewerDiag?.inboundVideo?.packetsReceived ?? 0}
+packetsLost: ${viewerDiag?.inboundVideo?.packetsLost ?? 0}
+fps: ${viewerDiag?.inboundVideo?.fps ?? 0}
+framesPerSecond: ${viewerDiag?.inboundVideo?.nativeFps ?? viewerDiag?.inboundVideo?.fps ?? 0}
+frameWidth: ${viewerDiag?.inboundVideo?.frameWidth ?? "N/A"}
+frameHeight: ${viewerDiag?.inboundVideo?.frameHeight ?? "N/A"}
+resolution: ${viewerDiag?.inboundVideo?.frameWidth && viewerDiag?.inboundVideo?.frameHeight ? `${viewerDiag.inboundVideo.frameWidth}x${viewerDiag.inboundVideo.frameHeight}` : "N/A"}
+bitrateKbps: ${viewerDiag?.inboundVideo?.bitrateKbps ?? 0}
+jitter: ${viewerDiag?.inboundVideo?.jitter !== undefined ? `${viewerDiag.inboundVideo.jitter} s` : "N/A"}
+jitterBufferDelay: ${viewerDiag?.inboundVideo?.jitterBufferDelay !== undefined ? `${viewerDiag.inboundVideo.jitterBufferDelay} s` : "N/A"}
+jitterBufferEmittedCount: ${viewerDiag?.inboundVideo?.jitterBufferEmittedCount ?? "N/A"}
+jitterBufferDelayAvgMs: ${viewerDiag?.inboundVideo?.jitterBufferDelayAvgMs !== undefined ? `${viewerDiag.inboundVideo.jitterBufferDelayAvgMs} ms` : "N/A"}
+freezeCount: ${viewerDiag?.inboundVideo?.freezeCount ?? "N/A"}
+totalFreezesDuration: ${viewerDiag?.inboundVideo?.totalFreezesDuration !== undefined ? `${viewerDiag.inboundVideo.totalFreezesDuration} s` : "N/A"}
+keyFramesDecoded: ${viewerDiag?.inboundVideo?.keyFramesDecoded ?? "N/A"}
+totalDecodeTime: ${viewerDiag?.inboundVideo?.totalDecodeTime !== undefined ? `${viewerDiag.inboundVideo.totalDecodeTime} s` : "N/A"}
+decoderImplementation: ${viewerDiag?.inboundVideo?.decoderImplementation ?? "N/A"}
 
-framesEncoded:
-${hostDiag?.outboundVideo?.framesEncoded ?? 0}
-bytesSent:
-${hostDiag?.outboundVideo?.bytesSent ?? 0}
-bytesReceived:
-${viewerDiag?.inboundVideo?.bytesReceived ?? 0}
-framesReceived:
-${viewerDiag?.inboundVideo?.framesReceived ?? 0}
-framesDecoded:
-${viewerDiag?.inboundVideo?.framesDecoded ?? 0}`;
+VIDEO ELEMENT:
+readyState: ${viewerDiag?.videoElement?.readyState ?? "N/A"}
+videoDimensions: ${viewerDiag?.videoElement?.videoWidth && viewerDiag?.videoElement?.videoHeight ? `${viewerDiag.videoElement.videoWidth}x${viewerDiag.videoElement.videoHeight}` : "N/A"}
+paused: ${viewerDiag?.videoElement?.paused !== undefined ? String(viewerDiag.videoElement.paused) : "N/A"}
+currentTime: ${viewerDiag?.videoElement?.currentTime ?? "N/A"}`;
 }
 
 export function WebRTCDiagnosticInspector({
@@ -452,11 +487,14 @@ export function WebRTCDiagnosticInspector({
                 </span>
               </div>
               <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                <span className="text-[10px] text-zinc-500 block">RTT Latency</span>
-                <span className="font-mono text-zinc-200 block">
+                <span className="text-[10px] text-zinc-500 block">RTT / Bandwidth</span>
+                <span className="font-mono text-zinc-200 block truncate">
                   {localDiag?.ice?.selectedPair?.currentRoundTripTime !== undefined
                     ? `${localDiag.ice.selectedPair.currentRoundTripTime} ms`
                     : "N/A"}
+                  {localDiag?.ice?.selectedPair?.availableOutgoingBitrate
+                    ? ` (${localDiag.ice.selectedPair.availableOutgoingBitrate}k)`
+                    : ""}
                 </span>
               </div>
               <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
@@ -585,70 +623,128 @@ export function WebRTCDiagnosticInspector({
 
             {/* If Host: Outbound RTP metrics */}
             {isHost && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                  <span className="text-[10px] text-zinc-500 block">Frames Encoded</span>
-                  <span className="font-mono text-white font-bold">
-                    {localDiag?.outboundVideo?.framesEncoded ?? 0}
-                  </span>
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Frames Encoded</span>
+                    <span className="font-mono text-white font-bold">
+                      {localDiag?.outboundVideo?.framesEncoded ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Encoder FPS</span>
+                    <span className="font-mono text-emerald-400 font-bold">
+                      {localDiag?.outboundVideo?.fps ?? 0} fps
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Resolution</span>
+                    <span className="font-mono text-zinc-200">
+                      {localDiag?.outboundVideo?.frameWidth && localDiag?.outboundVideo?.frameHeight
+                        ? `${localDiag.outboundVideo.frameWidth}x${localDiag.outboundVideo.frameHeight}`
+                        : "Awaiting"}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Bitrate</span>
+                    <span className="font-mono text-zinc-200">
+                      {localDiag?.outboundVideo?.bitrateKbps ?? 0} kbps
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                  <span className="text-[10px] text-zinc-500 block">Encoder FPS</span>
-                  <span className="font-mono text-emerald-400 font-bold">
-                    {localDiag?.outboundVideo?.fps ?? 0} fps
-                  </span>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Retransmitted</span>
+                    <span className="font-mono text-zinc-300 block">
+                      {localDiag?.outboundVideo?.retransmittedPacketsSent ?? 0} pkts
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">NACK / PLI</span>
+                    <span className="font-mono text-zinc-300 block">
+                      N:{localDiag?.outboundVideo?.nackCount ?? 0} / P:{localDiag?.outboundVideo?.pliCount ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Quality Limitation</span>
+                    <span className={`font-mono block font-semibold ${(localDiag?.outboundVideo?.qualityLimitationReason || "none") === "none" ? "text-emerald-400" : "text-amber-400"}`}>
+                      {localDiag?.outboundVideo?.qualityLimitationReason || "none"}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Content Hint</span>
+                    <span className="font-mono text-emerald-400 block font-semibold">
+                      {localDiag?.localVideoTrack?.contentHint || "motion"}
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                  <span className="text-[10px] text-zinc-500 block">Resolution</span>
-                  <span className="font-mono text-zinc-200">
-                    {localDiag?.outboundVideo?.frameWidth && localDiag?.outboundVideo?.frameHeight
-                      ? `${localDiag.outboundVideo.frameWidth}x${localDiag.outboundVideo.frameHeight}`
-                      : "Awaiting"}
-                  </span>
-                </div>
-                <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                  <span className="text-[10px] text-zinc-500 block">Bitrate</span>
-                  <span className="font-mono text-zinc-200">
-                    {localDiag?.outboundVideo?.bitrateKbps ?? 0} kbps
-                  </span>
-                </div>
-              </div>
+              </>
             )}
 
             {/* If Viewer: Inbound RTP metrics */}
             {!isHost && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                  <span className="text-[10px] text-zinc-500 block">Frames Decoded</span>
-                  <span
-                    className={`font-mono font-bold ${
-                      (localDiag?.inboundVideo?.framesDecoded || 0) > 0
-                        ? "text-emerald-400"
-                        : "text-rose-400"
-                    }`}
-                  >
-                    {localDiag?.inboundVideo?.framesDecoded ?? 0}
-                  </span>
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Frames Decoded</span>
+                    <span
+                      className={`font-mono font-bold ${
+                        (localDiag?.inboundVideo?.framesDecoded || 0) > 0
+                          ? "text-emerald-400"
+                          : "text-rose-400"
+                      }`}
+                    >
+                      {localDiag?.inboundVideo?.framesDecoded ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Decoder FPS</span>
+                    <span className="font-mono text-emerald-400 font-bold">
+                      {localDiag?.inboundVideo?.fps ?? 0} fps
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Bytes Received</span>
+                    <span className="font-mono text-zinc-200">
+                      {Math.round((localDiag?.inboundVideo?.bytesReceived || 0) / 1024)} KB
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Frames Dropped</span>
+                    <span className="font-mono text-zinc-400">
+                      {localDiag?.inboundVideo?.framesDropped ?? 0}
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                  <span className="text-[10px] text-zinc-500 block">Decoder FPS</span>
-                  <span className="font-mono text-emerald-400 font-bold">
-                    {localDiag?.inboundVideo?.fps ?? 0} fps
-                  </span>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Packets Lost</span>
+                    <span className={`font-mono block ${(localDiag?.inboundVideo?.packetsLost ?? 0) > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+                      {localDiag?.inboundVideo?.packetsLost ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Jitter / Delay</span>
+                    <span className="font-mono text-zinc-200 block truncate">
+                      {localDiag?.inboundVideo?.jitter !== undefined ? `${Math.round(localDiag.inboundVideo.jitter * 1000)}ms` : "0ms"} ({localDiag?.inboundVideo?.jitterBufferDelayAvgMs ?? 0}ms)
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Freezes / Keys</span>
+                    <span className="font-mono text-zinc-200 block">
+                      F:{localDiag?.inboundVideo?.freezeCount ?? 0} / K:{localDiag?.inboundVideo?.keyFramesDecoded ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                    <span className="text-[10px] text-zinc-500 block">Decoder Engine</span>
+                    <span className="font-mono text-emerald-400 block truncate">
+                      {localDiag?.inboundVideo?.decoderImplementation || "Hardware/Native"}
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                  <span className="text-[10px] text-zinc-500 block">Bytes Received</span>
-                  <span className="font-mono text-zinc-200">
-                    {Math.round((localDiag?.inboundVideo?.bytesReceived || 0) / 1024)} KB
-                  </span>
-                </div>
-                <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                  <span className="text-[10px] text-zinc-500 block">Frames Dropped</span>
-                  <span className="font-mono text-zinc-400">
-                    {localDiag?.inboundVideo?.framesDropped ?? 0}
-                  </span>
-                </div>
-              </div>
+              </>
             )}
           </div>
 

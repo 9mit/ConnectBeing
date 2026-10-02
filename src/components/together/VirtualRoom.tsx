@@ -153,6 +153,7 @@ export function VirtualRoom({
     userId,
     isHost,
     initialHostStreamActive,
+    isDiagOpen: showDiagModal,
   });
 
   // Theater Session & Playback States
@@ -336,14 +337,16 @@ export function VirtualRoom({
       videoEl.addEventListener("loadedmetadata", onLoadedMetadata);
       videoEl.addEventListener("loadeddata", onLoadedMetadata);
       videoEl.addEventListener("resize", onResize);
-      videoEl.addEventListener("timeupdate", updateRenderingState);
 
-      // Fast detection via requestVideoFrameCallback on supported mobile browsers
+      // Fast detection via requestVideoFrameCallback on supported mobile browsers (terminates once first frame rendered)
       let rVfcId: number | null = null;
       if ("requestVideoFrameCallback" in videoEl) {
         const onFrame = () => {
           updateRenderingState();
-          if (videoEl && !videoEl.paused) {
+          // Stop scheduling once dimensions and playback are confirmed to prevent 60 Hz main-thread load
+          const hasDimensions = videoEl.videoWidth > 0 && videoEl.videoHeight > 0;
+          const isPlaying = !videoEl.paused;
+          if (videoEl && (!hasDimensions || !isPlaying)) {
             rVfcId = (videoEl as any).requestVideoFrameCallback(onFrame);
           }
         };
@@ -365,7 +368,6 @@ export function VirtualRoom({
         videoEl.removeEventListener("loadedmetadata", onLoadedMetadata);
         videoEl.removeEventListener("loadeddata", onLoadedMetadata);
         videoEl.removeEventListener("resize", onResize);
-        videoEl.removeEventListener("timeupdate", updateRenderingState);
       };
     } else {
       videoEl.srcObject = null;
@@ -1089,8 +1091,16 @@ export function VirtualRoom({
       remoteStream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled);
 
   // DRM Black Screen Detector for PC screen sharing Hotstar/Netflix
+  // Strictly restricted to Host: running getImageData canvas polling on mobile hardware-decoded remote video
+  // triggers synchronous GPU-to-CPU texture readbacks from MediaCodec, causing main-thread stutter.
+  // The Viewer receives theater:drm-detected via Realtime broadcast from the Host.
   useEffect(() => {
-    const video = isHost ? localVideoRef.current : remoteVideoRef.current;
+    if (!isHost) {
+      setIsDrmBlackScreenDetected(false);
+      return;
+    }
+
+    const video = localVideoRef.current;
     if (!video || !hasActiveStream || Boolean(directMediaUrl)) {
       setIsDrmBlackScreenDetected(false);
       return;
@@ -1798,6 +1808,7 @@ export function VirtualRoom({
             {isHost && (
               <video
                 ref={localVideoRef}
+                data-webrtc-role="local"
                 muted={true}
                 autoPlay
                 playsInline
@@ -1813,6 +1824,7 @@ export function VirtualRoom({
             {!isHost && (
               <video
                 ref={remoteVideoRef}
+                data-webrtc-role="remote"
                 muted={true}
                 autoPlay
                 playsInline
