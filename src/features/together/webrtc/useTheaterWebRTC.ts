@@ -30,6 +30,54 @@ export type FailureMatrixCase =
   | "HEALTHY_STREAMING"
   | "IDLE";
 
+export interface WebRTCSignalingDiag {
+  offerId: string | null;
+  // Host metrics
+  offerCreated?: boolean;
+  offerSent?: boolean;
+  answerReceived?: boolean;
+  answerApplied?: boolean;
+  answerApplyError?: string | null;
+  // Viewer metrics
+  offerReceived?: boolean;
+  offerApplied?: boolean;
+  offerApplyError?: string | null;
+  answerCreated?: boolean;
+  answerSent?: boolean;
+  offerReceivedForPcId?: number;
+  answerCreatedForPcId?: number;
+  answerSentForPcId?: number;
+}
+
+export interface WebRTCTurnDiag {
+  turnConfiguredServerSide: boolean;
+  turnConfigDeliveredToBrowser: boolean;
+  iceServerCount: number;
+  stunServerCount: number;
+  turnServerCount: number;
+  turnTransports: string[];
+  forcedRelayMode: boolean;
+}
+
+export interface WebRTCIceDiag {
+  candidatesGathered: { host: number; srflx: number; relay: number };
+  remoteCandidatesReceived: { host: number; srflx: number; relay: number; total: number };
+  remoteCandidatesAdded: number;
+  candidateErrors: number;
+  lastCandidateError?: string | null;
+  selectedPair?: {
+    state: string;
+    localType: string;
+    remoteType: string;
+    localAddress: string;
+    remoteAddress: string;
+    currentRoundTripTime?: number;
+    bytesSent: number;
+    bytesReceived: number;
+    relayActive: boolean;
+  } | null;
+}
+
 export interface WebRTCDiagnosticData {
   timestamp: number;
   role: "host" | "viewer";
@@ -40,6 +88,9 @@ export interface WebRTCDiagnosticData {
   signalingState: RTCSignalingState | "none";
   failureMatrixCase: FailureMatrixCase;
   failureMatrixSummary: string;
+  signaling: WebRTCSignalingDiag;
+  turn: WebRTCTurnDiag;
+  ice: WebRTCIceDiag;
   localVideoTrack?: {
     id: string;
     readyState: MediaStreamTrackState;
@@ -74,20 +125,6 @@ export interface WebRTCDiagnosticData {
     fps?: number;
     bitrateKbps?: number;
   };
-  ice: {
-    candidatesGathered: { host: number; srflx: number; relay: number };
-    selectedPair?: {
-      state: string;
-      localType: string;
-      remoteType: string;
-      localAddress: string;
-      remoteAddress: string;
-      currentRoundTripTime?: number;
-      bytesSent: number;
-      bytesReceived: number;
-      relayActive: boolean;
-    } | null;
-  };
   negotiatedCodec?: {
     mimeType?: string;
     payloadType?: number;
@@ -112,9 +149,6 @@ export interface TheaterWebRTCProps {
   onDriftCorrect?: (remotePos: number) => void;
 }
 
-const envTurnUser = process.env.NEXT_PUBLIC_TURN_USERNAME || "openrelayproject";
-const envTurnCred = process.env.NEXT_PUBLIC_TURN_CREDENTIAL || "openrelayproject";
-
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   {
     urls: [
@@ -125,27 +159,149 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
       "stun:global.stun.twilio.com:3478",
     ],
   },
+  // OpenRelay Public TURN (Always valid with 'openrelayproject' credentials)
   {
     urls: [
-      "turn:a.relay.metered.ca:80",
-      "turn:a.relay.metered.ca:443",
+      "turn:openrelay.metered.ca:3478",
+      "turn:openrelay.metered.ca:3478?transport=tcp",
       "turn:openrelay.metered.ca:80",
       "turn:openrelay.metered.ca:443",
-    ],
-    username: envTurnUser,
-    credential: envTurnCred,
-  },
-  {
-    urls: [
-      "turn:a.relay.metered.ca:443?transport=tcp",
       "turn:openrelay.metered.ca:443?transport=tcp",
-      "turns:a.relay.metered.ca:443",
       "turns:openrelay.metered.ca:443",
+      "turns:openrelay.metered.ca:5349",
     ],
-    username: envTurnUser,
-    credential: envTurnCred,
+    username: "openrelayproject",
+    credential: "openrelayproject",
   },
+  // Custom Metered TURN (Only if environment credentials provided)
+  ...(process.env.NEXT_PUBLIC_TURN_USERNAME && process.env.NEXT_PUBLIC_TURN_CREDENTIAL
+    ? [
+        {
+          urls: [
+            "turn:a.relay.metered.ca:3478",
+            "turn:a.relay.metered.ca:3478?transport=tcp",
+            "turn:a.relay.metered.ca:80",
+            "turn:a.relay.metered.ca:443",
+            "turn:a.relay.metered.ca:443?transport=tcp",
+            "turns:a.relay.metered.ca:443",
+            "turns:a.relay.metered.ca:5349",
+          ],
+          username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+          credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
+        },
+      ]
+    : []),
 ];
+
+/**
+ * Inspects ICE servers configuration safely WITHOUT revealing passwords or secrets
+ */
+function inspectIceServers(servers: RTCIceServer[]) {
+  let stunCount = 0;
+  let turnCount = 0;
+  const transports = new Set<string>();
+
+  for (const s of servers) {
+    const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+    for (const u of urls) {
+      if (u.startsWith("stun:") || u.startsWith("stuns:")) {
+        stunCount++;
+      } else if (u.startsWith("turn:") || u.startsWith("turns:")) {
+        turnCount++;
+        if (u.startsWith("turns:")) transports.add("tls");
+        if (u.includes("transport=tcp")) transports.add("tcp");
+        else transports.add("udp");
+      }
+    }
+  }
+
+  return {
+    iceServerCount: servers.length,
+    stunServerCount: stunCount,
+    turnServerCount: turnCount,
+    turnTransports: Array.from(transports),
+  };
+}
+
+/**
+ * Deduplicates ICE servers list by sorted URLs and username
+ */
+function deduplicateIceServers(servers: RTCIceServer[]): RTCIceServer[] {
+  const seen = new Set<string>();
+  const result: RTCIceServer[] = [];
+  for (const s of servers) {
+    const urls = Array.isArray(s.urls) ? [...s.urls].sort().join(",") : s.urls;
+    const key = `${urls}|${s.username || ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(s);
+    }
+  }
+  return result;
+}
+
+/**
+ * Parses ICE candidate type from candidate string per RFC 5245 §15.1
+ */
+function parseCandidateType(candStr?: string): "host" | "srflx" | "relay" | "unknown" {
+  if (!candStr) return "unknown";
+  const match = candStr.match(/typ\s+(\w+)/i);
+  if (match && match[1]) {
+    const t = match[1].toLowerCase();
+    if (t === "host" || t === "srflx" || t === "relay") return t;
+  }
+  return "unknown";
+}
+
+/**
+ * Standardized WebRTC Diagnostic Logger
+ * Explicitly logs ONLY: sessionId, peer role, pcId, offerId, event name,
+ * signalingState, connectionState, iceConnectionState, candidate type.
+ * STRICTLY NEVER logs TURN credentials, passwords, tokens, or cookies.
+ */
+function emitDiagnosticLog(params: {
+  sessionId: string;
+  role: "host" | "viewer";
+  pcId: number;
+  offerId: string | null;
+  eventName: string;
+  signalingState: string;
+  connectionState: string;
+  iceConnectionState: string;
+  candidateType?: string;
+  details?: Record<string, unknown>;
+}) {
+  const safeDetails: Record<string, unknown> = {};
+  if (params.details) {
+    for (const [k, v] of Object.entries(params.details)) {
+      const lower = k.toLowerCase();
+      if (
+        lower.includes("pass") ||
+        lower.includes("secret") ||
+        lower.includes("cred") ||
+        lower.includes("token") ||
+        lower.includes("cookie") ||
+        lower.includes("auth")
+      ) {
+        continue;
+      }
+      safeDetails[k] = v;
+    }
+  }
+
+  console.log(`[WebRTC-DIAG] [${params.role.toUpperCase()}] ${params.eventName}`, {
+    sessionId: params.sessionId,
+    role: params.role,
+    pcId: params.pcId,
+    offerId: params.offerId ?? "none",
+    eventName: params.eventName,
+    signalingState: params.signalingState,
+    connectionState: params.connectionState,
+    iceConnectionState: params.iceConnectionState,
+    candidateType: params.candidateType ?? "none",
+    ...safeDetails,
+  });
+}
 
 /**
  * Reorders video payload types in SDP so mobile-friendly codecs (H.264 Baseline & VP8)
@@ -361,7 +517,8 @@ export function useTheaterWebRTC({
   const restartAttemptsRef = useRef(0);
   const makingOfferRef = useRef(false);
   const activeOfferIdRef = useRef<string | null>(null);
-  const pendingRenegotiateViewerIdRef = useRef<string | null>(null);
+  const offerSentTimestampRef = useRef<number>(0);
+  const pendingRenegotiateRef = useRef<boolean>(false);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const localVoiceRef = useRef<MediaStream | null>(null);
@@ -370,6 +527,48 @@ export function useTheaterWebRTC({
   const remoteVoiceStreamIdRef = useRef<string | null>(null);
   const streamSourceTypeRef = useRef<"tab" | "window" | "screen" | "none">(streamSourceType);
   streamSourceTypeRef.current = streamSourceType;
+
+  // Diagnostic tracking refs
+  const signalingDiagRef = useRef<WebRTCSignalingDiag>({
+    offerId: null,
+    offerCreated: false,
+    offerSent: false,
+    answerReceived: false,
+    answerApplied: false,
+    answerApplyError: null,
+    offerReceived: false,
+    offerApplied: false,
+    offerApplyError: null,
+    answerCreated: false,
+    answerSent: false,
+  });
+
+  const turnDiagRef = useRef<WebRTCTurnDiag>({
+    turnConfiguredServerSide: false,
+    turnConfigDeliveredToBrowser: false,
+    iceServerCount: 0,
+    stunServerCount: 0,
+    turnServerCount: 0,
+    turnTransports: [],
+    forcedRelayMode: false,
+  });
+
+  const iceDiagRef = useRef<{
+    remoteCandidatesReceived: { host: number; srflx: number; relay: number; total: number };
+    remoteCandidatesAdded: number;
+    candidateErrors: number;
+    lastCandidateError: string | null;
+  }>({
+    remoteCandidatesReceived: { host: 0, srflx: 0, relay: 0, total: 0 },
+    remoteCandidatesAdded: 0,
+    candidateErrors: 0,
+    lastCandidateError: null,
+  });
+
+  // Forced Relay Diagnostic Control (temporary test mode)
+  const [forceRelay, setForceRelay] = useState(false);
+  const forceRelayRef = useRef(forceRelay);
+  forceRelayRef.current = forceRelay;
 
   const gatheredCandidatesRef = useRef<{ host: number; srflx: number; relay: number }>({
     host: 0,
@@ -418,6 +617,12 @@ export function useTheaterWebRTC({
       type: "broadcast",
       event,
       payload: fullPayload,
+    }).then((res) => {
+      if (res && res !== "ok") {
+        console.warn(`[WebRTC Realtime] Broadcast '${event}' response: ${res}`);
+      }
+    }).catch((err) => {
+      console.error(`[WebRTC Realtime] Broadcast '${event}' failed:`, err);
     });
   }, [userId]);
 
@@ -439,17 +644,43 @@ export function useTheaterWebRTC({
 
   // Flush queued ICE candidates after remote description is set
   const flushPendingIce = useCallback(async (pc: RTCPeerConnection) => {
-    while (pendingIceRef.current.length > 0) {
-      const cand = pendingIceRef.current.shift();
-      if (cand) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(cand));
-        } catch {
-          // ignore stale candidate
-        }
+    const queue = [...pendingIceRef.current];
+    pendingIceRef.current = [];
+    for (const cand of queue) {
+      const cType = parseCandidateType(cand.candidate);
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(cand));
+        iceDiagRef.current.remoteCandidatesAdded++;
+        emitDiagnosticLog({
+          sessionId,
+          role: isHost ? "host" : "viewer",
+          pcId: currentPcIdRef.current,
+          offerId: activeOfferIdRef.current,
+          eventName: "ice-candidate-flushed-success",
+          signalingState: pc.signalingState,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          candidateType: cType,
+        });
+      } catch (err: unknown) {
+        iceDiagRef.current.candidateErrors++;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        iceDiagRef.current.lastCandidateError = errMsg;
+        emitDiagnosticLog({
+          sessionId,
+          role: isHost ? "host" : "viewer",
+          pcId: currentPcIdRef.current,
+          offerId: activeOfferIdRef.current,
+          eventName: "ice-candidate-flushed-error",
+          signalingState: pc.signalingState,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          candidateType: cType,
+          details: { error: errMsg },
+        });
       }
     }
-  }, []);
+  }, [isHost, sessionId]);
 
   // Initialize or re-create PeerConnection cleanly
   const getOrCreatePc = useCallback((forceFresh = false) => {
@@ -459,7 +690,16 @@ export function useTheaterWebRTC({
 
     if (pcRef.current) {
       try {
-        console.log(`[WebRTC PC #${currentPcIdRef.current}] Closing previous RTCPeerConnection cleanly`);
+        emitDiagnosticLog({
+          sessionId,
+          role: isHost ? "host" : "viewer",
+          pcId: currentPcIdRef.current,
+          offerId: activeOfferIdRef.current,
+          eventName: "closing-previous-pc",
+          signalingState: pcRef.current.signalingState,
+          connectionState: pcRef.current.connectionState,
+          iceConnectionState: pcRef.current.iceConnectionState,
+        });
         pcRef.current.onicecandidate = null;
         pcRef.current.ontrack = null;
         pcRef.current.onconnectionstatechange = null;
@@ -473,10 +713,30 @@ export function useTheaterWebRTC({
     const pcId = ++pcCountRef.current;
     currentPcIdRef.current = pcId;
     gatheredCandidatesRef.current = { host: 0, srflx: 0, relay: 0 };
-    console.log(`[WebRTC PC #${pcId}] Initialized fresh RTCPeerConnection (role=${isHost ? "HOST" : "VIEWER"}, forceFresh=${forceFresh})`);
 
-    // Clear stale remote media state so dead tracks from old PC don't contaminate new streams
+    const inspectedServers = inspectIceServers(iceServersRef.current);
+    emitDiagnosticLog({
+      sessionId,
+      role: isHost ? "host" : "viewer",
+      pcId,
+      offerId: activeOfferIdRef.current,
+      eventName: "initialized-fresh-pc",
+      signalingState: "new",
+      connectionState: "new",
+      iceConnectionState: "new",
+      details: {
+        forceFresh,
+        forcedRelay: forceRelayRef.current,
+        iceServerCount: inspectedServers.iceServerCount,
+        stunServerCount: inspectedServers.stunServerCount,
+        turnServerCount: inspectedServers.turnServerCount,
+        turnTransports: inspectedServers.turnTransports,
+      },
+    });
+
+    // Clear stale remote media state and queued candidates only on explicit fresh teardown
     if (forceFresh) {
+      pendingIceRef.current = [];
       if (remoteStreamRef.current) {
         remoteStreamRef.current.getTracks().forEach((t) => t.stop());
       }
@@ -490,21 +750,33 @@ export function useTheaterWebRTC({
       iceServers: iceServersRef.current,
       bundlePolicy: "max-bundle",
       iceCandidatePoolSize: 2,
+      iceTransportPolicy: forceRelayRef.current ? "relay" : "all",
     });
     pcRef.current = pc;
 
     pc.onicecandidate = (ev) => {
       if (ev.candidate) {
-        const cType = ev.candidate.type;
+        const cType = ev.candidate.type || parseCandidateType(ev.candidate.candidate);
         if (cType === "host") gatheredCandidatesRef.current.host++;
         else if (cType === "srflx") gatheredCandidatesRef.current.srflx++;
         else if (cType === "relay") gatheredCandidatesRef.current.relay++;
 
-        console.log(`[WebRTC PC #${pcId} ICE] Candidate gathered (${cType}):`, ev.candidate.candidate);
+        emitDiagnosticLog({
+          sessionId,
+          role: isHost ? "host" : "viewer",
+          pcId,
+          offerId: activeOfferIdRef.current,
+          eventName: "ice-candidate-gathered",
+          signalingState: pc.signalingState,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          candidateType: cType,
+        });
 
         sendSignal("theater:ice-candidate", {
           candidate: ev.candidate.toJSON(),
           offerId: activeOfferIdRef.current,
+          pcId,
         });
       }
     };
@@ -514,17 +786,23 @@ export function useTheaterWebRTC({
       const associatedStream = ev.streams[0];
       const streamId = associatedStream?.id;
 
-      console.log(`[WebRTC PC #${pcId}] ontrack fired:`, {
-        kind: track.kind,
-        trackId: track.id,
-        readyState: track.readyState,
-        enabled: track.enabled,
-        muted: track.muted,
-        label: track.label,
-        streamsCount: ev.streams.length,
-        streamId,
-        existingRemoteVideoTracks: remoteStreamRef.current?.getVideoTracks().length ?? 0,
-        existingRemoteAudioTracks: remoteStreamRef.current?.getAudioTracks().length ?? 0,
+      emitDiagnosticLog({
+        sessionId,
+        role: isHost ? "host" : "viewer",
+        pcId,
+        offerId: activeOfferIdRef.current,
+        eventName: "ontrack-fired",
+        signalingState: pc.signalingState,
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        details: {
+          kind: track.kind,
+          trackId: track.id,
+          readyState: track.readyState,
+          enabled: track.enabled,
+          muted: track.muted,
+          streamId,
+        },
       });
 
       if (track.kind === "video") {
@@ -542,13 +820,21 @@ export function useTheaterWebRTC({
 
         // CRITICAL: Stable MediaStream identity!
         // Do NOT create new MediaStream instances on every packet or onunmute.
-        // A single stable MediaStream reference prevents mobile hardware decoders
-        // from resetting and staying black.
         setRemoteStream(rStream);
         updateState("LIVE");
 
         track.onunmute = () => {
-          console.log(`[WebRTC PC #${pcId}] Video track unmuted (media packets flowing):`, track.id);
+          emitDiagnosticLog({
+            sessionId,
+            role: isHost ? "host" : "viewer",
+            pcId,
+            offerId: activeOfferIdRef.current,
+            eventName: "track-unmuted",
+            signalingState: pc.signalingState,
+            connectionState: pc.connectionState,
+            iceConnectionState: pc.iceConnectionState,
+            details: { trackId: track.id },
+          });
           updateState("LIVE");
           setRemoteTrackRevision((c) => c + 1);
         };
@@ -596,14 +882,15 @@ export function useTheaterWebRTC({
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
-      console.log(`[WebRTC PC #${pcId}] connectionStateChange:`, {
+      emitDiagnosticLog({
+        sessionId,
+        role: isHost ? "host" : "viewer",
+        pcId,
+        offerId: activeOfferIdRef.current,
+        eventName: "connection-state-change",
+        signalingState: pc.signalingState,
         connectionState: state,
         iceConnectionState: pc.iceConnectionState,
-        iceGatheringState: pc.iceGatheringState,
-        signalingState: pc.signalingState,
-        senderCount: pc.getSenders().length,
-        receiverCount: pc.getReceivers().length,
-        isHost,
       });
 
       if (state === "connected") {
@@ -632,18 +919,31 @@ export function useTheaterWebRTC({
     };
 
     return pc;
-  }, [applyBitrateCap, isHost, sendSignal, updateState]);
+  }, [applyBitrateCap, isHost, sendSignal, sessionId, updateState]);
 
   const lastRenegotiateTimeRef = useRef<number>(0);
 
   // Host renegotiation logic when Viewer announces presence/readiness
+  // CRITICAL FIX: Never destroy an in-flight PC while it is awaiting an answer (have-local-offer)
   const renegotiateForViewer = useCallback(async (targetViewerId?: string) => {
     if (!isHost || !localStreamRef.current) return;
     const videoTrack = localStreamRef.current.getVideoTracks()[0];
     if (!videoTrack || videoTrack.readyState !== "live") return;
 
-    // 1. If already connected AND not responding to a newly joined viewer, re-announce stream state
-    if (!targetViewerId && pcRef.current && pcRef.current.connectionState === "connected") {
+    const pc = pcRef.current;
+
+    // 1. If existing PC is already connected, re-announce stream state without destroying PC
+    if (pc && pc.connectionState === "connected") {
+      emitDiagnosticLog({
+        sessionId,
+        role: "host",
+        pcId: currentPcIdRef.current,
+        offerId: activeOfferIdRef.current,
+        eventName: "renegotiate-skipped-already-connected",
+        signalingState: pc.signalingState,
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+      });
       sendSignal("theater:stream-state", {
         state: "LIVE",
         surface: streamSourceTypeRef.current || "tab",
@@ -651,38 +951,94 @@ export function useTheaterWebRTC({
       return;
     }
 
-    // 2. Debounce and concurrency protection
-    const now = Date.now();
-    if (makingOfferRef.current || (now - lastRenegotiateTimeRef.current < 500 && !targetViewerId)) {
-      if (targetViewerId) {
-        pendingRenegotiateViewerIdRef.current = targetViewerId;
+    // 2. If existing PC is currently awaiting answer (have-local-offer)
+    // DO NOT destroy the PC! That destroys the offer before the viewer can answer.
+    if (pc && pc.signalingState === "have-local-offer") {
+      const elapsedSinceOffer = Date.now() - offerSentTimestampRef.current;
+      if (elapsedSinceOffer < 10000) {
+        emitDiagnosticLog({
+          sessionId,
+          role: "host",
+          pcId: currentPcIdRef.current,
+          offerId: activeOfferIdRef.current,
+          eventName: "renegotiate-resending-existing-offer",
+          signalingState: pc.signalingState,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          details: { elapsedMs: elapsedSinceOffer, targetViewerId: targetViewerId ?? "broadcast" },
+        });
+
+        // Re-transmit existing offer to the target viewer or broadcast
+        sendSignal("theater:offer", {
+          sdp: pc.localDescription,
+          surface: streamSourceTypeRef.current || "tab",
+          offerId: activeOfferIdRef.current,
+          targetViewerId,
+          pcId: currentPcIdRef.current,
+          movieStreamId: localStreamRef.current?.id,
+          voiceStreamId: localVoiceRef.current?.id,
+        });
+        return;
       }
+      // If elapsed >= 10000ms, offer timed out; fall through to create a fresh offer.
+    }
+
+    // 3. If existing PC is in 'stable' signaling state and ICE is actively connecting/checking
+    // DO NOT interrupt in-flight ICE connection checks with a new offer!
+    if (
+      pc &&
+      pc.signalingState === "stable" &&
+      (pc.connectionState === "connecting" || pc.iceConnectionState === "checking")
+    ) {
+      const elapsedSinceOffer = Date.now() - offerSentTimestampRef.current;
+      if (elapsedSinceOffer < 15000) {
+        emitDiagnosticLog({
+          sessionId,
+          role: "host",
+          pcId: currentPcIdRef.current,
+          offerId: activeOfferIdRef.current,
+          eventName: "renegotiate-skipped-ice-in-flight",
+          signalingState: pc.signalingState,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          details: { elapsedMs: elapsedSinceOffer, targetViewerId: targetViewerId ?? "broadcast" },
+        });
+        return;
+      }
+    }
+
+    // 4. Concurrency protection & debouncing
+    const now = Date.now();
+    if (makingOfferRef.current) {
+      pendingRenegotiateRef.current = true;
+      return;
+    }
+    if (now - lastRenegotiateTimeRef.current < 1000) {
+      pendingRenegotiateRef.current = true;
       return;
     }
     lastRenegotiateTimeRef.current = now;
     makingOfferRef.current = true;
 
     try {
-      // When responding to a viewer readiness announcement, refresh, or when disconnected,
-      // instantiate a fresh RTCPeerConnection to guarantee clean SDP generation & fresh ICE candidate exchange.
+      // Only instantiate fresh PC if none exists, or closed, or failed, or offer explicitly timed out
       const needFresh =
         !pcRef.current ||
-        pcRef.current.connectionState !== "connected" ||
         pcRef.current.signalingState === "closed" ||
-        Boolean(targetViewerId);
-      const pc = getOrCreatePc(needFresh);
-      if (needFresh) {
-        pendingIceRef.current = [];
-      }
+        pcRef.current.connectionState === "failed" ||
+        pcRef.current.connectionState === "disconnected" ||
+        (pcRef.current.signalingState === "have-local-offer" && (now - offerSentTimestampRef.current >= 10000));
+
+      const activePc = getOrCreatePc(needFresh);
 
       // Add movie stream tracks if not already added
-      const senders = pc.getSenders();
+      const senders = activePc.getSenders();
       localStreamRef.current.getTracks().forEach((track) => {
         if (track.readyState === "live") {
           const alreadyAdded = senders.some((s) => s.track?.id === track.id);
           if (!alreadyAdded) {
             try {
-              pc.addTrack(track, localStreamRef.current!);
+              activePc.addTrack(track, localStreamRef.current!);
             } catch {
               // ignore duplicate track
             }
@@ -697,7 +1053,7 @@ export function useTheaterWebRTC({
           const alreadyAdded = senders.some((s) => s.track?.id === vTrack.id);
           if (!alreadyAdded) {
             try {
-              pc.addTrack(vTrack, localVoiceRef.current);
+              activePc.addTrack(vTrack, localVoiceRef.current);
             } catch {
               // ignore duplicate track
             }
@@ -705,44 +1061,90 @@ export function useTheaterWebRTC({
         }
       }
 
-      const offerId = Math.random().toString(36).substring(2, 9);
+      const offerId = `off_${sessionId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       activeOfferIdRef.current = offerId;
+      offerSentTimestampRef.current = Date.now();
 
-      pc.getTransceivers().forEach((transceiver) => {
+      // Diagnostic tracking
+      signalingDiagRef.current.offerId = offerId;
+      signalingDiagRef.current.offerCreated = true;
+      signalingDiagRef.current.offerSent = false;
+      signalingDiagRef.current.answerReceived = false;
+      signalingDiagRef.current.answerApplied = false;
+      signalingDiagRef.current.answerApplyError = null;
+
+      activePc.getTransceivers().forEach((transceiver) => {
         if (transceiver.sender.track?.kind === "video" || transceiver.receiver.track?.kind === "video") {
           prioritizeMobileSafeCodecs(transceiver);
         }
       });
 
-      const offer = await pc.createOffer();
+      emitDiagnosticLog({
+        sessionId,
+        role: "host",
+        pcId: currentPcIdRef.current,
+        offerId,
+        eventName: "creating-offer",
+        signalingState: activePc.signalingState,
+        connectionState: activePc.connectionState,
+        iceConnectionState: activePc.iceConnectionState,
+      });
+
+      const offer = await activePc.createOffer();
       const safeOfferSdp = prioritizeCodecsInSdp(offer.sdp || "");
       const modifiedOffer = { type: offer.type, sdp: safeOfferSdp };
-      await pc.setLocalDescription(modifiedOffer);
+      await activePc.setLocalDescription(modifiedOffer);
+
+      emitDiagnosticLog({
+        sessionId,
+        role: "host",
+        pcId: currentPcIdRef.current,
+        offerId,
+        eventName: "set-local-description-offer",
+        signalingState: activePc.signalingState,
+        connectionState: activePc.connectionState,
+        iceConnectionState: activePc.iceConnectionState,
+      });
 
       // Wait up to 300ms for initial STUN/TURN candidates to gather into localDescription
       await new Promise<void>((resolve) => {
-        if (pc.iceGatheringState === "complete") {
+        if (activePc.iceGatheringState === "complete") {
           resolve();
         } else {
           const check = () => {
-            if (pc.iceGatheringState === "complete") {
-              pc.removeEventListener("icegatheringstatechange", check);
+            if (activePc.iceGatheringState === "complete") {
+              activePc.removeEventListener("icegatheringstatechange", check);
               resolve();
             }
           };
-          pc.addEventListener("icegatheringstatechange", check);
+          activePc.addEventListener("icegatheringstatechange", check);
           setTimeout(() => {
-            pc.removeEventListener("icegatheringstatechange", check);
+            activePc.removeEventListener("icegatheringstatechange", check);
             resolve();
           }, 300);
         }
       });
 
+      signalingDiagRef.current.offerSent = true;
+
+      emitDiagnosticLog({
+        sessionId,
+        role: "host",
+        pcId: currentPcIdRef.current,
+        offerId,
+        eventName: "offer-sent",
+        signalingState: activePc.signalingState,
+        connectionState: activePc.connectionState,
+        iceConnectionState: activePc.iceConnectionState,
+        details: { targetViewerId: targetViewerId ?? "broadcast" },
+      });
+
       sendSignal("theater:offer", {
-        sdp: pc.localDescription || offer,
+        sdp: activePc.localDescription || offer,
         surface: streamSourceTypeRef.current || "tab",
         offerId,
         targetViewerId,
+        pcId: currentPcIdRef.current,
         movieStreamId: localStreamRef.current?.id,
         voiceStreamId: localVoiceRef.current?.id,
       });
@@ -751,31 +1153,87 @@ export function useTheaterWebRTC({
         state: "LIVE",
         surface: streamSourceTypeRef.current || "tab",
       });
-    } catch (err) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      signalingDiagRef.current.answerApplyError = errMsg;
+      emitDiagnosticLog({
+        sessionId,
+        role: "host",
+        pcId: currentPcIdRef.current,
+        offerId: activeOfferIdRef.current,
+        eventName: "create-offer-error",
+        signalingState: pcRef.current?.signalingState || "none",
+        connectionState: pcRef.current?.connectionState || "none",
+        iceConnectionState: pcRef.current?.iceConnectionState || "none",
+        details: { error: errMsg },
+      });
       console.error("[WebRTC Host] Failed creating renegotiated offer:", err);
     } finally {
       makingOfferRef.current = false;
-      if (pendingRenegotiateViewerIdRef.current) {
-        const nextViewer = pendingRenegotiateViewerIdRef.current;
-        pendingRenegotiateViewerIdRef.current = null;
-        setTimeout(() => {
-          void renegotiateForViewer(nextViewer);
-        }, 350);
+      if (pendingRenegotiateRef.current) {
+        pendingRenegotiateRef.current = false;
+        // Schedule next renegotiation ONLY if PC is not currently awaiting answer
+        const currentPc = pcRef.current;
+        if (currentPc && currentPc.signalingState !== "have-local-offer") {
+          setTimeout(() => {
+            void renegotiateForViewer();
+          }, 1500);
+        }
       }
     }
-  }, [getOrCreatePc, isHost, sendSignal]);
+  }, [getOrCreatePc, isHost, sendSignal, sessionId]);
 
   // Viewer announces readiness to host
   const sendViewerReady = useCallback(() => {
     if (isHost) return;
+    emitDiagnosticLog({
+      sessionId,
+      role: "viewer",
+      pcId: currentPcIdRef.current,
+      offerId: activeOfferIdRef.current,
+      eventName: "send-viewer-ready",
+      signalingState: pcRef.current?.signalingState || "none",
+      connectionState: pcRef.current?.connectionState || "none",
+      iceConnectionState: pcRef.current?.iceConnectionState || "none",
+    });
     sendSignal("theater:viewer-ready", {
       viewerUserId: userId,
       timestamp: Date.now(),
     });
-  }, [isHost, sendSignal, userId]);
+  }, [isHost, sendSignal, sessionId, userId]);
 
   renegotiateRef.current = renegotiateForViewer;
   sendViewerReadyRef.current = sendViewerReady;
+
+  // Toggle forced relay mode for diagnostic control test
+  const toggleForceRelay = useCallback(() => {
+    setForceRelay((prev) => {
+      const next = !prev;
+      forceRelayRef.current = next;
+      console.log(`[WebRTC] Forced Relay Diagnostic mode changed to: ${next ? "RELAY ONLY" : "ALL"}`);
+
+      // Recreate PC fresh with new iceTransportPolicy because W3C spec prohibits changing it on existing PC
+      if (isHost) {
+        if (localStreamRef.current) {
+          const pc = getOrCreatePc(true);
+          localStreamRef.current.getTracks().forEach((track) => {
+            pc.addTrack(track, localStreamRef.current!);
+          });
+          if (localVoiceRef.current) {
+            const vTrack = localVoiceRef.current.getAudioTracks()[0];
+            if (vTrack && vTrack.readyState === "live") {
+              pc.addTrack(vTrack, localVoiceRef.current);
+            }
+          }
+          void renegotiateRef.current?.();
+        }
+      } else {
+        getOrCreatePc(true);
+        sendViewerReadyRef.current?.();
+      }
+      return next;
+    });
+  }, [getOrCreatePc, isHost]);
 
   // Stop screen sharing cleanly
   const stopScreenShare = useCallback(() => {
@@ -881,8 +1339,16 @@ export function useTheaterWebRTC({
       // Create offer
       makingOfferRef.current = true;
       try {
-        const offerId = Math.random().toString(36).substring(2, 9);
+        const offerId = `off_${sessionId}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         activeOfferIdRef.current = offerId;
+        offerSentTimestampRef.current = Date.now();
+
+        signalingDiagRef.current.offerId = offerId;
+        signalingDiagRef.current.offerCreated = true;
+        signalingDiagRef.current.offerSent = false;
+        signalingDiagRef.current.answerReceived = false;
+        signalingDiagRef.current.answerApplied = false;
+        signalingDiagRef.current.answerApplyError = null;
 
         pc.getTransceivers().forEach((transceiver) => {
           if (transceiver.sender.track?.kind === "video" || transceiver.receiver.track?.kind === "video") {
@@ -890,10 +1356,32 @@ export function useTheaterWebRTC({
           }
         });
 
+        emitDiagnosticLog({
+          sessionId,
+          role: "host",
+          pcId: currentPcIdRef.current,
+          offerId,
+          eventName: "host-screenshare-create-offer",
+          signalingState: pc.signalingState,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+        });
+
         const offer = await pc.createOffer();
         const safeOfferSdp = prioritizeCodecsInSdp(offer.sdp || "");
         const modifiedOffer = { type: offer.type, sdp: safeOfferSdp };
         await pc.setLocalDescription(modifiedOffer);
+
+        emitDiagnosticLog({
+          sessionId,
+          role: "host",
+          pcId: currentPcIdRef.current,
+          offerId,
+          eventName: "set-local-description-offer",
+          signalingState: pc.signalingState,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+        });
 
         // Wait up to 350ms for initial STUN/TURN candidates to gather into localDescription
         await new Promise<void>((resolve) => {
@@ -914,10 +1402,25 @@ export function useTheaterWebRTC({
           }
         });
 
+        signalingDiagRef.current.offerSent = true;
+
+        emitDiagnosticLog({
+          sessionId,
+          role: "host",
+          pcId: currentPcIdRef.current,
+          offerId,
+          eventName: "offer-sent",
+          signalingState: pc.signalingState,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          details: { surface: detectedSurface },
+        });
+
         sendSignal("theater:offer", {
           sdp: pc.localDescription || offer,
           surface: detectedSurface,
           offerId,
+          pcId: currentPcIdRef.current,
           movieStreamId: stream.id,
           voiceStreamId: localVoiceRef.current?.id,
         });
@@ -1017,18 +1520,68 @@ export function useTheaterWebRTC({
       .on("broadcast", { event: "theater:offer" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
         if (payload.targetViewerId && payload.targetViewerId !== userId) return;
+        if (isHost) return;
+
+        signalingDiagRef.current.offerReceived = true;
+        signalingDiagRef.current.offerId = payload.offerId || null;
+        signalingDiagRef.current.offerReceivedForPcId = currentPcIdRef.current;
+
+        emitDiagnosticLog({
+          sessionId,
+          role: "viewer",
+          pcId: currentPcIdRef.current,
+          offerId: payload.offerId,
+          eventName: "offer-received",
+          signalingState: pcRef.current?.signalingState || "none",
+          connectionState: pcRef.current?.connectionState || "none",
+          iceConnectionState: pcRef.current?.iceConnectionState || "none",
+          details: { hostPcId: payload.pcId, offerId: payload.offerId },
+        });
+
         try {
           // If already processing or connected with this offerId, avoid resetting
-          if (
-            activeOfferIdRef.current === payload.offerId &&
-            pcRef.current?.connectionState === "connected"
-          ) {
-            return;
+          if (activeOfferIdRef.current === payload.offerId && pcRef.current) {
+            if (pcRef.current.connectionState === "connected") {
+              emitDiagnosticLog({
+                sessionId,
+                role: "viewer",
+                pcId: currentPcIdRef.current,
+                offerId: payload.offerId,
+                eventName: "offer-ignored-already-connected",
+                signalingState: pcRef.current.signalingState,
+                connectionState: pcRef.current.connectionState,
+                iceConnectionState: pcRef.current.iceConnectionState,
+              });
+              return;
+            }
+
+            // If we already generated an answer for this offerId and are connecting,
+            // re-send the existing answer instead of re-applying SDP and disrupting ICE!
+            if (
+              pcRef.current.signalingState === "stable" &&
+              pcRef.current.localDescription &&
+              signalingDiagRef.current.answerCreated
+            ) {
+              emitDiagnosticLog({
+                sessionId,
+                role: "viewer",
+                pcId: currentPcIdRef.current,
+                offerId: payload.offerId,
+                eventName: "offer-resending-existing-answer",
+                signalingState: pcRef.current.signalingState,
+                connectionState: pcRef.current.connectionState,
+                iceConnectionState: pcRef.current.iceConnectionState,
+              });
+              sendSignal("theater:answer", {
+                sdp: pcRef.current.localDescription,
+                offerId: payload.offerId,
+                viewerPcId: currentPcIdRef.current,
+                hostPcId: payload.pcId,
+              });
+              return;
+            }
           }
-          // A new offerId from the host means the host created a fresh RTCPeerConnection
-          // (e.g., in renegotiateForViewer). The viewer MUST also create a fresh PC so that
-          // ontrack fires for the new transceivers. Reusing the old PC causes ontrack to
-          // never fire (W3C WebRTC spec: existing transceivers don't re-fire ontrack).
+
           const isNewOffer = payload.offerId !== activeOfferIdRef.current;
           activeOfferIdRef.current = payload.offerId;
 
@@ -1042,11 +1595,9 @@ export function useTheaterWebRTC({
           const needFresh =
             !pcRef.current ||
             pcRef.current.signalingState === "closed" ||
+            pcRef.current.connectionState === "failed" ||
             isNewOffer;
           const pc = getOrCreatePc(needFresh);
-          if (needFresh) {
-            pendingIceRef.current = [];
-          }
 
           const rawSdp = typeof payload.sdp === "string" ? payload.sdp : payload.sdp?.sdp || "";
           const safeOfferSdp = prioritizeCodecsInSdp(rawSdp);
@@ -1054,6 +1605,21 @@ export function useTheaterWebRTC({
             type: "offer",
             sdp: safeOfferSdp,
           }));
+
+          signalingDiagRef.current.offerApplied = true;
+          signalingDiagRef.current.offerApplyError = null;
+
+          emitDiagnosticLog({
+            sessionId,
+            role: "viewer",
+            pcId: currentPcIdRef.current,
+            offerId: payload.offerId,
+            eventName: "offer-applied-success",
+            signalingState: pc.signalingState,
+            connectionState: pc.connectionState,
+            iceConnectionState: pc.iceConnectionState,
+          });
+
           await flushPendingIce(pc);
 
           // Defensive receiver track recovery: ensure any newly provisioned receiver track is attached
@@ -1083,9 +1649,23 @@ export function useTheaterWebRTC({
           }
 
           const answer = await pc.createAnswer();
+          signalingDiagRef.current.answerCreated = true;
+          signalingDiagRef.current.answerCreatedForPcId = currentPcIdRef.current;
+
           // CRITICAL: DO NOT munge answer SDP per RFC 8829 §5.4!
           // Modifying answer payload types causes WebKit (iOS Safari) and Chromium to throw InvalidModificationError.
           await pc.setLocalDescription(answer);
+
+          emitDiagnosticLog({
+            sessionId,
+            role: "viewer",
+            pcId: currentPcIdRef.current,
+            offerId: payload.offerId,
+            eventName: "set-local-description-answer",
+            signalingState: pc.signalingState,
+            connectionState: pc.connectionState,
+            iceConnectionState: pc.iceConnectionState,
+          });
 
           // Wait up to 300ms for initial STUN/TURN candidates to gather into localDescription
           await new Promise<void>((resolve) => {
@@ -1106,9 +1686,25 @@ export function useTheaterWebRTC({
             }
           });
 
+          signalingDiagRef.current.answerSent = true;
+          signalingDiagRef.current.answerSentForPcId = currentPcIdRef.current;
+
+          emitDiagnosticLog({
+            sessionId,
+            role: "viewer",
+            pcId: currentPcIdRef.current,
+            offerId: payload.offerId,
+            eventName: "answer-sent",
+            signalingState: pc.signalingState,
+            connectionState: pc.connectionState,
+            iceConnectionState: pc.iceConnectionState,
+          });
+
           sendSignal("theater:answer", {
             sdp: pc.localDescription || answer,
             offerId: payload.offerId,
+            viewerPcId: currentPcIdRef.current,
+            hostPcId: payload.pcId,
           });
 
           if (payload.surface) {
@@ -1116,12 +1712,89 @@ export function useTheaterWebRTC({
             streamSourceTypeRef.current = payload.surface;
           }
           updateState("STREAM_CONNECTING");
-        } catch (e) {
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          signalingDiagRef.current.offerApplied = false;
+          signalingDiagRef.current.offerApplyError = errMsg;
+          emitDiagnosticLog({
+            sessionId,
+            role: "viewer",
+            pcId: currentPcIdRef.current,
+            offerId: payload.offerId,
+            eventName: "offer-handling-error",
+            signalingState: pcRef.current?.signalingState || "none",
+            connectionState: pcRef.current?.connectionState || "none",
+            iceConnectionState: pcRef.current?.iceConnectionState || "none",
+            details: { error: errMsg },
+          });
           console.error("[WebRTC Viewer] Failed handling WebRTC offer:", e);
         }
       })
       .on("broadcast", { event: "theater:answer" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
+        if (!isHost) return;
+
+        signalingDiagRef.current.answerReceived = true;
+
+        emitDiagnosticLog({
+          sessionId,
+          role: "host",
+          pcId: currentPcIdRef.current,
+          offerId: payload.offerId,
+          eventName: "answer-received",
+          signalingState: pcRef.current?.signalingState || "none",
+          connectionState: pcRef.current?.connectionState || "none",
+          iceConnectionState: pcRef.current?.iceConnectionState || "none",
+          details: {
+            payloadOfferId: payload.offerId,
+            activeOfferId: activeOfferIdRef.current,
+            viewerPcId: payload.viewerPcId,
+            hostPcId: payload.hostPcId,
+          },
+        });
+
+        // OfferId validation to prevent SDP session mismatch on host PC
+        if (activeOfferIdRef.current && payload.offerId && payload.offerId !== activeOfferIdRef.current) {
+          const mismatchMsg = `OfferId mismatch: expected ${activeOfferIdRef.current}, received ${payload.offerId}`;
+          signalingDiagRef.current.answerApplyError = mismatchMsg;
+          emitDiagnosticLog({
+            sessionId,
+            role: "host",
+            pcId: currentPcIdRef.current,
+            offerId: payload.offerId,
+            eventName: "answer-offerId-mismatch",
+            signalingState: pcRef.current?.signalingState || "none",
+            connectionState: pcRef.current?.connectionState || "none",
+            iceConnectionState: pcRef.current?.iceConnectionState || "none",
+            details: {
+              expectedOfferId: activeOfferIdRef.current,
+              receivedOfferId: payload.offerId,
+            },
+          });
+          return;
+        }
+
+        // Host PC ID validation: reject answers intended for an older/closed Host PC instance
+        if (payload.hostPcId && payload.hostPcId !== currentPcIdRef.current) {
+          const mismatchMsg = `Host PC ID mismatch: expected PC #${currentPcIdRef.current}, received for PC #${payload.hostPcId}`;
+          signalingDiagRef.current.answerApplyError = mismatchMsg;
+          emitDiagnosticLog({
+            sessionId,
+            role: "host",
+            pcId: currentPcIdRef.current,
+            offerId: payload.offerId,
+            eventName: "answer-hostPcId-mismatch",
+            signalingState: pcRef.current?.signalingState || "none",
+            connectionState: pcRef.current?.connectionState || "none",
+            iceConnectionState: pcRef.current?.iceConnectionState || "none",
+            details: {
+              expectedHostPcId: currentPcIdRef.current,
+              receivedHostPcId: payload.hostPcId,
+            },
+          });
+          return;
+        }
+
         try {
           const pc = pcRef.current;
           if (
@@ -1129,37 +1802,158 @@ export function useTheaterWebRTC({
             (pc.signalingState === "have-local-offer" ||
               pc.signalingState === "have-remote-pranswer")
           ) {
-            const answerDesc =
+            const rawSdp =
               typeof payload.sdp === "string"
-                ? { type: "answer", sdp: payload.sdp }
-                : payload.sdp;
-            if (answerDesc && answerDesc.sdp) {
-              await pc.setRemoteDescription(new RTCSessionDescription(answerDesc));
+                ? payload.sdp
+                : payload.sdp?.sdp;
+            if (rawSdp) {
+              await pc.setRemoteDescription(new RTCSessionDescription({
+                type: "answer",
+                sdp: rawSdp,
+              }));
+              signalingDiagRef.current.answerApplied = true;
+              signalingDiagRef.current.answerApplyError = null;
+
+              emitDiagnosticLog({
+                sessionId,
+                role: "host",
+                pcId: currentPcIdRef.current,
+                offerId: activeOfferIdRef.current,
+                eventName: "answer-applied-success",
+                signalingState: pc.signalingState,
+                connectionState: pc.connectionState,
+                iceConnectionState: pc.iceConnectionState,
+              });
+
               await flushPendingIce(pc);
             }
+          } else {
+            const stateMsg = `Host PC not in have-local-offer (current: ${pc?.signalingState || "no-pc"})`;
+            signalingDiagRef.current.answerApplyError = stateMsg;
+            emitDiagnosticLog({
+              sessionId,
+              role: "host",
+              pcId: currentPcIdRef.current,
+              offerId: activeOfferIdRef.current,
+              eventName: "answer-ignored-wrong-state",
+              signalingState: pc?.signalingState || "none",
+              connectionState: pc?.connectionState || "none",
+              iceConnectionState: pc?.iceConnectionState || "none",
+            });
           }
-        } catch (e) {
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          signalingDiagRef.current.answerApplied = false;
+          signalingDiagRef.current.answerApplyError = errMsg;
+          emitDiagnosticLog({
+            sessionId,
+            role: "host",
+            pcId: currentPcIdRef.current,
+            offerId: activeOfferIdRef.current,
+            eventName: "answer-apply-error",
+            signalingState: pcRef.current?.signalingState || "none",
+            connectionState: pcRef.current?.connectionState || "none",
+            iceConnectionState: pcRef.current?.iceConnectionState || "none",
+            details: { error: errMsg },
+          });
           console.error("[WebRTC Host] Failed handling WebRTC answer:", e);
         }
       })
       .on("broadcast", { event: "theater:ice-candidate" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
         const candidate = payload.candidate as RTCIceCandidateInit;
-        if (!candidate) return;
+        if (!candidate || !candidate.candidate) return;
+
+        // Reject candidates from stale offer generations to prevent SDP mismatch errors
+        if (
+          payload.offerId &&
+          activeOfferIdRef.current &&
+          payload.offerId !== activeOfferIdRef.current
+        ) {
+          emitDiagnosticLog({
+            sessionId,
+            role: isHost ? "host" : "viewer",
+            pcId: currentPcIdRef.current,
+            offerId: activeOfferIdRef.current,
+            eventName: "ice-candidate-dropped-stale-offer",
+            signalingState: pcRef.current?.signalingState || "none",
+            connectionState: pcRef.current?.connectionState || "none",
+            iceConnectionState: pcRef.current?.iceConnectionState || "none",
+            details: {
+              receivedOfferId: payload.offerId,
+              activeOfferId: activeOfferIdRef.current,
+            },
+          });
+          return;
+        }
+
+        const cType = parseCandidateType(candidate.candidate);
+        if (cType === "host") iceDiagRef.current.remoteCandidatesReceived.host++;
+        else if (cType === "srflx") iceDiagRef.current.remoteCandidatesReceived.srflx++;
+        else if (cType === "relay") iceDiagRef.current.remoteCandidatesReceived.relay++;
+        iceDiagRef.current.remoteCandidatesReceived.total++;
 
         const pc = pcRef.current;
         if (pc && pc.remoteDescription && pc.remoteDescription.type) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch {
-            // ignore stale candidate
+            iceDiagRef.current.remoteCandidatesAdded++;
+            emitDiagnosticLog({
+              sessionId,
+              role: isHost ? "host" : "viewer",
+              pcId: currentPcIdRef.current,
+              offerId: activeOfferIdRef.current,
+              eventName: "ice-candidate-applied",
+              signalingState: pc.signalingState,
+              connectionState: pc.connectionState,
+              iceConnectionState: pc.iceConnectionState,
+              candidateType: cType,
+            });
+          } catch (err: unknown) {
+            iceDiagRef.current.candidateErrors++;
+            const errMsg = err instanceof Error ? err.message : String(err);
+            iceDiagRef.current.lastCandidateError = errMsg;
+            emitDiagnosticLog({
+              sessionId,
+              role: isHost ? "host" : "viewer",
+              pcId: currentPcIdRef.current,
+              offerId: activeOfferIdRef.current,
+              eventName: "ice-candidate-apply-error",
+              signalingState: pc.signalingState,
+              connectionState: pc.connectionState,
+              iceConnectionState: pc.iceConnectionState,
+              candidateType: cType,
+              details: { error: errMsg },
+            });
           }
         } else {
           pendingIceRef.current.push(candidate);
+          emitDiagnosticLog({
+            sessionId,
+            role: isHost ? "host" : "viewer",
+            pcId: currentPcIdRef.current,
+            offerId: activeOfferIdRef.current,
+            eventName: "ice-candidate-queued",
+            signalingState: pc?.signalingState || "none",
+            connectionState: pc?.connectionState || "none",
+            iceConnectionState: pc?.iceConnectionState || "none",
+            candidateType: cType,
+          });
         }
       })
       .on("broadcast", { event: "theater:viewer-ready" }, async ({ payload }: { payload: any }) => {
         if (payload.senderUserId === userId) return;
+        emitDiagnosticLog({
+          sessionId,
+          role: isHost ? "host" : "viewer",
+          pcId: currentPcIdRef.current,
+          offerId: activeOfferIdRef.current,
+          eventName: "viewer-ready-received",
+          signalingState: pcRef.current?.signalingState || "none",
+          connectionState: pcRef.current?.connectionState || "none",
+          iceConnectionState: pcRef.current?.iceConnectionState || "none",
+          details: { fromUserId: payload.senderUserId },
+        });
         // Host receives viewer readiness signal -> renegotiate fresh offer immediately
         if (isHost && localStreamRef.current) {
           await renegotiateForViewer(payload.senderUserId);
@@ -1181,8 +1975,15 @@ export function useTheaterWebRTC({
             setRemoteStream(null);
             remoteStreamRef.current = null;
           } else if (payload.state === "LIVE" && !isHost && !remoteStreamRef.current) {
-            // Host is live but viewer doesn't have stream yet -> request offer
-            sendViewerReady();
+            const isActivelyConnecting =
+              pcRef.current?.connectionState === "connecting" ||
+              pcRef.current?.iceConnectionState === "checking" ||
+              (activeOfferIdRef.current !== null && Date.now() - offerSentTimestampRef.current < 10000);
+
+            // Only request offer if viewer is not already in-flight connecting/negotiating
+            if (!isActivelyConnecting) {
+              sendViewerReady();
+            }
           }
         }
       })
@@ -1246,38 +2047,70 @@ export function useTheaterWebRTC({
 
     // Load TURN credentials
     void getTurnCredentialsAction().then((res) => {
-      // === MANDATORY DIAGNOSTIC: TURN credential verification ===
-      console.log("[WebRTC] TURN credentials response:", {
-        ok: res.ok,
-        serverCount: res.ok ? res.data.iceServers.length : 0,
-        hasTurnServer: res.ok ? res.data.iceServers.some((s: any) => {
-          const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
-          return urls.some((u: string) => u.startsWith("turn:"));
-        }) : false,
-        hasCredential: res.ok ? res.data.iceServers.some((s: any) => !!s.credential) : false,
-      });
-      if (res.ok && res.data.iceServers && res.data.iceServers.length > 0) {
-        iceServersRef.current = [
+      const serverTurnConfigured = res.ok && Boolean(res.data?.serverInfo?.turnConfigured);
+      const serverIceServers = res.ok ? res.data.iceServers : [];
+      const hasReturnedConfig = serverIceServers.length > 0;
+
+      turnDiagRef.current.turnConfiguredServerSide = serverTurnConfigured;
+      turnDiagRef.current.turnConfigDeliveredToBrowser = hasReturnedConfig;
+
+      if (res.ok && serverIceServers.length > 0) {
+        iceServersRef.current = deduplicateIceServers([
           ...DEFAULT_ICE_SERVERS,
-          ...res.data.iceServers,
-        ];
-        if (pcRef.current && pcRef.current.signalingState !== "closed") {
-          try {
-            pcRef.current.setConfiguration({
-              iceServers: iceServersRef.current,
-              bundlePolicy: "max-bundle",
-              iceCandidatePoolSize: 2,
-            });
-          } catch {
-            /* ignore dynamic update error on older engines */
-          }
+          ...serverIceServers,
+        ]);
+      }
+
+      const inspected = inspectIceServers(iceServersRef.current);
+      turnDiagRef.current.iceServerCount = inspected.iceServerCount;
+      turnDiagRef.current.stunServerCount = inspected.stunServerCount;
+      turnDiagRef.current.turnServerCount = inspected.turnServerCount;
+      turnDiagRef.current.turnTransports = inspected.turnTransports;
+
+      // Safe diagnostic log: NEVER prints credentials/passwords
+      console.log("[WebRTC-DIAG] [TURN-CONFIG]", {
+        sessionId,
+        role: isHost ? "host" : "viewer",
+        TURN_USERNAME_present: res.ok && serverIceServers.some((s: any) => Boolean(s.username)) ? "YES" : "NO",
+        TURN_CREDENTIAL_present: res.ok && serverIceServers.some((s: any) => Boolean(s.credential)) ? "YES" : "NO",
+        ICE_config_returned: hasReturnedConfig ? "YES" : "NO",
+        TURN_URL_count: inspected.turnServerCount,
+        iceServerCount: inspected.iceServerCount,
+        stunServerCount: inspected.stunServerCount,
+        turnTransports: inspected.turnTransports,
+      });
+
+      if (pcRef.current && pcRef.current.signalingState !== "closed") {
+        try {
+          pcRef.current.setConfiguration({
+            iceServers: iceServersRef.current,
+            bundlePolicy: "max-bundle",
+            iceCandidatePoolSize: 2,
+          });
+        } catch {
+          /* ignore dynamic update error on older engines */
         }
       }
     });
 
     // Authorize & subscribe
     void authorizeRealtimeTopicAction(topic).then((auth) => {
-      if (disposed || !auth.ok) return;
+      if (disposed) return;
+      if (!auth.ok) {
+        emitDiagnosticLog({
+          sessionId,
+          role: isHost ? "host" : "viewer",
+          pcId: currentPcIdRef.current,
+          offerId: activeOfferIdRef.current,
+          eventName: "channel-auth-failed",
+          signalingState: pcRef.current?.signalingState || "none",
+          connectionState: pcRef.current?.connectionState || "none",
+          iceConnectionState: pcRef.current?.iceConnectionState || "none",
+          details: { error: auth.error?.message || "Unauthorized" },
+        });
+        console.error("[WebRTC] Realtime signaling topic authorization failed:", auth.error);
+        return;
+      }
 
       channel.subscribe(async (status: string) => {
         if (status === "SUBSCRIBED") {
@@ -1356,7 +2189,9 @@ export function useTheaterWebRTC({
       const hasLiveVideo = remoteStreamRef.current?.getVideoTracks().some(
         (t) => t.readyState === "live",
       );
-      const isActivelyConnecting = pcRef.current?.connectionState === "connecting";
+      const isActivelyConnecting =
+        pcRef.current?.connectionState === "connecting" ||
+        pcRef.current?.iceConnectionState === "checking";
 
       if (
         !hasLiveVideo &&
@@ -1590,6 +2425,16 @@ export function useTheaterWebRTC({
         signalingState: pc?.signalingState || "none",
         failureMatrixCase: matrixCase,
         failureMatrixSummary: matrixSummary,
+        signaling: { ...signalingDiagRef.current },
+        turn: { ...turnDiagRef.current, forcedRelayMode: forceRelayRef.current },
+        ice: {
+          candidatesGathered: { ...gatheredCandidatesRef.current },
+          remoteCandidatesReceived: { ...iceDiagRef.current.remoteCandidatesReceived },
+          remoteCandidatesAdded: iceDiagRef.current.remoteCandidatesAdded,
+          candidateErrors: iceDiagRef.current.candidateErrors,
+          lastCandidateError: iceDiagRef.current.lastCandidateError,
+          selectedPair,
+        },
         localVideoTrack: localVTrack ? {
           id: localVTrack.id,
           readyState: localVTrack.readyState,
@@ -1605,10 +2450,6 @@ export function useTheaterWebRTC({
         } : null,
         outboundVideo,
         inboundVideo,
-        ice: {
-          candidatesGathered: { ...gatheredCandidatesRef.current },
-          selectedPair,
-        },
         negotiatedCodec,
         videoElement: videoElementStats,
       };
@@ -1670,5 +2511,7 @@ export function useTheaterWebRTC({
     remoteVoiceAudioRef,
     notifyPartnerLeaving,
     sendViewerReady,
+    forceRelay,
+    toggleForceRelay,
   };
 }

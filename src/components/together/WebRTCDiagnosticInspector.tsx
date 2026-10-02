@@ -14,6 +14,8 @@ import {
   Video,
   Layers,
   ArrowRightLeft,
+  Radio,
+  Network,
 } from "lucide-react";
 import type { WebRTCDiagnosticData, FailureMatrixCase } from "@/features/together/webrtc/useTheaterWebRTC";
 
@@ -24,6 +26,92 @@ interface WebRTCDiagnosticInspectorProps {
   partnerDiag: WebRTCDiagnosticData | null;
   onRefreshStream?: () => void;
   isHost: boolean;
+  forceRelay?: boolean;
+  onToggleForceRelay?: () => void;
+}
+
+function formatSection12Report(
+  isHost: boolean,
+  localDiag: WebRTCDiagnosticData | null,
+  partnerDiag: WebRTCDiagnosticData | null,
+): string {
+  const hostDiag = isHost ? localDiag : partnerDiag;
+  const viewerDiag = !isHost ? localDiag : partnerDiag;
+
+  const hostCandidate = hostDiag?.ice?.selectedPair?.localAddress
+    ? `${hostDiag.ice.selectedPair.localType} (${hostDiag.ice.selectedPair.localAddress})`
+    : hostDiag?.ice?.selectedPair?.localType || "none";
+  const remoteCandidate = hostDiag?.ice?.selectedPair?.remoteAddress
+    ? `${hostDiag.ice.selectedPair.remoteType} (${hostDiag.ice.selectedPair.remoteAddress})`
+    : hostDiag?.ice?.selectedPair?.remoteType || "none";
+
+  return `SIGNALING
+
+Host PC:
+pcId: ${hostDiag?.pcId ?? "N/A"}
+offerId: ${hostDiag?.signaling?.offerId ?? "none"}
+offerSent: ${hostDiag?.signaling?.offerSent ? "true" : "false"}
+answerReceived: ${hostDiag?.signaling?.answerReceived ? "true" : "false"}
+answerApplied: ${hostDiag?.signaling?.answerApplied ? "true" : "false"}
+
+Viewer PC:
+pcId: ${viewerDiag?.pcId ?? "N/A"}
+offerReceived: ${viewerDiag?.signaling?.offerReceived ? "true" : "false"}
+offerApplied: ${viewerDiag?.signaling?.offerApplied ? "true" : "false"}
+answerCreated: ${viewerDiag?.signaling?.answerCreated ? "true" : "false"}
+answerSent: ${viewerDiag?.signaling?.answerSent ? "true" : "false"}
+
+ICE
+
+Host:
+host: ${hostDiag?.ice?.candidatesGathered?.host ?? 0}
+srflx: ${hostDiag?.ice?.candidatesGathered?.srflx ?? 0}
+relay: ${hostDiag?.ice?.candidatesGathered?.relay ?? 0}
+remoteCandidatesReceived: ${hostDiag?.ice?.remoteCandidatesReceived?.total ?? 0}
+
+Viewer:
+host: ${viewerDiag?.ice?.candidatesGathered?.host ?? 0}
+srflx: ${viewerDiag?.ice?.candidatesGathered?.srflx ?? 0}
+relay: ${viewerDiag?.ice?.candidatesGathered?.relay ?? 0}
+remoteCandidatesReceived: ${viewerDiag?.ice?.remoteCandidatesReceived?.total ?? 0}
+
+Selected pair:
+host candidate: ${hostCandidate}
+remote candidate: ${remoteCandidate}
+state: ${hostDiag?.ice?.selectedPair?.state ?? viewerDiag?.ice?.selectedPair?.state ?? "null"}
+
+TURN:
+
+TURN configured server-side:
+${(localDiag?.turn?.turnConfiguredServerSide || partnerDiag?.turn?.turnConfiguredServerSide) ? "YES" : "NO"}
+
+TURN config delivered to browser:
+${(localDiag?.turn?.turnConfigDeliveredToBrowser || partnerDiag?.turn?.turnConfigDeliveredToBrowser) ? "YES" : "NO"}
+
+TURN candidates:
+${(localDiag?.ice?.candidatesGathered?.relay ?? 0) + (partnerDiag?.ice?.candidatesGathered?.relay ?? 0)}
+
+CONNECTION:
+
+signalingState:
+${localDiag?.signalingState ?? "none"}
+iceConnectionState:
+${localDiag?.iceConnectionState ?? "none"}
+connectionState:
+${localDiag?.connectionState ?? "none"}
+
+MEDIA:
+
+framesEncoded:
+${hostDiag?.outboundVideo?.framesEncoded ?? 0}
+bytesSent:
+${hostDiag?.outboundVideo?.bytesSent ?? 0}
+bytesReceived:
+${viewerDiag?.inboundVideo?.bytesReceived ?? 0}
+framesReceived:
+${viewerDiag?.inboundVideo?.framesReceived ?? 0}
+framesDecoded:
+${viewerDiag?.inboundVideo?.framesDecoded ?? 0}`;
 }
 
 export function WebRTCDiagnosticInspector({
@@ -33,8 +121,11 @@ export function WebRTCDiagnosticInspector({
   partnerDiag,
   onRefreshStream,
   isHost,
+  forceRelay = false,
+  onToggleForceRelay,
 }: WebRTCDiagnosticInspectorProps) {
   const [copied, setCopied] = useState(false);
+  const [copiedSec12, setCopiedSec12] = useState(false);
 
   if (!isOpen) return null;
 
@@ -95,12 +186,98 @@ export function WebRTCDiagnosticInspector({
 
   const badge = getCaseBadge(currentCase);
 
+  const handleCopySec12 = () => {
+    const text = formatSection12Report(isHost, localDiag, partnerDiag);
+    void navigator.clipboard.writeText(text);
+    setCopiedSec12(true);
+    setTimeout(() => setCopiedSec12(false), 2000);
+  };
+
   const handleCopyReport = () => {
     const report = {
       generatedAt: new Date().toISOString(),
       role: isHost ? "host" : "viewer",
       local: localDiag,
       partner: partnerDiag,
+      formattedSummary: {
+        SIGNALING: {
+          HostPC: isHost ? {
+            pcId: localDiag?.pcId,
+            offerId: localDiag?.signaling?.offerId,
+            offerSent: localDiag?.signaling?.offerSent,
+            answerReceived: localDiag?.signaling?.answerReceived,
+            answerApplied: localDiag?.signaling?.answerApplied,
+            error: localDiag?.signaling?.answerApplyError,
+          } : {
+            pcId: partnerDiag?.pcId,
+            offerId: partnerDiag?.signaling?.offerId,
+            offerSent: partnerDiag?.signaling?.offerSent,
+            answerReceived: partnerDiag?.signaling?.answerReceived,
+            answerApplied: partnerDiag?.signaling?.answerApplied,
+            error: partnerDiag?.signaling?.answerApplyError,
+          },
+          ViewerPC: !isHost ? {
+            pcId: localDiag?.pcId,
+            offerReceived: localDiag?.signaling?.offerReceived,
+            offerApplied: localDiag?.signaling?.offerApplied,
+            answerCreated: localDiag?.signaling?.answerCreated,
+            answerSent: localDiag?.signaling?.answerSent,
+            error: localDiag?.signaling?.offerApplyError,
+          } : {
+            pcId: partnerDiag?.pcId,
+            offerReceived: partnerDiag?.signaling?.offerReceived,
+            offerApplied: partnerDiag?.signaling?.offerApplied,
+            answerCreated: partnerDiag?.signaling?.answerCreated,
+            answerSent: partnerDiag?.signaling?.answerSent,
+            error: partnerDiag?.signaling?.offerApplyError,
+          },
+        },
+        ICE: {
+          Host: isHost ? {
+            gathered: localDiag?.ice?.candidatesGathered,
+            remoteReceived: localDiag?.ice?.remoteCandidatesReceived,
+            remoteAdded: localDiag?.ice?.remoteCandidatesAdded,
+            candidateErrors: localDiag?.ice?.candidateErrors,
+          } : {
+            gathered: partnerDiag?.ice?.candidatesGathered,
+            remoteReceived: partnerDiag?.ice?.remoteCandidatesReceived,
+            remoteAdded: partnerDiag?.ice?.remoteCandidatesAdded,
+            candidateErrors: partnerDiag?.ice?.candidateErrors,
+          },
+          Viewer: !isHost ? {
+            gathered: localDiag?.ice?.candidatesGathered,
+            remoteReceived: localDiag?.ice?.remoteCandidatesReceived,
+            remoteAdded: localDiag?.ice?.remoteCandidatesAdded,
+            candidateErrors: localDiag?.ice?.candidateErrors,
+          } : {
+            gathered: partnerDiag?.ice?.candidatesGathered,
+            remoteReceived: partnerDiag?.ice?.remoteCandidatesReceived,
+            remoteAdded: partnerDiag?.ice?.remoteCandidatesAdded,
+            candidateErrors: partnerDiag?.ice?.candidateErrors,
+          },
+          selectedPair: localDiag?.ice?.selectedPair,
+        },
+        TURN: {
+          configuredServerSide: localDiag?.turn?.turnConfiguredServerSide ? "YES" : "NO",
+          configDeliveredToBrowser: localDiag?.turn?.turnConfigDeliveredToBrowser ? "YES" : "NO",
+          turnCandidateCount: localDiag?.ice?.candidatesGathered?.relay ?? 0,
+          iceServerCount: localDiag?.turn?.iceServerCount ?? 0,
+          turnTransports: localDiag?.turn?.turnTransports ?? [],
+          forcedRelayMode: localDiag?.turn?.forcedRelayMode ?? false,
+        },
+        CONNECTION: {
+          signalingState: localDiag?.signalingState,
+          iceConnectionState: localDiag?.iceConnectionState,
+          connectionState: localDiag?.connectionState,
+        },
+        MEDIA: {
+          framesEncoded: localDiag?.outboundVideo?.framesEncoded ?? partnerDiag?.outboundVideo?.framesEncoded ?? 0,
+          bytesSent: localDiag?.outboundVideo?.bytesSent ?? partnerDiag?.outboundVideo?.bytesSent ?? 0,
+          bytesReceived: localDiag?.inboundVideo?.bytesReceived ?? partnerDiag?.inboundVideo?.bytesReceived ?? 0,
+          framesReceived: localDiag?.inboundVideo?.framesReceived ?? partnerDiag?.inboundVideo?.framesReceived ?? 0,
+          framesDecoded: localDiag?.inboundVideo?.framesDecoded ?? partnerDiag?.inboundVideo?.framesDecoded ?? 0,
+        },
+      },
     };
     void navigator.clipboard.writeText(JSON.stringify(report, null, 2));
     setCopied(true);
@@ -115,9 +292,16 @@ export function WebRTCDiagnosticInspector({
           <div className="flex items-center gap-2.5">
             <Activity size={18} className="text-rose-400" />
             <div>
-              <h3 className="text-sm font-semibold text-white tracking-wide">
-                WebRTC Media Pipeline Diagnostics
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-white tracking-wide">
+                  WebRTC Media Pipeline Diagnostics
+                </h3>
+                {forceRelay && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    FORCED RELAY
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-zinc-400 font-mono">
                 Role: <span className="text-white font-bold">{isHost ? "Desktop Host" : "Mobile Viewer"}</span> | PC ID: #{localDiag?.pcId || 1}
               </p>
@@ -148,6 +332,92 @@ export function WebRTCDiagnosticInspector({
             </div>
           </div>
 
+          {/* Section: Signaling & Negotiation Audit */}
+          <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-300">
+              <span className="flex items-center gap-1.5">
+                <Radio size={14} className="text-sky-400" />
+                Signaling & Negotiation Audit
+              </span>
+              <span className="font-mono text-[10px] text-zinc-400">
+                SignalingState: <span className="text-white font-bold">{localDiag?.signalingState || "unknown"}</span>
+              </span>
+            </div>
+
+            <div className="bg-black/40 rounded-lg p-2.5 border border-white/[0.04] space-y-2 text-[11px]">
+              <div className="flex items-center justify-between font-mono text-[10px] text-zinc-400 border-b border-white/[0.05] pb-1.5">
+                <span>Active OfferId:</span>
+                <span className="text-zinc-200 font-bold truncate max-w-[280px]">
+                  {localDiag?.signaling?.offerId || "None"}
+                </span>
+              </div>
+
+              {isHost ? (
+                /* Host Negotiation Telemetry */
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-[10px]">
+                  <div>
+                    <span className="text-zinc-500 block">Offer Created</span>
+                    <span className={localDiag?.signaling?.offerCreated ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                      {localDiag?.signaling?.offerCreated ? "YES" : "NO"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block">Offer Sent</span>
+                    <span className={localDiag?.signaling?.offerSent ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                      {localDiag?.signaling?.offerSent ? "YES" : "NO"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block">Answer Received</span>
+                    <span className={localDiag?.signaling?.answerReceived ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                      {localDiag?.signaling?.answerReceived ? "YES" : "NO (Awaiting)"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block">Answer Applied</span>
+                    <span className={localDiag?.signaling?.answerApplied ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                      {localDiag?.signaling?.answerApplied ? "YES" : "NO"}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                /* Viewer Negotiation Telemetry */
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-[10px]">
+                  <div>
+                    <span className="text-zinc-500 block">Offer Received</span>
+                    <span className={localDiag?.signaling?.offerReceived ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                      {localDiag?.signaling?.offerReceived ? `YES (PC #${localDiag.signaling.offerReceivedForPcId ?? "?"})` : "NO (Awaiting)"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block">Offer Applied</span>
+                    <span className={localDiag?.signaling?.offerApplied ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                      {localDiag?.signaling?.offerApplied ? "YES" : "NO"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block">Answer Created</span>
+                    <span className={localDiag?.signaling?.answerCreated ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                      {localDiag?.signaling?.answerCreated ? "YES" : "NO"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block">Answer Sent</span>
+                    <span className={localDiag?.signaling?.answerSent ? "text-emerald-400 font-bold" : "text-zinc-400"}>
+                      {localDiag?.signaling?.answerSent ? "YES" : "NO"}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {(localDiag?.signaling?.answerApplyError || localDiag?.signaling?.offerApplyError) && (
+                <div className="text-[10px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded p-1.5 font-mono">
+                  Error: {localDiag?.signaling?.answerApplyError || localDiag?.signaling?.offerApplyError}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Section: Live Transport & ICE Pair */}
           <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5 space-y-2.5">
             <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-300">
@@ -156,13 +426,13 @@ export function WebRTCDiagnosticInspector({
                 Transport & ICE Connection
               </span>
               <span className="font-mono text-[10px] text-zinc-400">
-                PeerConnection: {localDiag?.connectionState || "unknown"}
+                PeerConnection: <span className="text-white font-bold">{localDiag?.connectionState || "unknown"}</span> | ICE: <span className="text-white font-bold">{localDiag?.iceConnectionState || "unknown"}</span>
               </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
               <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                <span className="text-[10px] text-zinc-500 block">Candidate Pair</span>
+                <span className="text-[10px] text-zinc-500 block">Selected Pair</span>
                 <span className="font-mono text-zinc-200 truncate block font-medium">
                   {localDiag?.ice?.selectedPair
                     ? `${localDiag.ice.selectedPair.localType} ⇄ ${localDiag.ice.selectedPair.remoteType}`
@@ -170,17 +440,15 @@ export function WebRTCDiagnosticInspector({
                 </span>
               </div>
               <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                <span className="text-[10px] text-zinc-500 block">Relay / TURN</span>
+                <span className="text-[10px] text-zinc-500 block">Pair State</span>
                 <span
                   className={`font-mono truncate block font-semibold ${
-                    localDiag?.ice?.selectedPair?.relayActive
+                    localDiag?.ice?.selectedPair?.state === "succeeded"
                       ? "text-emerald-400"
-                      : "text-zinc-300"
+                      : "text-amber-400"
                   }`}
                 >
-                  {localDiag?.ice?.selectedPair?.relayActive
-                    ? "Metered Relay Active"
-                    : "Direct P2P"}
+                  {localDiag?.ice?.selectedPair?.state || "Unselected"}
                 </span>
               </div>
               <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
@@ -192,7 +460,7 @@ export function WebRTCDiagnosticInspector({
                 </span>
               </div>
               <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
-                <span className="text-[10px] text-zinc-500 block">Candidates Gathered</span>
+                <span className="text-[10px] text-zinc-500 block">Local Gathered</span>
                 <span className="font-mono text-zinc-300 block">
                   H:{localDiag?.ice?.candidatesGathered?.host || 0} S:
                   {localDiag?.ice?.candidatesGathered?.srflx || 0} R:
@@ -202,6 +470,102 @@ export function WebRTCDiagnosticInspector({
                 </span>
               </div>
             </div>
+
+            {/* Remote candidate exchange stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] pt-1">
+              <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                <span className="text-[10px] text-zinc-500 block">Remote Received</span>
+                <span className="font-mono text-zinc-300 block text-[10px]">
+                  H:{localDiag?.ice?.remoteCandidatesReceived?.host ?? 0} S:
+                  {localDiag?.ice?.remoteCandidatesReceived?.srflx ?? 0} R:
+                  <span className="text-emerald-400 font-bold ml-0.5">
+                    {localDiag?.ice?.remoteCandidatesReceived?.relay ?? 0}
+                  </span>{" "}
+                  (Tot:{localDiag?.ice?.remoteCandidatesReceived?.total ?? 0})
+                </span>
+              </div>
+              <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                <span className="text-[10px] text-zinc-500 block">Remote Added</span>
+                <span className="font-mono text-emerald-400 block font-bold">
+                  {localDiag?.ice?.remoteCandidatesAdded ?? 0}
+                </span>
+              </div>
+              <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                <span className="text-[10px] text-zinc-500 block">Candidate Errors</span>
+                <span className={`font-mono block font-bold ${(localDiag?.ice?.candidateErrors ?? 0) > 0 ? "text-rose-400" : "text-zinc-400"}`}>
+                  {localDiag?.ice?.candidateErrors ?? 0}
+                </span>
+              </div>
+            </div>
+
+            {localDiag?.ice?.lastCandidateError && (
+              <div className="text-[10px] text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded p-1.5 font-mono">
+                Last Candidate Error: {localDiag.ice.lastCandidateError}
+              </div>
+            )}
+          </div>
+
+          {/* Section: TURN Relay Traversal & Configuration */}
+          <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-300">
+              <span className="flex items-center gap-1.5">
+                <Network size={14} className="text-emerald-400" />
+                TURN Relay Traversal & Diagnostic Controls
+              </span>
+              <span className="font-mono text-[10px] text-zinc-400">
+                Policy: <span className="text-white font-bold">{forceRelay ? "relay" : "all"}</span>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+              <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                <span className="text-[10px] text-zinc-500 block">Server-Side TURN</span>
+                <span className={`font-mono block font-semibold ${localDiag?.turn?.turnConfiguredServerSide ? "text-emerald-400" : "text-zinc-400"}`}>
+                  {localDiag?.turn?.turnConfiguredServerSide ? "YES" : "NO"}
+                </span>
+              </div>
+              <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                <span className="text-[10px] text-zinc-500 block">Delivered to Browser</span>
+                <span className={`font-mono block font-semibold ${localDiag?.turn?.turnConfigDeliveredToBrowser ? "text-emerald-400" : "text-zinc-400"}`}>
+                  {localDiag?.turn?.turnConfigDeliveredToBrowser ? "YES" : "NO"}
+                </span>
+              </div>
+              <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                <span className="text-[10px] text-zinc-500 block">Total ICE Servers</span>
+                <span className="font-mono text-zinc-200 block">
+                  {localDiag?.turn?.iceServerCount ?? 0} (TURN: {localDiag?.turn?.turnServerCount ?? 0})
+                </span>
+              </div>
+              <div className="bg-black/40 rounded-lg p-2 border border-white/[0.04]">
+                <span className="text-[10px] text-zinc-500 block">Transports</span>
+                <span className="font-mono text-zinc-300 block truncate">
+                  {(localDiag?.turn?.turnTransports || []).join(", ") || "None"}
+                </span>
+              </div>
+            </div>
+
+            {/* Diagnostic Control Toggle: Force Relay Mode */}
+            {onToggleForceRelay && (
+              <div className="pt-1 flex items-center justify-between bg-black/40 rounded-lg p-2.5 border border-white/[0.04]">
+                <div>
+                  <span className="text-zinc-200 font-semibold block text-[11px]">Control Test: Force Relay Policy</span>
+                  <span className="text-[10px] text-zinc-500 block">
+                    Sets iceTransportPolicy to &quot;relay&quot; to verify TURN allocation under strict firewall conditions.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onToggleForceRelay}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+                    forceRelay
+                      ? "bg-amber-600 hover:bg-amber-500 text-white font-bold"
+                      : "bg-white/[0.08] hover:bg-white/[0.14] text-zinc-300"
+                  }`}
+                >
+                  {forceRelay ? "Disable Forced Relay" : "Enable Forced Relay"}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Section: Codec & Video Metrics */}
@@ -390,11 +754,19 @@ export function WebRTCDiagnosticInspector({
           <div className="flex items-center gap-2 ml-auto">
             <button
               type="button"
+              onClick={handleCopySec12}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 transition-all border border-rose-500/30 active:scale-95"
+            >
+              {copiedSec12 ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+              <span>{copiedSec12 ? "Copied Section 12!" : "Copy Section 12 Text"}</span>
+            </button>
+            <button
+              type="button"
               onClick={handleCopyReport}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.06] hover:bg-white/[0.1] text-zinc-200 transition-all border border-white/[0.08] active:scale-95"
             >
               {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-              <span>{copied ? "Copied Report!" : "Copy Full JSON"}</span>
+              <span>{copied ? "Copied JSON!" : "Copy Full JSON"}</span>
             </button>
             <button
               type="button"

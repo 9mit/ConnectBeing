@@ -18,7 +18,11 @@ type IceServer = {
  * session token derived from server TURN_* secrets (never NEXT_PUBLIC_*).
  */
 export async function getTurnCredentialsAction(): Promise<
-  ActionResult<{ iceServers: IceServer[]; expiresAt: number }>
+  ActionResult<{
+    iceServers: IceServer[];
+    expiresAt: number;
+    serverInfo?: { turnConfigured: boolean; turnUrlCount: number };
+  }>
 > {
   try {
     const { couple } = await requireActiveCouple();
@@ -33,11 +37,25 @@ export async function getTurnCredentialsAction(): Promise<
     ];
 
     const turnUrls = [
+      "turn:a.relay.metered.ca:3478",
+      "turn:a.relay.metered.ca:3478?transport=tcp",
       "turn:a.relay.metered.ca:80",
       "turn:a.relay.metered.ca:443",
       "turn:a.relay.metered.ca:443?transport=tcp",
       "turns:a.relay.metered.ca:443",
+      "turns:a.relay.metered.ca:5349",
       "turns:a.relay.metered.ca:443?transport=tcp",
+    ];
+
+    const openRelayUrls = [
+      "turn:openrelay.metered.ca:3478",
+      "turn:openrelay.metered.ca:3478?transport=tcp",
+      "turn:openrelay.metered.ca:80",
+      "turn:openrelay.metered.ca:443",
+      "turn:openrelay.metered.ca:443?transport=tcp",
+      "turns:openrelay.metered.ca:443",
+      "turns:openrelay.metered.ca:5349",
+      "turns:openrelay.metered.ca:443?transport=tcp",
     ];
 
     const turnSecret = process.env.TURN_SECRET;
@@ -45,6 +63,7 @@ export async function getTurnCredentialsAction(): Promise<
     const turnCredential = process.env.TURN_CREDENTIAL || process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
 
     const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60;
+    let turnConfigured = false;
 
     if (turnSecret) {
       const username = `${expiresAt}:${randomBytes(4).toString("hex")}`;
@@ -56,33 +75,37 @@ export async function getTurnCredentialsAction(): Promise<
         username,
         credential,
       });
+      turnConfigured = true;
     } else if (turnUsername && turnCredential) {
       iceServers.push({
         urls: turnUrls,
         username: turnUsername,
         credential: turnCredential,
       });
-    } else {
-      // Free reliable OpenRelay TURN servers when custom TURN is not configured
-      // Guarantees mobile cellular (4G/5G Symmetric NAT / CGNAT) WebRTC peer traversal
-      iceServers.push({
-        urls: [
-          "turn:openrelay.metered.ca:80",
-          "turn:openrelay.metered.ca:443",
-          "turn:openrelay.metered.ca:443?transport=tcp",
-          "turns:openrelay.metered.ca:443",
-          "turns:openrelay.metered.ca:443?transport=tcp",
-        ],
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      });
-      iceServers.push(
-        { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun.cloudflare.com:3478" },
-      );
+      turnConfigured = true;
     }
 
-    return ok({ iceServers, expiresAt: expiresAt * 1000 });
+    // Always supply reliable OpenRelay TURN servers with openrelayproject credentials
+    // Guarantees mobile cellular (4G/5G Symmetric NAT / CGNAT) WebRTC peer traversal
+    iceServers.push({
+      urls: openRelayUrls,
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    });
+
+    const turnUrlCount = iceServers.reduce((acc, s) => {
+      const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+      return acc + urls.filter((u) => u.startsWith("turn:") || u.startsWith("turns:")).length;
+    }, 0);
+
+    return ok({
+      iceServers,
+      expiresAt: expiresAt * 1000,
+      serverInfo: {
+        turnConfigured,
+        turnUrlCount,
+      },
+    });
   } catch (e) {
     return fail(e);
   }

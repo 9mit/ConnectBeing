@@ -146,6 +146,8 @@ export function VirtualRoom({
     remoteVoiceAudioRef,
     notifyPartnerLeaving,
     sendViewerReady,
+    forceRelay,
+    toggleForceRelay,
   } = useTheaterWebRTC({
     sessionId,
     userId,
@@ -3115,6 +3117,8 @@ export function VirtualRoom({
         partnerDiag={partnerDiagStats}
         onRefreshStream={sendViewerReady}
         isHost={isHost}
+        forceRelay={forceRelay}
+        onToggleForceRelay={toggleForceRelay}
       />
       </div>
     </div>
