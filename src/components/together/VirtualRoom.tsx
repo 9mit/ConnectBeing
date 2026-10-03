@@ -156,6 +156,7 @@ export function VirtualRoom({
     updateState,
     startScreenShare,
     stopScreenShare,
+    refreshScreenShare,
     startVoiceCall,
     stopVoiceCall,
     toggleMic,
@@ -174,6 +175,7 @@ export function VirtualRoom({
 
   // Real-time track dimension state for host preview (updates immediately on resize event)
   const [hostCaptureDimensions, setHostCaptureDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [isUpgradingStream, setIsUpgradingStream] = useState(false);
 
   // Theater Session & Playback States
   const [playbackState, setPlaybackState] = useState<"playing" | "paused">(() => {
@@ -1882,11 +1884,30 @@ export function VirtualRoom({
 
             {/* Host source resolution banner if captured window is smaller than 720p */}
             {isSourceResolutionLow && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] shadow-lg backdrop-blur-md pointer-events-none max-w-[92vw] text-center">
-                <AlertTriangle size={13} className="text-amber-400 shrink-0" />
-                <span>
-                  ⚠️ Movie Window Minimized/Shrunk ({sourceWidth}x{sourceHeight || Math.round((sourceWidth! * 9) / 16)}): Keep your movie window (Netflix/Hotstar/tab) OPEN and MAXIMIZED behind this screen. Do NOT minimize it to the taskbar! (Minimizing kills resolution to 226x108).
-                </span>
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-between gap-3 px-4 py-2 rounded-2xl bg-amber-950/90 border border-amber-500/50 text-amber-200 text-xs shadow-2xl backdrop-blur-md max-w-[95vw] pointer-events-auto">
+                <div className="flex items-center gap-2 min-w-0 text-left">
+                  <AlertTriangle size={15} className="text-amber-400 shrink-0" />
+                  <span className="leading-snug">
+                    <strong className="text-amber-300 font-semibold">Movie window captured at {sourceWidth}×{sourceHeight || Math.round((sourceWidth! * 9) / 16)}:</strong>{" "}
+                    Keep movie window OPEN &amp; MAXIMIZED (don&apos;t minimize to taskbar). If already maximized, upgrade stream:
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isUpgradingStream}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    setIsUpgradingStream(true);
+                    try {
+                      await refreshScreenShare();
+                    } finally {
+                      setIsUpgradingStream(false);
+                    }
+                  }}
+                  className="shrink-0 px-3.5 py-1.5 rounded-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer ml-auto"
+                >
+                  {isUpgradingStream ? "🔄 Upgrading..." : "🔄 Upgrade to 1080p"}
+                </button>
               </div>
             )}
 
@@ -3280,7 +3301,13 @@ export function VirtualRoom({
         onClose={() => setShowDiagModal(false)}
         localDiag={webrtcDiagStats}
         partnerDiag={partnerDiagStats}
-        onRefreshStream={sendViewerReady}
+        onRefreshStream={() => {
+          if (isHost) {
+            void refreshScreenShare();
+          } else {
+            sendViewerReady();
+          }
+        }}
         isHost={isHost}
         forceRelay={forceRelay}
         onToggleForceRelay={toggleForceRelay}

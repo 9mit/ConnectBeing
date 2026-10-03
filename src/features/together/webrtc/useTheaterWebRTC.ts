@@ -660,6 +660,8 @@ export function useTheaterWebRTC({
     targetProfile: null,
   });
 
+  const lastConstraintAttemptRef = useRef<number>(0);
+
   const gatheredCandidatesRef = useRef<{ host: number; srflx: number; relay: number }>({
     host: 0,
     srflx: 0,
@@ -1406,6 +1408,106 @@ export function useTheaterWebRTC({
       hostStreamType: "none",
     });
   }, [sendSignal, sessionId, updateState]);
+
+  // Seamlessly upgrade / re-capture screen share at 1080p without dropping WebRTC session
+  const refreshScreenShare = useCallback(async (): Promise<boolean> => {
+    try {
+      const pc = pcRef.current;
+      if (!pc || !isHost) return false;
+
+      const currentVideoTrack = localStreamRef.current?.getVideoTracks()[0];
+
+      // Step 1: Attempt in-place applyConstraints to prompt Chromium to resize its internal capture sink
+      if (currentVideoTrack && currentVideoTrack.readyState === "live") {
+        try {
+          await currentVideoTrack.applyConstraints({
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30, max: 30 },
+          });
+          const settings = currentVideoTrack.getSettings();
+          if (settings.width && settings.width >= 1280) {
+            void applyBitrateCap(pc);
+            return true;
+          }
+        } catch {
+          // In-place constraint failed or rejected; proceed to seamless track replacement
+        }
+      }
+
+      // Step 2: Acquire fresh display media stream with ideal 1080p constraints
+      let newStream: MediaStream;
+      try {
+        newStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: "browser",
+            frameRate: { ideal: 30, max: 30 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: true,
+          selfBrowserSurface: "exclude",
+          surfaceSwitching: "include",
+          systemAudio: "include",
+        } as any);
+      } catch {
+        newStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            frameRate: { ideal: 30, max: 30 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: true,
+        });
+      }
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack || newVideoTrack.readyState !== "live") {
+        return false;
+      }
+
+      if ("contentHint" in newVideoTrack) {
+        (newVideoTrack as any).contentHint = "motion";
+      }
+
+      // Seamlessly replace video track on existing RTCRtpSender without renegotiation
+      const videoSender = pc.getSenders().find((s) => s.track?.kind === "video");
+      if (videoSender) {
+        await videoSender.replaceTrack(newVideoTrack);
+      }
+
+      // Seamlessly replace audio track if present
+      const newAudioTrack = newStream.getAudioTracks()[0];
+      if (newAudioTrack) {
+        const audioSender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        if (audioSender) {
+          await audioSender.replaceTrack(newAudioTrack);
+        }
+      }
+
+      // Stop old tracks cleanly
+      localStreamRef.current?.getTracks().forEach((t) => {
+        t.onended = null;
+        t.stop();
+      });
+
+      // Update refs & state
+      localStreamRef.current = newStream;
+      setLocalStream(newStream);
+
+      // Listen for browser native 'Stop sharing' on replacement track
+      newVideoTrack.onended = () => {
+        stopScreenShare();
+      };
+
+      // Re-apply bitrate cap on the active sender
+      void applyBitrateCap(pc);
+      return true;
+    } catch (err) {
+      console.warn("[WebRTC] refreshScreenShare notice:", err);
+      return false;
+    }
+  }, [isHost, applyBitrateCap, stopScreenShare]);
 
   // Start browser-approved screen/tab share (User Gesture Triggered)
   const startScreenShare = useCallback(async () => {
@@ -2666,6 +2768,17 @@ export function useTheaterWebRTC({
         const srcWidth = settings?.width ?? 0;
         const srcHeight = settings?.height ?? 0;
 
+        // If host capture resolution is low, periodically nudge Chromium to re-sample the window at 1080p
+        if (srcWidth > 0 && srcWidth < 1280 && now - lastConstraintAttemptRef.current >= 8000) {
+          lastConstraintAttemptRef.current = now;
+          localVTrack
+            ?.applyConstraints({
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            })
+            .catch(() => {});
+        }
+
         if (sender && srcWidth > 0) {
           let candidate: AdaptiveQualityProfile = "HIGH";
           if (bwKbps >= 2200 && lossRatio < 0.02 && rttMs < 800) {
@@ -2881,6 +2994,7 @@ export function useTheaterWebRTC({
     updateState,
     startScreenShare,
     stopScreenShare,
+    refreshScreenShare,
     startVoiceCall,
     stopVoiceCall,
     toggleMic,
