@@ -40,6 +40,7 @@ import {
   Activity,
   Globe,
 } from "lucide-react";
+import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 
@@ -210,6 +211,11 @@ export function VirtualRoom({
   const [directMediaTitleInput, setDirectMediaTitleInput] = useState("");
   const directVideoRef = useRef<HTMLVideoElement>(null);
 
+  // VLC Engine States: Proxy acceleration & HLS instance management
+  const [useVlcProxy, setUseVlcProxy] = useState<boolean>(true); // Enabled by default to eliminate CORS, mixed content, and referrer blocks
+  const [isUsingProxyFallback, setIsUsingProxyFallback] = useState<boolean>(false);
+  const hlsInstanceRef = useRef<Hls | null>(null);
+
   // Auto-initialize network stream if session title is a direct http(s) URL
   useEffect(() => {
     if (!directMediaUrl && (title.startsWith("http://") || title.startsWith("https://"))) {
@@ -217,6 +223,101 @@ export function VirtualRoom({
       setDirectMediaTitle(providerName || "Network Stream");
     }
   }, [title, providerName, directMediaUrl]);
+
+  const playbackStateRef = useRef(playbackState);
+  playbackStateRef.current = playbackState;
+
+  // Universal Network Stream Loader & Player Engine (HLS.js + Native HTML5 + VLC Streaming Proxy)
+  useEffect(() => {
+    const video = directVideoRef.current;
+    if (!directMediaUrl || !video) {
+      if (hlsInstanceRef.current) {
+        hlsInstanceRef.current.destroy();
+        hlsInstanceRef.current = null;
+      }
+      return;
+    }
+
+    // YouTube URLs are handled by the dedicated YouTube player iframe
+    if (extractYouTubeId(directMediaUrl)) {
+      if (hlsInstanceRef.current) {
+        hlsInstanceRef.current.destroy();
+        hlsInstanceRef.current = null;
+      }
+      return;
+    }
+
+    const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+    const isInsecureHttp = directMediaUrl.startsWith("http://") && isHttps;
+    const shouldProxy = useVlcProxy || isUsingProxyFallback || isInsecureHttp;
+
+    const effectiveSrc = shouldProxy
+      ? `/api/stream/proxy?url=${encodeURIComponent(directMediaUrl)}`
+      : directMediaUrl;
+
+    const isHls =
+      directMediaUrl.toLowerCase().includes(".m3u8") ||
+      directMediaUrl.toLowerCase().includes("/m3u8") ||
+      effectiveSrc.toLowerCase().includes(".m3u8");
+
+    if (hlsInstanceRef.current) {
+      hlsInstanceRef.current.destroy();
+      hlsInstanceRef.current = null;
+    }
+
+    setDirectMediaError(null);
+
+    if (isHls && typeof window !== "undefined" && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        backBufferLength: 90,
+      });
+      hlsInstanceRef.current = hls;
+
+      hls.loadSource(effectiveSrc);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setDirectMediaError(null);
+        if (playbackStateRef.current === "playing") {
+          void video.play().catch(() => {});
+        }
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          console.warn("[VirtualRoom] Hls.js fatal error:", data.type, data.details);
+          if (!shouldProxy) {
+            console.log("[VirtualRoom] Auto-switching HLS to VLC stream proxy...");
+            setIsUsingProxyFallback(true);
+          } else {
+            hls.destroy();
+            hlsInstanceRef.current = null;
+            setDirectMediaError(
+              "Network stream could not be loaded. Please verify the stream URL is online and accessible."
+            );
+          }
+        }
+      });
+    } else {
+      // Standard video (or Safari native HLS)
+      if (video.src !== effectiveSrc && !video.src.endsWith(effectiveSrc)) {
+        video.src = effectiveSrc;
+        video.load();
+      }
+      if (playbackStateRef.current === "playing") {
+        void video.play().catch(() => {});
+      }
+    }
+
+    return () => {
+      if (hlsInstanceRef.current) {
+        hlsInstanceRef.current.destroy();
+        hlsInstanceRef.current = null;
+      }
+    };
+  }, [directMediaUrl, useVlcProxy, isUsingProxyFallback]);
 
   // OTT Mobile & Cinema Player States
   const [estimatedDuration, setEstimatedDuration] = useState(7200);
@@ -2029,7 +2130,6 @@ export function VirtualRoom({
                   <div className="relative h-full w-full flex items-center justify-center">
                     <video
                       ref={directVideoRef}
-                      src={directMediaUrl}
                       playsInline
                       webkit-playsinline="true"
                       x5-playsinline="true"
@@ -2045,10 +2145,21 @@ export function VirtualRoom({
                           setEstimatedDuration(Math.floor(e.currentTarget.duration));
                         }
                       }}
-                      onError={() => {
-                        setDirectMediaError(
-                          "Network stream could not be loaded. Please ensure the URL is a direct media file (MP4, WebM, HLS) with public CORS access."
-                        );
+                      onError={(e) => {
+                        console.warn("[VirtualRoom] Direct video error:", e);
+                        const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+                        const isInsecureHttp = directMediaUrl ? directMediaUrl.startsWith("http://") && isHttps : false;
+                        const alreadyProxying = useVlcProxy || isUsingProxyFallback || isInsecureHttp;
+
+                        if (!alreadyProxying) {
+                          console.log("[VirtualRoom] Direct playback blocked, auto-falling back to VLC Streaming Proxy...");
+                          setIsUsingProxyFallback(true);
+                          setDirectMediaError(null);
+                        } else {
+                          setDirectMediaError(
+                            "Network stream could not be loaded. Please ensure the URL is online and accessible."
+                          );
+                        }
                       }}
                       onPlay={() => {
                         if (playbackState !== "playing") {
@@ -2077,7 +2188,7 @@ export function VirtualRoom({
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30 shrink-0">
                           <Globe size={11} className="animate-spin text-orange-400" />
-                          Direct Sync
+                          Direct Sync &bull; VLC Engine
                         </span>
                         <span className="font-semibold text-white truncate text-xs sm:text-sm">
                           {directMediaTitle || "Network Stream"}
@@ -2127,7 +2238,19 @@ export function VirtualRoom({
                               {directMediaError}
                             </p>
                           </div>
-                          <div className="flex items-center justify-center gap-3 pt-2">
+                          <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUseVlcProxy(true);
+                                setIsUsingProxyFallback(true);
+                                setDirectMediaError(null);
+                              }}
+                              className="px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-1.5"
+                            >
+                              <Sparkles size={13} />
+                              <span>Retry via VLC Engine ⚡</span>
+                            </button>
                             <button
                               type="button"
                               onClick={() => {
@@ -2135,9 +2258,9 @@ export function VirtualRoom({
                                 setDirectMediaTitleInput(directMediaTitle || "");
                                 setShowDirectMediaModal(true);
                               }}
-                              className="px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md transition-all"
+                              className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-200 text-xs font-semibold transition-all"
                             >
-                              Open Network Stream
+                              Change Stream
                             </button>
                             <button
                               type="button"
@@ -2151,7 +2274,7 @@ export function VirtualRoom({
                                   payload: { url: null },
                                 });
                               }}
-                              className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-300 text-xs font-semibold transition-all"
+                              className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 text-xs transition-all"
                             >
                               Dismiss
                             </button>
@@ -3365,6 +3488,28 @@ export function VirtualRoom({
                 </span>
               </div>
 
+              {/* VLC Compatibility Engine Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-orange-500/10 border border-orange-500/20">
+                <div className="space-y-0.5 pr-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-orange-200">
+                    <Sparkles size={13} className="text-orange-400" />
+                    <span>VLC Compatibility Engine</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-400 leading-tight">
+                    Emulates VLC network player headers to bypass CORS, mixed content, and CDN hotlink blocks.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={useVlcProxy}
+                    onChange={(e) => setUseVlcProxy(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500" />
+                </label>
+              </div>
+
               {/* URL Input with Paste action */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -3494,6 +3639,17 @@ export function VirtualRoom({
                     <div className="font-semibold text-white">🎬 Soul Connection</div>
                     <div className="text-[10px] text-zinc-400">Built-in Local Demo Video</div>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8");
+                      setDirectMediaTitleInput("Big Buck Bunny (HLS .m3u8)");
+                    }}
+                    className="p-2.5 rounded-xl border border-orange-500/30 bg-orange-500/10 text-left hover:border-orange-500/60 hover:bg-orange-500/20 text-orange-200 transition-all active:scale-[0.98] col-span-2"
+                  >
+                    <div className="font-semibold text-orange-300">⚡ HLS Adaptive Stream (.m3u8)</div>
+                    <div className="text-[10px] text-zinc-400">Test Multi-Bitrate HLS Live Streaming</div>
+                  </button>
                 </div>
               </div>
 
@@ -3506,6 +3662,7 @@ export function VirtualRoom({
                       setDirectMediaUrl(null);
                       setDirectMediaTitle(null);
                       setDirectMediaError(null);
+                      setIsUsingProxyFallback(false);
                       setShowDirectMediaModal(false);
                       void channelRef.current?.send({
                         type: "broadcast",
@@ -3545,6 +3702,7 @@ export function VirtualRoom({
                             return "Network Stream";
                           }
                         })();
+                      setIsUsingProxyFallback(false);
                       setDirectMediaUrl(url);
                       setDirectMediaTitle(derivedTitle);
                       setDirectMediaError(null);
