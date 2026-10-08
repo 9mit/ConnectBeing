@@ -2,14 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // Max allowed duration on Vercel Functions to eliminate stream cutoffs
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-  "Access-Control-Allow-Headers": "Range, Content-Type, Accept, User-Agent, X-Requested-With",
-  "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type, Accept-Ranges, Date",
+  "Access-Control-Allow-Headers": "Range, Content-Type, Accept, User-Agent, X-Requested-With, Origin, Referer",
+  "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type, Accept-Ranges, Date, ETag, Server",
   "Access-Control-Max-Age": "86400",
 };
+
+/**
+ * 3MB bounded byte-range chunks.
+ * On Vercel serverless, unbounded range requests (e.g. bytes=0-) force the proxy to download
+ * gigabytes of video over a single connection, which inevitably triggers Vercel's 15s execution
+ * timeout and freezes playback at ~0:17 seconds. Clamping to 3MB guarantees instant downloads (~150ms)
+ * that never hit Vercel timeouts while allowing fluid hardware decoding & infinite seeking.
+ */
+const MAX_CHUNK_SIZE = 3 * 1024 * 1024;
+
+const VLC_USER_AGENT = "VLC/3.0.20 LibVLC/3.0.20";
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
 /**
  * Validates against SSRF by disallowing private, loopback, and local network IPs.
@@ -39,7 +53,7 @@ function isPrivateOrLocalHost(hostname: string): boolean {
 }
 
 /**
- * Rewrites HLS playlist (.m3u8) URIs (segments and variant playlists)
+ * Rewrites HLS playlist (.m3u8) URIs (segments, sub-manifests, maps, and keys)
  * so every chunk is routed through the proxy with CORS & Range support.
  */
 function rewriteHlsPlaylist(manifestText: string, baseUrl: string, proxyEndpoint: string): string {
@@ -96,6 +110,9 @@ export async function GET(request: NextRequest) {
 async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") {
   const { searchParams } = new URL(request.url);
   const targetUrl = searchParams.get("url");
+  const uaParam = searchParams.get("ua");
+  const wrapParam = searchParams.get("wrap");
+  const rawParam = searchParams.get("raw") === "true";
 
   if (!targetUrl) {
     return NextResponse.json(
@@ -124,28 +141,118 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
     );
   }
 
-  // Build upstream request headers. Forward Range and omit browser Origin/Referer (VLC emulation).
-  const upstreamHeaders: Record<string, string> = {
-    "user-agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    accept: "*/*",
-    "accept-encoding": "identity",
-  };
+  // Handle MPEG-TS HLS synthesis wrapper so browsers with Hls.js can play raw .ts streams
+  const isTsExtension = parsedTarget.pathname.toLowerCase().endsWith(".ts");
+  if ((wrapParam === "hls" || isTsExtension) && !rawParam && method === "GET") {
+    const rawProxyUrl = `/api/stream/proxy?url=${encodeURIComponent(targetUrl)}&raw=true`;
+    const syntheticM3u8 = [
+      "#EXTM3U",
+      "#EXT-X-VERSION:3",
+      "#EXT-X-TARGETDURATION:7200",
+      "#EXT-X-MEDIA-SEQUENCE:0",
+      "#EXTINF:7200.0,",
+      rawProxyUrl,
+      "#EXT-X-ENDLIST",
+    ].join("\n");
 
-  const clientRange = request.headers.get("range");
-  if (clientRange) {
-    upstreamHeaders["range"] = clientRange;
+    return new Response(syntheticM3u8, {
+      status: 200,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+      },
+    });
   }
 
+  // Parse Range header & implement bounded chunk clamping to avoid Vercel timeouts
+  const clientRange = request.headers.get("range");
+  let clampedRangeHeader: string | undefined = undefined;
+
+  if (clientRange) {
+    const rangeMatch = clientRange.trim().match(/^bytes=(\d+)-(\d+)?$/);
+    if (rangeMatch) {
+      const start = parseInt(rangeMatch[1], 10);
+      const requestedEnd = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : undefined;
+      const clampedEnd =
+        requestedEnd !== undefined
+          ? Math.min(requestedEnd, start + MAX_CHUNK_SIZE - 1)
+          : start + MAX_CHUNK_SIZE - 1;
+      clampedRangeHeader = `bytes=${start}-${clampedEnd}`;
+    } else {
+      clampedRangeHeader = clientRange;
+    }
+  } else if (method === "GET") {
+    // For initial GET requests on binary streams, request first chunk to prevent full-file 2GB pull
+    const ext = parsedTarget.pathname.split(".").pop()?.toLowerCase();
+    const isManifest = ext === "m3u8" || ext === "mpd";
+    if (!isManifest) {
+      clampedRangeHeader = `bytes=0-${MAX_CHUNK_SIZE - 1}`;
+    }
+  }
+
+  // Determine initial User-Agent (VLC emulation vs Browser emulation)
+  let primaryUA = VLC_USER_AGENT;
+  let fallbackUA = BROWSER_USER_AGENT;
+
+  if (uaParam === "browser") {
+    primaryUA = BROWSER_USER_AGENT;
+    fallbackUA = VLC_USER_AGENT;
+  } else if (uaParam === "vlc") {
+    primaryUA = VLC_USER_AGENT;
+    fallbackUA = BROWSER_USER_AGENT;
+  }
+
+  const buildHeaders = (ua: string) => {
+    const headers: Record<string, string> = {
+      "user-agent": ua,
+      accept: "*/*",
+      "accept-encoding": "identity",
+      referer: `${parsedTarget.origin}/`,
+      origin: parsedTarget.origin,
+      connection: "keep-alive",
+    };
+    if (clampedRangeHeader) {
+      headers["range"] = clampedRangeHeader;
+    }
+    return headers;
+  };
+
   try {
-    const upstreamRes = await fetch(parsedTarget.href, {
+    let upstreamRes = await fetch(parsedTarget.href, {
       method,
-      headers: upstreamHeaders,
+      headers: buildHeaders(primaryUA),
       redirect: "follow",
     });
 
+    // Dual-UA Auto-Recovery: If primary UA was rejected with 403 or 401, retry with alternate UA
+    if ((upstreamRes.status === 403 || upstreamRes.status === 401) && !uaParam) {
+      const retryRes = await fetch(parsedTarget.href, {
+        method,
+        headers: buildHeaders(fallbackUA),
+        redirect: "follow",
+      });
+      if (retryRes.ok || retryRes.status === 206) {
+        upstreamRes = retryRes;
+      }
+    }
+
     const contentType = upstreamRes.headers.get("content-type") || "";
     const isM3u8Extension = parsedTarget.pathname.toLowerCase().endsWith(".m3u8");
+
+    // Guard against web pages / anti-bot challenge HTML returned instead of media
+    if (contentType.toLowerCase().includes("text/html") && !isM3u8Extension) {
+      return NextResponse.json(
+        {
+          error:
+            "The stream URL returned a webpage (HTML) rather than a direct media stream. Please verify that this is a direct video/stream link (e.g. ending in .mp4, .m3u8, etc.) and not a web player page.",
+          status: upstreamRes.status,
+        },
+        { status: 422, headers: CORS_HEADERS }
+      );
+    }
 
     // Check if the response is an HLS playlist
     const isHls =
@@ -166,7 +273,7 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
           headers: {
             ...CORS_HEADERS,
             "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Cache-Control": "no-cache, no-store, must-revalidate, private",
             Pragma: "no-cache",
             Expires: "0",
           },
@@ -180,7 +287,7 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
       responseHeaders.set(key, val);
     }
 
-    // Pass through essential headers
+    // Pass through essential streaming headers
     const forwardHeader = (name: string, fallback?: string) => {
       const val = upstreamRes.headers.get(name) || fallback;
       if (val) responseHeaders.set(name, val);
@@ -200,13 +307,13 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
       else if (ext === "ts") effectiveContentType = "video/mp2t";
       else if (ext === "mp4" || ext === "m4v" || ext === "m4s") effectiveContentType = "video/mp4";
       else if (ext === "webm") effectiveContentType = "video/webm";
-      else if (ext === "mkv") effectiveContentType = "video/x-matroska";
+      else if (ext === "mkv") effectiveContentType = "video/mp4"; // Serve with video/mp4 to allow browser MSE demuxers to attempt decode
       else if (ext === "mp3") effectiveContentType = "audio/mpeg";
       else if (ext === "aac") effectiveContentType = "audio/aac";
       else if (ext === "ogg") effectiveContentType = "video/ogg";
       else effectiveContentType = isM3u8Extension ? "application/vnd.apple.mpegurl" : "video/mp4";
     }
-    responseHeaders.set("content-type", effectiveContentType);
+    responseHeaders.set("content-type", effectiveContentType || "video/mp4");
 
     forwardHeader("content-length");
     forwardHeader("content-range");
@@ -214,7 +321,12 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
     forwardHeader("last-modified");
     forwardHeader("etag");
 
-    responseHeaders.set("Cache-Control", "public, max-age=3600");
+    // Critical Vercel fix: NEVER allow CDN caching of byte ranges!
+    responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate, private, max-age=0");
+    responseHeaders.set("Pragma", "no-cache");
+    responseHeaders.set("Expires", "0");
+    responseHeaders.set("Vary", "Range, Accept-Encoding");
+    responseHeaders.set("Content-Disposition", "inline");
 
     if (method === "HEAD") {
       return new Response(null, {

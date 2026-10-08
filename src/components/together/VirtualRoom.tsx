@@ -251,14 +251,15 @@ export function VirtualRoom({
     const isInsecureHttp = directMediaUrl.startsWith("http://") && isHttps;
     const shouldProxy = useVlcProxy || isUsingProxyFallback || isInsecureHttp;
 
-    const effectiveSrc = shouldProxy
-      ? `/api/stream/proxy?url=${encodeURIComponent(directMediaUrl)}`
-      : directMediaUrl;
-
+    const isTs = directMediaUrl.toLowerCase().includes(".ts");
     const isHls =
       directMediaUrl.toLowerCase().includes(".m3u8") ||
       directMediaUrl.toLowerCase().includes("/m3u8") ||
-      effectiveSrc.toLowerCase().includes(".m3u8");
+      isTs;
+
+    const effectiveSrc = shouldProxy
+      ? `/api/stream/proxy?url=${encodeURIComponent(directMediaUrl)}${isTs ? "&wrap=hls" : ""}`
+      : directMediaUrl;
 
     if (hlsInstanceRef.current) {
       hlsInstanceRef.current.destroy();
@@ -270,8 +271,10 @@ export function VirtualRoom({
     if (isHls && typeof window !== "undefined" && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 90,
+        lowLatencyMode: false,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
+        backBufferLength: 60,
       });
       hlsInstanceRef.current = hls;
 
@@ -288,15 +291,23 @@ export function VirtualRoom({
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           console.warn("[VirtualRoom] Hls.js fatal error:", data.type, data.details);
-          if (!shouldProxy) {
-            console.log("[VirtualRoom] Auto-switching HLS to VLC stream proxy...");
-            setIsUsingProxyFallback(true);
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            console.log("[VirtualRoom] Auto-recovering HLS network error...");
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            console.log("[VirtualRoom] Auto-recovering HLS media error...");
+            hls.recoverMediaError();
           } else {
-            hls.destroy();
-            hlsInstanceRef.current = null;
-            setDirectMediaError(
-              "Network stream could not be loaded. Please verify the stream URL is online and accessible."
-            );
+            if (!shouldProxy) {
+              console.log("[VirtualRoom] Auto-switching HLS to VLC stream proxy...");
+              setIsUsingProxyFallback(true);
+            } else {
+              hls.destroy();
+              hlsInstanceRef.current = null;
+              setDirectMediaError(
+                "Network stream could not be loaded. Please verify the stream URL is online and accessible."
+              );
+            }
           }
         }
       });
@@ -318,6 +329,22 @@ export function VirtualRoom({
       }
     };
   }, [directMediaUrl, useVlcProxy, isUsingProxyFallback]);
+
+  const handleResyncStream = useCallback(() => {
+    const video = directVideoRef.current;
+    if (!video || !directMediaUrl) return;
+    setDirectMediaError(null);
+    const curTime = video.currentTime || positionSeconds || 0;
+    if (hlsInstanceRef.current) {
+      hlsInstanceRef.current.startLoad(curTime);
+      video.currentTime = curTime;
+      void video.play().catch(() => {});
+    } else {
+      video.load();
+      video.currentTime = curTime;
+      void video.play().catch(() => {});
+    }
+  }, [directMediaUrl, positionSeconds]);
 
   // OTT Mobile & Cinema Player States
   const [estimatedDuration, setEstimatedDuration] = useState(7200);
@@ -2133,6 +2160,7 @@ export function VirtualRoom({
                       playsInline
                       webkit-playsinline="true"
                       x5-playsinline="true"
+                      crossOrigin="anonymous"
                       className="h-full w-full object-contain block z-10"
                       style={{ maxHeight: "100%", maxWidth: "100%" }}
                       onTimeUpdate={(e) => {
@@ -2146,18 +2174,24 @@ export function VirtualRoom({
                         }
                       }}
                       onError={(e) => {
-                        console.warn("[VirtualRoom] Direct video error:", e);
+                        const videoErr = e.currentTarget.error;
+                        console.warn("[VirtualRoom] Direct video error:", videoErr);
                         const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
                         const isInsecureHttp = directMediaUrl ? directMediaUrl.startsWith("http://") && isHttps : false;
                         const alreadyProxying = useVlcProxy || isUsingProxyFallback || isInsecureHttp;
 
-                        if (!alreadyProxying) {
+                        if (videoErr?.code === 3) {
+                          // MEDIA_ERR_DECODE
+                          setDirectMediaError(
+                            "Audio/Video Codec Decode Error: This video uses a codec (such as AC3/DTS audio or MKV container) that web browsers cannot hardware-decode. You can play it locally in VLC and click 'Share Screen' to stream the VLC window with synchronized 1080p WebRTC audio and video, or provide an MP4/HLS stream."
+                          );
+                        } else if (!alreadyProxying) {
                           console.log("[VirtualRoom] Direct playback blocked, auto-falling back to VLC Streaming Proxy...");
                           setIsUsingProxyFallback(true);
                           setDirectMediaError(null);
                         } else {
                           setDirectMediaError(
-                            "Network stream could not be loaded. Please ensure the URL is online and accessible."
+                            "Network stream could not be loaded. Please ensure the URL is online, publicly reachable, and points to a direct video or HLS stream."
                           );
                         }
                       }}
@@ -2195,6 +2229,15 @@ export function VirtualRoom({
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleResyncStream}
+                          title="Re-sync and kickstart stream buffer"
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium text-orange-300 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/25 transition-colors flex items-center gap-1"
+                        >
+                          <RotateCw size={11} />
+                          <span>Re-sync</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -3576,29 +3619,29 @@ export function VirtualRoom({
                   <button
                     type="button"
                     onClick={() => {
-                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4");
-                      setDirectMediaTitleInput("Big Buck Bunny (1080p)");
+                      setDirectMediaInput("https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4");
+                      setDirectMediaTitleInput("Big Buck Bunny (720p)");
                     }}
                     className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
                   >
                     <div className="font-semibold text-white">🐰 Big Buck Bunny</div>
-                    <div className="text-[10px] text-zinc-400">1080p Open Movie MP4</div>
+                    <div className="text-[10px] text-zinc-400">Open Movie Direct MP4</div>
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4");
+                      setDirectMediaInput("https://archive.org/download/Tears-of-Steel/tears_of_steel_720p.mp4");
                       setDirectMediaTitleInput("Tears of Steel (Sci-Fi)");
                     }}
                     className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
                   >
                     <div className="font-semibold text-white">🤖 Tears of Steel</div>
-                    <div className="text-[10px] text-zinc-400">Sci-Fi 1080p VFX MP4</div>
+                    <div className="text-[10px] text-zinc-400">Sci-Fi VFX Direct MP4</div>
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4");
+                      setDirectMediaInput("https://archive.org/download/Sintel/sintel-2048-surround.mp4");
                       setDirectMediaTitleInput("Sintel (Fantasy)");
                     }}
                     className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
@@ -3609,7 +3652,7 @@ export function VirtualRoom({
                   <button
                     type="button"
                     onClick={() => {
-                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
+                      setDirectMediaInput("https://archive.org/download/ElephantsDream/ed_hd.mp4");
                       setDirectMediaTitleInput("Elephants Dream");
                     }}
                     className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
