@@ -38,6 +38,7 @@ import {
   CheckCircle2,
   LogOut,
   Activity,
+  Globe,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
@@ -200,12 +201,22 @@ export function VirtualRoom({
   const [isDrmBlackScreenDetected, setIsDrmBlackScreenDetected] = useState(false);
   const [partnerDrmReported, setPartnerDrmReported] = useState(false);
 
-  // Direct Synchronized Movie Player states (open-source / web video fallback)
+  // Direct Sync & Network Stream states (VLC-style Direct URL Playback)
   const [directMediaUrl, setDirectMediaUrl] = useState<string | null>(null);
   const [directMediaTitle, setDirectMediaTitle] = useState<string | null>(null);
+  const [directMediaError, setDirectMediaError] = useState<string | null>(null);
   const [showDirectMediaModal, setShowDirectMediaModal] = useState(false);
   const [directMediaInput, setDirectMediaInput] = useState("");
+  const [directMediaTitleInput, setDirectMediaTitleInput] = useState("");
   const directVideoRef = useRef<HTMLVideoElement>(null);
+
+  // Auto-initialize network stream if session title is a direct http(s) URL
+  useEffect(() => {
+    if (!directMediaUrl && (title.startsWith("http://") || title.startsWith("https://"))) {
+      setDirectMediaUrl(title);
+      setDirectMediaTitle(providerName || "Network Stream");
+    }
+  }, [title, providerName, directMediaUrl]);
 
   // OTT Mobile & Cinema Player States
   const [estimatedDuration, setEstimatedDuration] = useState(7200);
@@ -327,9 +338,10 @@ export function VirtualRoom({
     };
   }, [localStream, webrtcDiagStatsRef, isHost]);
 
-  // Attach remote media stream to remote video element (Viewer) with robust autoplay mitigation.
-  // Video element is kept PERMANENTLY muted so that mobile Safari and Android Chrome NEVER block
-  // video rendering or pause the stream due to audio policies.
+  // Attach remote media stream to remote video element (Viewer) with robust mobile autoplay mitigation.
+  // Video element is kept PERMANENTLY muted and assigned a VIDEO-ONLY MediaStream so that mobile Safari
+  // and Android Chrome treat it as a silent video element, unlocking zero-latency hardware decoding
+  // without audio session contention or audio autoplay gating.
   useEffect(() => {
     const videoEl = remoteVideoRef.current;
     if (!videoEl) return;
@@ -343,16 +355,24 @@ export function VirtualRoom({
       videoEl.setAttribute("webkit-playsinline", "true");
       videoEl.setAttribute("x5-playsinline", "true");
 
-      if (videoEl.srcObject !== remoteStream) {
-        videoEl.srcObject = remoteStream;
+      // Extract ONLY video track to prevent mobile browser audio-pipeline contention on <video>
+      const vTracks = remoteStream.getVideoTracks();
+      if (vTracks.length > 0) {
+        const curStream = videoEl.srcObject as MediaStream | null;
+        if (!curStream || curStream.getVideoTracks()[0] !== vTracks[0]) {
+          videoEl.srcObject = new MediaStream([vTracks[0]]);
+        }
+      } else {
+        videoEl.srcObject = null;
       }
 
       const updateRenderingState = () => {
-        const hasDimensions = videoEl.videoWidth > 0 && videoEl.videoHeight > 0;
         const isPlaying = !videoEl.paused;
-        if (hasDimensions && isPlaying) {
-          setIsMediaRendering(true);
+        if (isPlaying) {
           setIsVideoActuallyPlaying(true);
+          if (videoEl.videoWidth > 0 || videoEl.currentTime > 0 || videoEl.readyState >= 2) {
+            setIsMediaRendering(true);
+          }
         }
       };
 
@@ -450,12 +470,13 @@ export function VirtualRoom({
     const audioEl = remoteMovieAudioRef.current;
     if (!audioEl || !remoteStream) return;
 
-    if (audioEl.srcObject !== remoteStream) {
-      audioEl.srcObject = remoteStream;
-    }
-
-    const hasAudio = remoteStream.getAudioTracks().length > 0;
-    if (hasAudio) {
+    // Dedicated audio-only stream for remote movie audio
+    const aTracks = remoteStream.getAudioTracks();
+    if (aTracks.length > 0) {
+      const curAudio = audioEl.srcObject as MediaStream | null;
+      if (!curAudio || curAudio.getAudioTracks()[0] !== aTracks[0]) {
+        audioEl.srcObject = new MediaStream([aTracks[0]]);
+      }
       audioEl.play().then(() => {
         setIsAutoplayMuted(false);
       }).catch((err) => {
@@ -463,6 +484,7 @@ export function VirtualRoom({
         setIsAutoplayMuted(true);
       });
     } else {
+      audioEl.srcObject = null;
       setIsAutoplayMuted(false);
     }
   }, [remoteStream]);
@@ -485,8 +507,13 @@ export function VirtualRoom({
       });
     }
     // Verify remote video is playing smoothly
-    if (remoteVideoRef.current && remoteVideoRef.current.paused) {
-      void remoteVideoRef.current.play().catch(() => {});
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.muted = true;
+      setIsMediaRendering(true);
+      setIsVideoActuallyPlaying(true);
+      if (remoteVideoRef.current.paused) {
+        void remoteVideoRef.current.play().catch(() => {});
+      }
     }
   }, []);
 
@@ -503,6 +530,22 @@ export function VirtualRoom({
       if (positionTimerRef.current) clearInterval(positionTimerRef.current);
     };
   }, [playbackState]);
+
+  // Periodic playback sync broadcast for Direct Sync / Network Stream
+  useEffect(() => {
+    if (!isHost || !directMediaUrl || playbackState !== "playing") return;
+    const interval = window.setInterval(() => {
+      const currentPos = directVideoRef.current
+        ? Math.floor(directVideoRef.current.currentTime)
+        : positionSeconds;
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "theater:playback",
+        payload: { userId, state: "playing", position: currentPos },
+      });
+    }, 4500);
+    return () => clearInterval(interval);
+  }, [isHost, directMediaUrl, playbackState, userId, positionSeconds]);
 
   // Auto-hiding OTT player controls timer (3.5s inactivity)
   const resetControlsTimer = useCallback(() => {
@@ -820,11 +863,13 @@ export function VirtualRoom({
       .on("broadcast", { event: "theater:direct-media" }, ({ payload }: { payload: any }) => {
         if (payload?.url) {
           setDirectMediaUrl(payload.url);
-          setDirectMediaTitle(payload.title || "Shared Movie");
+          setDirectMediaTitle(payload.title || "Network Stream");
+          setDirectMediaError(null);
           if (payload.duration) setEstimatedDuration(payload.duration);
         } else {
           setDirectMediaUrl(null);
           setDirectMediaTitle(null);
+          setDirectMediaError(null);
         }
       })
       .on("broadcast", { event: "theater:message" }, ({ payload }: { payload: any }) => {
@@ -1154,7 +1199,9 @@ export function VirtualRoom({
   const hasActiveStream = isHost
     ? isHostCapturing
     : !!remoteStream &&
-      remoteStream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled);
+      (remoteStream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled) ||
+       remoteStream.getAudioTracks().some((t) => t.readyState === "live" && t.enabled) ||
+       roomState === "LIVE");
 
   // Effective host source resolution: combines immediate element resize detection with WebRTC diagnostic stats
   const sourceWidth = hostCaptureDimensions?.width ?? webrtcDiagStats?.localVideoTrack?.settings?.width;
@@ -1411,17 +1458,21 @@ export function VirtualRoom({
               </button>
             )}
 
-            {/* Direct Movie Player Shortcut Button */}
+            {/* Direct Sync / Network Stream Button */}
             <button
               type="button"
-              onClick={() => setShowDirectMediaModal(true)}
+              onClick={() => {
+                setDirectMediaInput(directMediaUrl || "");
+                setDirectMediaTitleInput(directMediaTitle || "");
+                setShowDirectMediaModal(true);
+              }}
               className={`p-1.5 rounded-full transition-colors ${
-                directMediaUrl ? "text-rose-400 bg-rose-500/10" : "text-zinc-400 hover:text-white hover:bg-white/[0.05]"
+                directMediaUrl ? "text-orange-400 bg-orange-500/15 ring-1 ring-orange-500/30" : "text-zinc-400 hover:text-white hover:bg-white/[0.05]"
               }`}
-              title="Play direct movie or video link"
-              aria-label="Play direct movie"
+              title="Direct Sync — Open Network Stream"
+              aria-label="Direct Sync — Open Network Stream"
             >
-              <Film size={14} />
+              <Globe size={14} />
             </button>
 
             {/* Fullscreen Button */}
@@ -1956,7 +2007,7 @@ export function VirtualRoom({
               />
             )}
 
-            {/* C. SYNCHRONIZED DIRECT MEDIA PLAYER (Direct Movie Link / Open-Source / YouTube) */}
+            {/* C. SYNCHRONIZED DIRECT MEDIA PLAYER (Direct Network Stream / Open-Source / YouTube) */}
             {directMediaUrl && (
               (() => {
                 const ytId = extractYouTubeId(directMediaUrl);
@@ -1975,27 +2026,140 @@ export function VirtualRoom({
                   );
                 }
                 return (
-                  <video
-                    ref={directVideoRef}
-                    src={directMediaUrl}
-                    playsInline
-                    webkit-playsinline="true"
-                    x5-playsinline="true"
-                    className="h-full w-full object-contain block z-10"
-                    style={{ maxHeight: "100%", maxWidth: "100%" }}
-                    onTimeUpdate={(e) => {
-                      if (isHost) {
-                        setPositionSeconds(Math.floor(e.currentTarget.currentTime));
-                      }
-                    }}
-                    onLoadedMetadata={(e) => {
-                      if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
-                        setEstimatedDuration(Math.floor(e.currentTarget.duration));
-                      }
-                    }}
-                    onPlay={() => setPlaybackState("playing")}
-                    onPause={() => setPlaybackState("paused")}
-                  />
+                  <div className="relative h-full w-full flex items-center justify-center">
+                    <video
+                      ref={directVideoRef}
+                      src={directMediaUrl}
+                      playsInline
+                      webkit-playsinline="true"
+                      x5-playsinline="true"
+                      className="h-full w-full object-contain block z-10"
+                      style={{ maxHeight: "100%", maxWidth: "100%" }}
+                      onTimeUpdate={(e) => {
+                        const cur = Math.floor(e.currentTarget.currentTime);
+                        setPositionSeconds(cur);
+                      }}
+                      onLoadedMetadata={(e) => {
+                        setDirectMediaError(null);
+                        if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
+                          setEstimatedDuration(Math.floor(e.currentTarget.duration));
+                        }
+                      }}
+                      onError={() => {
+                        setDirectMediaError(
+                          "Network stream could not be loaded. Please ensure the URL is a direct media file (MP4, WebM, HLS) with public CORS access."
+                        );
+                      }}
+                      onPlay={() => {
+                        if (playbackState !== "playing") {
+                          setPlaybackState("playing");
+                          void channelRef.current?.send({
+                            type: "broadcast",
+                            event: "theater:playback",
+                            payload: { userId, state: "playing", position: positionSeconds },
+                          });
+                        }
+                      }}
+                      onPause={() => {
+                        if (playbackState !== "paused") {
+                          setPlaybackState("paused");
+                          void channelRef.current?.send({
+                            type: "broadcast",
+                            event: "theater:playback",
+                            payload: { userId, state: "paused", position: positionSeconds },
+                          });
+                        }
+                      }}
+                    />
+
+                    {/* Network Stream Top Bar */}
+                    <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-2 p-2 sm:px-3 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-xs shadow-xl pointer-events-auto">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30 shrink-0">
+                          <Globe size={11} className="animate-spin text-orange-400" />
+                          Direct Sync
+                        </span>
+                        <span className="font-semibold text-white truncate text-xs sm:text-sm">
+                          {directMediaTitle || "Network Stream"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDirectMediaInput(directMediaUrl || "");
+                            setDirectMediaTitleInput(directMediaTitle || "");
+                            setShowDirectMediaModal(true);
+                          }}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-200 bg-white/10 hover:bg-white/20 border border-white/10 transition-colors"
+                        >
+                          Change Stream
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDirectMediaUrl(null);
+                            setDirectMediaTitle(null);
+                            setDirectMediaError(null);
+                            void channelRef.current?.send({
+                              type: "broadcast",
+                              event: "theater:direct-media",
+                              payload: { url: null },
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-colors"
+                        >
+                          Stop Stream
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Network Stream Error Overlay */}
+                    {directMediaError && (
+                      <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/90 p-6 text-center">
+                        <div className="max-w-md w-full rounded-2xl border border-rose-500/30 bg-[#0d0f17] p-6 shadow-2xl space-y-4">
+                          <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto">
+                            <AlertTriangle size={24} />
+                          </div>
+                          <div>
+                            <h4 className="text-base font-semibold text-white">Network Stream Error</h4>
+                            <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
+                              {directMediaError}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-center gap-3 pt-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDirectMediaInput(directMediaUrl || "");
+                                setDirectMediaTitleInput(directMediaTitle || "");
+                                setShowDirectMediaModal(true);
+                              }}
+                              className="px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md transition-all"
+                            >
+                              Open Network Stream
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDirectMediaUrl(null);
+                                setDirectMediaTitle(null);
+                                setDirectMediaError(null);
+                                void channelRef.current?.send({
+                                  type: "broadcast",
+                                  event: "theater:direct-media",
+                                  payload: { url: null },
+                                });
+                              }}
+                              className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-300 text-xs font-semibold transition-all"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
               })()
             )}
@@ -2005,14 +2169,13 @@ export function VirtualRoom({
               <div
                 onClick={async (e) => {
                   e.stopPropagation();
+                  // Dismiss immediately on user tap gesture
+                  setIsMediaRendering(true);
+                  setIsVideoActuallyPlaying(true);
                   if (remoteVideoRef.current) {
                     remoteVideoRef.current.muted = true;
                     try {
                       await remoteVideoRef.current.play();
-                      if (remoteVideoRef.current.videoWidth > 0) {
-                        setIsMediaRendering(true);
-                      }
-                      setIsVideoActuallyPlaying(true);
                     } catch (err) {
                       console.warn("[VirtualRoom] Manual play error:", err);
                     }
@@ -2021,6 +2184,7 @@ export function VirtualRoom({
                     remoteMovieAudioRef.current.muted = false;
                     void remoteMovieAudioRef.current.play().then(() => {
                       setIsAutoplayMuted(false);
+                      setIsVideoMuted(false);
                     }).catch(() => {});
                   }
                 }}
@@ -2211,10 +2375,14 @@ export function VirtualRoom({
 
                     <button
                       type="button"
-                      onClick={() => setShowDirectMediaModal(true)}
+                      onClick={() => {
+                        setDirectMediaInput(directMediaUrl || "");
+                        setDirectMediaTitleInput(directMediaTitle || "");
+                        setShowDirectMediaModal(true);
+                      }}
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-xs font-semibold text-zinc-200 bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.1] transition-all active:scale-95"
                     >
-                      <Film size={13} /> Direct / YouTube Sync 🎬
+                      <Globe size={13} className="text-orange-400" /> Direct Sync (Network Stream) 🎬
                     </button>
                   </div>
 
@@ -2291,10 +2459,14 @@ export function VirtualRoom({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowDirectMediaModal(true)}
-                      className="text-[11px] text-rose-300 hover:text-rose-200 underline transition-colors"
+                      onClick={() => {
+                        setDirectMediaInput(directMediaUrl || "");
+                        setDirectMediaTitleInput(directMediaTitle || "");
+                        setShowDirectMediaModal(true);
+                      }}
+                      className="text-[11px] text-orange-300 hover:text-orange-200 underline transition-colors"
                     >
-                      Or play direct movie together 🎬
+                      Or open network stream directly 🎬
                     </button>
                   </div>
 
@@ -2418,15 +2590,7 @@ export function VirtualRoom({
               <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   type="button"
-                  onClick={() => {
-                    const next = playbackState === "playing" ? "paused" : "playing";
-                    setPlaybackState(next);
-                    void channelRef.current?.send({
-                      type: "broadcast",
-                      event: "theater:playback",
-                      payload: { userId, state: next, position: positionSeconds },
-                    });
-                  }}
+                  onClick={togglePlayback}
                   className="w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-white text-zinc-950 flex items-center justify-center hover:bg-zinc-200 transition-all shadow-sm active:scale-95"
                   title={playbackState === "playing" ? "Pause timeline" : "Resume timeline"}
                   aria-label={playbackState === "playing" ? "Pause" : "Play"}
@@ -2744,20 +2908,24 @@ export function VirtualRoom({
                   </button>
                 )}
 
-                {/* Direct Movie Player Pill */}
+                {/* Direct Sync / Network Stream Pill */}
                 <button
                   type="button"
-                  onClick={() => setShowDirectMediaModal(true)}
+                  onClick={() => {
+                    setDirectMediaInput(directMediaUrl || "");
+                    setDirectMediaTitleInput(directMediaTitle || "");
+                    setShowDirectMediaModal(true);
+                  }}
                   className={`min-h-[44px] px-3.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-all active:scale-95 shrink-0 ${
                     directMediaUrl
-                      ? "bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm"
+                      ? "bg-orange-500/20 text-orange-300 border-orange-500/40 shadow-sm"
                       : "bg-white/[0.04] text-zinc-300 border-white/[0.08] hover:bg-white/[0.08]"
                   }`}
-                  title="Direct movie / video player"
-                  aria-label="Direct movie / video player"
+                  title="Direct Sync — Open Network Stream"
+                  aria-label="Direct Sync — Open Network Stream"
                 >
-                  <Film size={13} className={directMediaUrl ? "text-rose-400" : ""} />
-                  <span>{directMediaUrl ? "Direct Movie Active" : "Direct Movie"}</span>
+                  <Globe size={13} className={directMediaUrl ? "text-orange-400" : ""} />
+                  <span>{directMediaUrl ? "Network Stream Active" : "Network Stream"}</span>
                 </button>
 
                 {/* OTT Native App Deep Link */}
@@ -3148,117 +3316,196 @@ export function VirtualRoom({
         )}
       </AnimatePresence>
 
-      {/* DIRECT SYNCHRONIZED MOVIE / VIDEO PLAYER MODAL */}
+      {/* DIRECT SYNCHRONIZED NETWORK STREAM MODAL (VLC-STYLE) */}
       <AnimatePresence>
         {showDirectMediaModal && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="max-w-md w-full rounded-2xl border border-white/[0.12] bg-[#0c0e15] p-6 shadow-2xl space-y-4 text-left"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="max-w-lg w-full rounded-3xl border border-white/[0.12] bg-[#0c0e15] p-5 sm:p-6 shadow-2xl space-y-4 text-left max-h-[90vh] overflow-y-auto"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Film size={20} className="text-rose-400" />
-                  <h3 className="text-base font-semibold text-white">Direct Movie Player</h3>
+              <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-orange-500/20 border border-orange-500/40 text-orange-400 flex items-center justify-center shadow-lg shadow-orange-500/20">
+                    <Globe size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-semibold text-white tracking-wide">
+                      Direct Sync &bull; Open Network Stream
+                    </h3>
+                    <p className="text-[11px] text-zinc-400">
+                      VLC-style direct media playback synchronized for both partners
+                    </p>
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowDirectMediaModal(false)}
-                  className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08]"
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <p className="text-xs text-zinc-300 leading-relaxed">
-                Stream any YouTube link (e.g. youtube.com/watch?v=...) or direct video link (MP4, WebM, HLS) in 100% native HD sync on both PC and Mobile without screen recording blur or DRM black screens.
-              </p>
+              {/* Protocol Badges */}
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
+                  HTTP / HTTPS Direct MP4
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
+                  WebM
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
+                  HLS (.m3u8)
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
+                  YouTube
+                </span>
+              </div>
 
-              <div className="space-y-2">
+              {/* URL Input with Paste action */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-mono uppercase tracking-wider text-amber-300/90 font-medium">
+                    Network Stream URL
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {directMediaInput && (
+                      <button
+                        type="button"
+                        onClick={() => setDirectMediaInput("")}
+                        className="text-[10px] text-zinc-400 hover:text-zinc-200"
+                      >
+                        Clear
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const text = await navigator.clipboard.readText();
+                          if (text) setDirectMediaInput(text.trim());
+                        } catch {
+                          /* ignore clipboard permission errors */
+                        }
+                      }}
+                      className="text-[10px] text-orange-400 hover:text-orange-300 font-semibold"
+                    >
+                      Paste from clipboard
+                    </button>
+                  </div>
+                </div>
+                <div className="relative">
+                  <input
+                    type="url"
+                    placeholder="https://example.com/movie.mp4, .m3u8, or YouTube URL"
+                    value={directMediaInput}
+                    onChange={(e) => setDirectMediaInput(e.target.value)}
+                    className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 font-mono transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Stream Title Input */}
+              <div className="space-y-1.5">
                 <label className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
-                  YouTube or Video Stream URL
+                  Stream Title (Optional)
                 </label>
                 <input
-                  type="url"
-                  placeholder="https://www.youtube.com/watch?v=... or .mp4"
-                  value={directMediaInput}
-                  onChange={(e) => setDirectMediaInput(e.target.value)}
-                  className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-rose-500"
+                  type="text"
+                  placeholder="e.g. Tears of Steel (1080p)"
+                  value={directMediaTitleInput}
+                  onChange={(e) => setDirectMediaTitleInput(e.target.value)}
+                  className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 transition-colors"
                 />
               </div>
 
-              {/* Quick sample open-source free movie links */}
-              <div className="space-y-1.5 pt-1">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
-                  Or pick a sample stream:
+              {/* Curated Sample Streams */}
+              <div className="space-y-2 pt-1">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-medium">
+                  Quick Network Stream Presets:
                 </span>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   <button
                     type="button"
                     onClick={() => {
-                      setDirectMediaInput("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
-                    }}
-                    className="p-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-left hover:border-rose-500/60 hover:bg-rose-500/20 text-rose-200 transition-colors"
-                  >
-                    ▶️ YouTube 4K/1080p Sync
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("/souls.mp4");
-                    }}
-                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
-                  >
-                    🎬 Soul Connection (Demo)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
                       setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4");
+                      setDirectMediaTitleInput("Big Buck Bunny (1080p)");
                     }}
-                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
+                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
                   >
-                    🐰 Big Buck Bunny (1080p)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
-                    }}
-                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
-                  >
-                    🐘 Elephants Dream
+                    <div className="font-semibold text-white">🐰 Big Buck Bunny</div>
+                    <div className="text-[10px] text-zinc-400">1080p Open Movie MP4</div>
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4");
+                      setDirectMediaTitleInput("Tears of Steel (Sci-Fi)");
                     }}
-                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
+                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
                   >
-                    🤖 Tears of Steel (Sci-Fi)
+                    <div className="font-semibold text-white">🤖 Tears of Steel</div>
+                    <div className="text-[10px] text-zinc-400">Sci-Fi 1080p VFX MP4</div>
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4");
+                      setDirectMediaTitleInput("Sintel (Fantasy)");
                     }}
-                    className="p-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-left hover:border-rose-500/50 hover:bg-rose-500/10 text-zinc-300 transition-colors"
+                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
                   >
-                    🐉 Sintel (Fantasy Animation)
+                    <div className="font-semibold text-white">🐉 Sintel</div>
+                    <div className="text-[10px] text-zinc-400">Fantasy Animation MP4</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4");
+                      setDirectMediaTitleInput("Elephants Dream");
+                    }}
+                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
+                  >
+                    <div className="font-semibold text-white">🐘 Elephants Dream</div>
+                    <div className="text-[10px] text-zinc-400">Open Source CGI MP4</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
+                      setDirectMediaTitleInput("Big Buck Bunny 4K (YouTube)");
+                    }}
+                    className="p-2.5 rounded-xl border border-red-500/20 bg-red-500/5 text-left hover:border-red-500/50 hover:bg-red-500/10 text-zinc-300 transition-all active:scale-[0.98]"
+                  >
+                    <div className="font-semibold text-red-200">▶️ YouTube 4K Sync</div>
+                    <div className="text-[10px] text-zinc-400">Synchronized YouTube Stream</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectMediaInput("/souls.mp4");
+                      setDirectMediaTitleInput("Soul Connection Demo");
+                    }}
+                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
+                  >
+                    <div className="font-semibold text-white">🎬 Soul Connection</div>
+                    <div className="text-[10px] text-zinc-400">Built-in Local Demo Video</div>
                   </button>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.08]">
-                {directMediaUrl && (
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/[0.08]">
+                {directMediaUrl ? (
                   <button
                     type="button"
                     onClick={() => {
                       setDirectMediaUrl(null);
                       setDirectMediaTitle(null);
+                      setDirectMediaError(null);
                       setShowDirectMediaModal(false);
                       void channelRef.current?.send({
                         type: "broadcast",
@@ -3266,29 +3513,55 @@ export function VirtualRoom({
                         payload: { url: null },
                       });
                     }}
-                    className="px-3 py-2 text-xs font-medium text-zinc-400 hover:text-white"
+                    className="px-3.5 py-2 text-xs font-medium text-rose-300 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-full transition-colors"
                   >
-                    Stop Direct Stream
+                    Stop Network Stream
                   </button>
+                ) : (
+                  <div />
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = directMediaInput.trim();
-                    if (!url) return;
-                    setDirectMediaUrl(url);
-                    setDirectMediaTitle("Synchronized Movie");
-                    setShowDirectMediaModal(false);
-                    void channelRef.current?.send({
-                      type: "broadcast",
-                      event: "theater:direct-media",
-                      payload: { url, title: "Synchronized Movie" },
-                    });
-                  }}
-                  className="rounded-full bg-rose-600 hover:bg-rose-500 px-5 py-2 text-xs font-semibold text-white transition-all shadow-md active:scale-95"
-                >
-                  Play Together in Sync 🎬
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDirectMediaModal(false)}
+                    className="px-4 py-2 text-xs font-medium text-zinc-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = directMediaInput.trim();
+                      if (!url) return;
+                      const derivedTitle =
+                        directMediaTitleInput.trim() ||
+                        (() => {
+                          try {
+                            const parsed = new URL(url);
+                            const pathname = parsed.pathname;
+                            const filename = pathname.split("/").pop() || "Network Stream";
+                            return decodeURIComponent(filename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "));
+                          } catch {
+                            return "Network Stream";
+                          }
+                        })();
+                      setDirectMediaUrl(url);
+                      setDirectMediaTitle(derivedTitle);
+                      setDirectMediaError(null);
+                      setShowDirectMediaModal(false);
+                      void channelRef.current?.send({
+                        type: "broadcast",
+                        event: "theater:direct-media",
+                        payload: { url, title: derivedTitle },
+                      });
+                    }}
+                    disabled={!directMediaInput.trim()}
+                    className="rounded-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 px-5 py-2 text-xs font-semibold text-white transition-all shadow-md shadow-orange-600/30 active:scale-95 flex items-center gap-1.5"
+                  >
+                    <Globe size={13} />
+                    <span>Open Network Stream 🎬</span>
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

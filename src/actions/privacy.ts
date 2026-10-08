@@ -16,6 +16,7 @@ import {
 } from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
+import { isCoupleVerified } from "@/lib/couple-verification";
 import { redis } from "@/lib/redis";
 import { rateLimitOrThrow } from "@/lib/security";
 
@@ -47,8 +48,7 @@ export async function getPrivacyStatusAction(): Promise<
       db.select({ value: count() }).from(moods).where(eq(moods.coupleId, couple.id)),
     ]);
 
-    const isVerified =
-      !!couple.verifiedUntil && couple.verifiedUntil.getTime() >= Date.now();
+    const isVerified = isCoupleVerified(couple);
 
     return ok({
       e2eeEnabled: !!(user.e2eePublicKey && partnerUser?.e2eePublicKey),

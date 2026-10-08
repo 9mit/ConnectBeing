@@ -13,6 +13,7 @@ import { requireActiveCouple } from "@/lib/auth";
 import {
   codesMatch,
   generateVerificationCode,
+  getCoupleVerificationStatus,
   hashVerificationCode,
   isCoupleVerified,
   issueVerificationPeriod,
@@ -32,6 +33,7 @@ export async function getVerificationStatusAction(): Promise<
     role: "revealer" | "submitter";
     verifiedUntil: string | null;
     isVerified: boolean;
+    status: "Verified" | "Expired";
     dueSoon: boolean;
     expired: boolean;
     hoursRemaining: number | null;
@@ -41,6 +43,8 @@ export async function getVerificationStatusAction(): Promise<
     const { user, couple } = await requireActiveCouple();
     const role =
       couple.userAId === user.id ? "revealer" : ("submitter" as const);
+    const isVerified = isCoupleVerified(couple);
+    const status = getCoupleVerificationStatus(couple);
     const verifiedUntil = couple.verifiedUntil?.toISOString() ?? null;
     const hoursRemaining = couple.verifiedUntil
       ? Math.max(
@@ -52,7 +56,8 @@ export async function getVerificationStatusAction(): Promise<
     return ok({
       role,
       verifiedUntil,
-      isVerified: isCoupleVerified(couple),
+      isVerified,
+      status,
       dueSoon: verificationDueSoon(couple, 48),
       expired: verificationExpired(couple),
       hoursRemaining,
@@ -103,7 +108,7 @@ export async function revealVerificationCodeAction(): Promise<
       const issued = await issueVerificationPeriod({
         coupleId: couple.id,
         revealedToUserId: couple.userAId,
-        syncVerifiedUntil: !couple.verifiedUntil || verificationExpired(couple),
+        syncVerifiedUntil: false,
       });
       return ok({
         code: issued.code,
@@ -236,15 +241,6 @@ export async function submitVerificationCodeAction(
     } catch {
       /* ignore */
     }
-
-    // Next week’s code for Partner A (does not shrink verifiedUntil)
-    await issueVerificationPeriod({
-      coupleId: couple.id,
-      revealedToUserId: couple.userAId,
-      periodStart: now,
-      syncVerifiedUntil: false,
-    });
-
 
     await notifyCoupleVerification({
       coupleId: couple.id,

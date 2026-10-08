@@ -406,22 +406,23 @@ function prioritizeCodecsInSdp(sdp: string): string {
       const fmtp = fmtpMap.get(pt) || "";
 
       if (codec === "H264") {
-        // High Profile (6400xx / 640cxx): Hardware NVENC/Intel/Apple acceleration + CABAC 8x8 DCT transform
-        if (fmtp.includes("6400") || fmtp.includes("640c")) {
+        // Baseline Profile (42e0xx / 4200xx / 4210xx): Universal mobile hardware decoding (100% supported by Android & iOS)
+        if (fmtp.includes("42e0") || fmtp.includes("4200") || fmtp.includes("4210")) {
           return 100;
         }
         // Main Profile (4d00xx / 4d0cxx): Hardware acceleration + CABAC
         if (fmtp.includes("4d00") || fmtp.includes("4d0c")) {
-          return 90;
+          return 85;
         }
-        // Baseline Profile (42e0xx / 4200xx): Universal mobile fallback
-        if (fmtp.includes("42e0") || fmtp.includes("4200") || fmtp.includes("4210")) {
-          return 80;
+        // High Profile (6400xx / 640cxx): Can cause decode failure / black screen on mobile decoders
+        if (fmtp.includes("6400") || fmtp.includes("640c")) {
+          return 75;
         }
-        return 75;
+        return 70;
       }
       if (codec === "VP8") {
-        return 70;
+        // Universal WebRTC software and hardware decoding across all browsers and mobile platforms
+        return 95;
       }
       if (codec === "VP9") {
         return 40;
@@ -504,28 +505,35 @@ function prioritizeMobileSafeCodecs(transceiver: RTCRtpTransceiver) {
       const aIsVP8 = aMime === "video/vp8";
       const bIsVP8 = bMime === "video/vp8";
 
-      if (aIsH264 && !bIsH264) return -1;
-      if (!aIsH264 && bIsH264) return 1;
+      const aFmtp = (a.sdpFmtpLine || "").toLowerCase();
+      const bFmtp = (b.sdpFmtpLine || "").toLowerCase();
+
+      // Check baseline first (most universally compatible with mobile chipsets)
+      const aBaseline = aIsH264 && (aFmtp.includes("42e0") || aFmtp.includes("4200") || aFmtp.includes("4210"));
+      const bBaseline = bIsH264 && (bFmtp.includes("42e0") || bFmtp.includes("4200") || bFmtp.includes("4210"));
+      if (aBaseline && !bBaseline) return -1;
+      if (!aBaseline && bBaseline) return 1;
+
+      // Check VP8 (supported by 100% of WebRTC implementations)
+      if (aIsVP8 && !bIsVP8 && !bBaseline) return -1;
+      if (!aIsVP8 && bIsVP8 && !aBaseline) return 1;
 
       if (aIsH264 && bIsH264) {
-        const aFmtp = (a.sdpFmtpLine || "").toLowerCase();
-        const bFmtp = (b.sdpFmtpLine || "").toLowerCase();
-        const aHigh = aFmtp.includes("6400") || aFmtp.includes("640c");
-        const bHigh = bFmtp.includes("6400") || bFmtp.includes("640c");
-        if (aHigh && !bHigh) return -1;
-        if (!aHigh && bHigh) return 1;
-
+        // Main profile
         const aMain = aFmtp.includes("4d00") || aFmtp.includes("4d0c");
         const bMain = bFmtp.includes("4d00") || bFmtp.includes("4d0c");
         if (aMain && !bMain) return -1;
         if (!aMain && bMain) return 1;
 
-        const aBaseline = aFmtp.includes("42e0") || aFmtp.includes("4200");
-        const bBaseline = bFmtp.includes("42e0") || bFmtp.includes("4200");
-        if (aBaseline && !bBaseline) return -1;
-        if (!aBaseline && bBaseline) return 1;
+        // High profile last (can fail on mobile decoders)
+        const aHigh = aFmtp.includes("6400") || aFmtp.includes("640c");
+        const bHigh = bFmtp.includes("6400") || bFmtp.includes("640c");
+        if (aHigh && !bHigh) return -1;
+        if (!aHigh && bHigh) return 1;
       }
 
+      if (aIsH264 && !bIsH264) return -1;
+      if (!aIsH264 && bIsH264) return 1;
       if (aIsVP8 && !bIsVP8) return -1;
       if (!aIsVP8 && bIsVP8) return 1;
 

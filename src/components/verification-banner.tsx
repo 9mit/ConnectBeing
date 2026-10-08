@@ -22,7 +22,7 @@ export function VerificationBanner({ couple }: { couple: Couple }) {
     >
       {expired ? (
         <p>
-          Weekly verification expired. Shared chat, calls, and Together are
+          Weekly verification expired for both partners. Shared chat, calls, and Together are
           locked until you{" "}
           <Link href="/verify" className="underline underline-offset-4 font-semibold text-amber-300 hover:text-amber-100">
             verify

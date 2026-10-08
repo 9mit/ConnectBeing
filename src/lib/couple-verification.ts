@@ -75,8 +75,14 @@ export function verificationDueSoon(
 }
 
 export function verificationExpired(couple: Couple): boolean {
-  if (!couple.verifiedUntil) return false;
+  if (!couple.verifiedUntil) return true;
   return couple.verifiedUntil.getTime() < Date.now();
+}
+
+export function getCoupleVerificationStatus(
+  couple: Couple,
+): "Verified" | "Expired" {
+  return isCoupleVerified(couple) ? "Verified" : "Expired";
 }
 
 /**
@@ -103,7 +109,7 @@ export async function issueVerificationPeriod(input: {
   coupleId: string;
   revealedToUserId: string;
   periodStart?: Date;
-  /** When false, only mint the next code row (e.g. after successful submit). */
+  /** When true, explicitly syncs couple.verifiedUntil. Defaults to false. */
   syncVerifiedUntil?: boolean;
 }): Promise<{ code: string; periodEnd: Date; verificationId: string }> {
   const periodStart = input.periodStart ?? new Date();
@@ -125,7 +131,7 @@ export async function issueVerificationPeriod(input: {
     revealedToUserId: input.revealedToUserId,
   });
 
-  if (input.syncVerifiedUntil !== false) {
+  if (input.syncVerifiedUntil === true) {
     await db
       .update(couples)
       .set({ verifiedUntil: periodEnd })
@@ -170,6 +176,7 @@ export async function ensureActiveVerificationCode(
     coupleId: couple.id,
     revealedToUserId: couple.userAId,
     periodStart: now,
+    syncVerifiedUntil: false,
   });
 }
 
@@ -189,41 +196,38 @@ export async function rotateCoupleVerifications(): Promise<{
 
   for (const couple of active) {
     try {
-      if (!couple.verifiedUntil) {
-        await issueVerificationPeriod({
-          coupleId: couple.id,
-          revealedToUserId: couple.userAId,
-        });
-        ensured += 1;
-        continue;
-      }
+      const isExpired =
+        !couple.verifiedUntil || couple.verifiedUntil.getTime() < now.getTime();
 
-      if (couple.verifiedUntil.getTime() < now.getTime()) {
+      if (isExpired) {
         await notifyCoupleVerification({
           coupleId: couple.id,
           kind: "expired",
         });
+
+        // Drop expired unconsumed rows (keep consumed for audit)
+        await db
+          .delete(coupleVerifications)
+          .where(
+            and(
+              eq(coupleVerifications.coupleId, couple.id),
+              isNull(coupleVerifications.consumedAt),
+              lt(coupleVerifications.periodEnd, now),
+            ),
+          );
+
+        await ensureActiveVerificationCode(couple);
+        ensured += 1;
       } else if (verificationDueSoon(couple, 48)) {
         await notifyCoupleVerification({
           coupleId: couple.id,
           kind: "due_soon",
         });
         dueSoonNotified += 1;
+        await ensureActiveVerificationCode(couple);
       }
-
-      // Drop expired unconsumed rows (keep consumed for audit)
-      await db
-        .delete(coupleVerifications)
-        .where(
-          and(
-            eq(coupleVerifications.coupleId, couple.id),
-            isNull(coupleVerifications.consumedAt),
-            lt(coupleVerifications.periodEnd, now),
-          ),
-        );
-
-      await ensureActiveVerificationCode(couple);
-      ensured += 1;
+      // If couple is verified and not due soon, verification status remains "Verified"
+      // until next verification date without churn.
     } catch (err) {
       console.error("[verify] rotate failed", couple.id, err);
     }

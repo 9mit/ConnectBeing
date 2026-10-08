@@ -13,12 +13,15 @@ export function VerifyPanel() {
   const [role, setRole] = useState<"revealer" | "submitter" | null>(null);
   const [verifiedUntil, setVerifiedUntil] = useState<string | null>(null);
   const [hoursRemaining, setHoursRemaining] = useState<number | null>(null);
+  const [isVerified, setIsVerified] = useState(false);
+  const [status, setStatus] = useState<"Verified" | "Expired" | null>(null);
   const [expired, setExpired] = useState(false);
   const [dueSoon, setDueSoon] = useState(false);
   const [code, setCode] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showEarlyExchange, setShowEarlyExchange] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function refresh() {
@@ -31,6 +34,8 @@ export function VerifyPanel() {
       setRole(res.data.role);
       setVerifiedUntil(res.data.verifiedUntil);
       setHoursRemaining(res.data.hoursRemaining);
+      setIsVerified(res.data.isVerified);
+      setStatus(res.data.status);
       setExpired(res.data.expired);
       setDueSoon(res.data.dueSoon);
       setError(null);
@@ -64,8 +69,11 @@ export function VerifyPanel() {
         setError(res.error.message);
         return;
       }
-      setMessage("You’re verified for another week. Shared features are unlocked.");
+      setMessage(
+        `Weekly verification complete! Both partners are immediately marked as Verified until ${formatSessionDateTime(res.data.verifiedUntil)}.`,
+      );
       setInput("");
+      setShowEarlyExchange(false);
       refresh();
     });
   }
@@ -77,33 +85,82 @@ export function VerifyPanel() {
         : `${Math.floor(hoursRemaining)}h left`
       : null;
 
+  const showCodeExchange = expired || dueSoon || !isVerified || showEarlyExchange;
+
   return (
     <div className="mx-auto max-w-lg space-y-6 rounded-3xl glass-panel border border-amber-500/30 bg-purple-950/50 p-6 md:p-8 shadow-[0_0_35px_rgba(212,175,55,0.12)]">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-white font-display text-glow-gold">Weekly Verification</h1>
         <p className="mt-2 text-sm text-slate-300 font-medium leading-relaxed">
-          Once a week, one partner shares a code and the other enters it. This
-          keeps shared chat, calls, and Together unlocked.
+          Once a week, one partner shares a verification code and the other enters it.
+          When verified, both partners remain unlocked until the next verification date.
         </p>
       </div>
 
       <div className="rounded-xl border border-amber-500/30 bg-purple-950/70 px-4 py-3 text-sm text-amber-200 font-medium shadow-inner">
         {expired ? (
-          <p className="text-red-400 font-bold">Verification expired — shared features are locked until you complete this.</p>
+          <div className="space-y-1">
+            <p className="text-red-400 font-bold text-base flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-red-400 animate-pulse" />
+              Status: Expired
+            </p>
+            <p className="text-xs text-red-300/80">
+              Weekly verification expired for both partners. Shared chat, calls, and Together are locked until completed.
+            </p>
+          </div>
         ) : dueSoon ? (
-          <p className="text-amber-300 font-bold">Verification due soon{countdown ? ` · ${countdown}` : ""}.</p>
+          <div className="space-y-1">
+            <p className="text-amber-300 font-bold text-base flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+              Status: Verified (Due soon)
+              {countdown ? ` · ${countdown}` : ""}
+            </p>
+            <p className="text-xs text-amber-200/80">
+              {verifiedUntil ? `Valid until ${formatSessionDateTime(verifiedUntil)}. ` : ""}
+              Exchange this week’s code before it expires to stay verified.
+            </p>
+          </div>
         ) : (
-          <p>
-            Status: active
-            {countdown ? ` · ${countdown}` : ""}
-            {verifiedUntil
-              ? ` · until ${formatSessionDateTime(verifiedUntil)}`
-              : ""}
-          </p>
+          <div className="space-y-1">
+            <p className="text-emerald-300 font-bold text-base flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              Status: Verified
+              {countdown ? ` · ${countdown}` : ""}
+            </p>
+            <p className="text-xs text-emerald-200/80">
+              Both partners are verified for this period
+              {verifiedUntil ? ` until ${formatSessionDateTime(verifiedUntil)}` : ""}.
+              Shared features are fully unlocked.
+            </p>
+          </div>
         )}
       </div>
 
-      {role === "revealer" ? (
+      {isVerified && !dueSoon && !expired ? (
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-5 text-sm space-y-3">
+          <div className="flex items-center gap-2.5 text-emerald-300 font-bold">
+            <span className="text-lg">✓</span>
+            <span>Weekly Verification Active</span>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Both partners are marked as verified for this period. The status remains{" "}
+            <span className="text-emerald-300 font-semibold">“Verified”</span> until{" "}
+            {verifiedUntil ? formatSessionDateTime(verifiedUntil) : "the next verification date"}.
+            Once that date is reached, the verification status will expire for both partners and require a new weekly verification.
+          </p>
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setShowEarlyExchange((v) => !v)}
+              className="text-xs text-amber-300 hover:text-amber-200 underline underline-offset-4 font-semibold"
+            >
+              {showEarlyExchange ? "Hide code exchange" : "Exchange code early"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {showCodeExchange && role === "revealer" ? (
         <div className="space-y-3">
           <p className="text-sm text-slate-300 font-medium leading-relaxed">
             You hold this week’s code. Show it to your partner so they can enter
@@ -125,7 +182,7 @@ export function VerifyPanel() {
         </div>
       ) : null}
 
-      {role === "submitter" ? (
+      {showCodeExchange && role === "submitter" ? (
         <form onSubmit={onSubmit} className="space-y-4">
           <p className="text-sm text-slate-300 font-medium leading-relaxed">
             Ask your partner for this week’s code, then enter it here.
