@@ -12,11 +12,13 @@ import { loadShakaModule, isShakaSupported } from "./shakaPlayer";
 export type NetworkPlayerState =
   | "IDLE"
   | "VALIDATING"
-  | "LOADING"
+  | "LOADING_MANIFEST"
+  | "LOADING_MEDIA"
+  | "BUFFERING"
   | "READY"
   | "PLAYING"
   | "PAUSED"
-  | "BUFFERING"
+  | "RECONNECTING"
   | "ERROR";
 
 export type PlaybackEngineType = "native" | "hlsjs" | "shaka" | "youtube" | "none";
@@ -28,6 +30,8 @@ export interface NetworkPlayerErrorInfo {
   technicalDetails?: string;
   suggestedAction?: string;
   canRetry: boolean;
+  httpStatus?: number;
+  failedUrl?: string;
 }
 
 export interface NetworkPlayerDiagnostics {
@@ -39,18 +43,43 @@ export interface NetworkPlayerDiagnostics {
   duration: number;
   currentTime: number;
   bufferedEnd: number;
+  bufferAhead: number;
+  readyState: number;
+  networkState: number;
   playbackRate: number;
+  isPaused: boolean;
   isMuted: boolean;
   mediaErrorCode: number | null;
   lastEvent: string;
   lastEventTime: number;
   sanitizedUrl: string;
+  hlsMetrics?: {
+    mediaAttached: boolean;
+    manifestLoaded: boolean;
+    manifestParsed: boolean;
+    levelsLoaded: number;
+    currentLevel: number;
+    fragsLoaded: number;
+    fragsBuffered: number;
+    bufferAppends: number;
+  };
+  lastError?: {
+    event: string;
+    stage: string;
+    fatal: boolean;
+    details: string;
+    httpStatus?: number;
+    retryCount: number;
+    sanitizedUrl?: string;
+    timestamp: number;
+  };
 }
 
 export interface UseNetworkStreamPlayerOptions {
   videoRef: React.RefObject<HTMLVideoElement>;
   streamUrl: string | null;
   streamTitle?: string | null;
+  fallbackUrl?: string | null;
   desiredPlaybackState: "playing" | "paused";
   onPlaybackStateChange?: (state: "playing" | "paused") => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
@@ -62,6 +91,7 @@ export function useNetworkStreamPlayer({
   videoRef,
   streamUrl,
   streamTitle,
+  fallbackUrl,
   desiredPlaybackState,
   onPlaybackStateChange,
   onTimeUpdate,
@@ -86,7 +116,11 @@ export function useNetworkStreamPlayer({
     duration: 0,
     currentTime: 0,
     bufferedEnd: 0,
+    bufferAhead: 0,
+    readyState: 0,
+    networkState: 0,
     playbackRate: 1,
+    isPaused: true,
     isMuted: false,
     mediaErrorCode: null,
     lastEvent: "init",
@@ -98,15 +132,35 @@ export function useNetworkStreamPlayer({
   const hlsRef = useRef<Hls | null>(null);
   const shakaPlayerRef = useRef<any>(null);
   const isProgrammaticSyncRef = useRef(false);
+  const isPlayingPromisePendingRef = useRef(false);
   const programmaticSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bufferingStallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isDestroyingRef = useRef(false);
-  const isLoadingPipelineRef = useRef(false);
   const attemptedHlsFallbackRef = useRef(false);
+  const attemptedDirectFallbackRef = useRef(false);
   const loadGenerationRef = useRef(0);
   const retryCountRef = useRef(0);
+  const fragErrorCountRef = useRef(0);
+  const fallbackUrlRef = useRef<string | null>(null);
+  const currentStreamUrlRef = useRef<string | null>(null);
+
+  const hlsMetricsRef = useRef({
+    mediaAttached: false,
+    manifestLoaded: false,
+    manifestParsed: false,
+    levelsLoaded: 0,
+    currentLevel: -1,
+    fragsLoaded: 0,
+    fragsBuffered: 0,
+    bufferAppends: 0,
+  });
 
   const engineRef = useRef<PlaybackEngineType>("none");
   engineRef.current = engine;
+
+  const playerStateRef = useRef<NetworkPlayerState>("IDLE");
+  playerStateRef.current = playerState;
 
   const desiredPlaybackStateRef = useRef(desiredPlaybackState);
   desiredPlaybackStateRef.current = desiredPlaybackState;
@@ -122,11 +176,26 @@ export function useNetworkStreamPlayer({
     []
   );
 
+  const clearStageTimeout = useCallback(() => {
+    if (stageTimeoutRef.current) {
+      clearTimeout(stageTimeoutRef.current);
+      stageTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearBufferingStallTimeout = useCallback(() => {
+    if (bufferingStallTimeoutRef.current) {
+      clearTimeout(bufferingStallTimeoutRef.current);
+      bufferingStallTimeoutRef.current = null;
+    }
+  }, []);
+
   const reportError = useCallback(
     (err: NetworkPlayerErrorInfo) => {
+      clearStageTimeout();
+      clearBufferingStallTimeout();
       console.warn(
-        `[NetworkStreamPlayer] ${err.title} (${err.stage}):`,
-        err.message,
+        `[NetworkStreamPlayer] Error reported (${err.stage}): ${err.title} - ${err.message}`,
         err.technicalDetails || ""
       );
       setErrorInfo(err);
@@ -137,7 +206,7 @@ export function useNetworkStreamPlayer({
       });
       onErrorChange?.(err);
     },
-    [onErrorChange, updateDiagnostics]
+    [clearStageTimeout, clearBufferingStallTimeout, onErrorChange, updateDiagnostics]
   );
 
   const clearError = useCallback(() => {
@@ -145,11 +214,34 @@ export function useNetworkStreamPlayer({
     onErrorChange?.(null);
   }, [onErrorChange]);
 
-  // Clean up existing player instances
+  const setStageTimeout = useCallback(
+    (stageName: string, durationMs: number, onTimeout: () => void) => {
+      clearStageTimeout();
+      stageTimeoutRef.current = setTimeout(() => {
+        stageTimeoutRef.current = null;
+        console.warn(`[NetworkStreamPlayer] Timeout on stage: ${stageName} after ${durationMs}ms`);
+        onTimeout();
+      }, durationMs);
+    },
+    [clearStageTimeout]
+  );
+
+  // Clean up existing player instances and media elements
   const destroyCurrentEngines = useCallback(() => {
     isDestroyingRef.current = true;
+    clearStageTimeout();
+    clearBufferingStallTimeout();
+    isPlayingPromisePendingRef.current = false;
+
+    if (programmaticSyncTimerRef.current) {
+      clearTimeout(programmaticSyncTimerRef.current);
+      programmaticSyncTimerRef.current = null;
+    }
+
     if (hlsRef.current) {
       try {
+        hlsRef.current.stopLoad();
+        hlsRef.current.detachMedia();
         hlsRef.current.destroy();
       } catch (e) {
         console.warn("[NetworkStreamPlayer] Hls destroy error:", e);
@@ -180,17 +272,19 @@ export function useNetworkStreamPlayer({
     setTimeout(() => {
       isDestroyingRef.current = false;
     }, 50);
-  }, [videoRef]);
+  }, [videoRef, clearStageTimeout, clearBufferingStallTimeout]);
 
-  // Safe play helper handling autoplay unmuted block
+  // Safe play helper handling autoplay policy restrictions and promise concurrency
   const executePlay = useCallback(
     async (video: HTMLVideoElement) => {
+      if (isPlayingPromisePendingRef.current) return;
+      isPlayingPromisePendingRef.current = true;
       try {
         await video.play();
       } catch (err: any) {
         if (err?.name === "NotAllowedError") {
           console.log(
-            "[NetworkStreamPlayer] Unmuted autoplay blocked by browser policy; falling back to muted playback with tap-to-unmute"
+            "[NetworkStreamPlayer] Autoplay unmuted blocked by browser policy; falling back to muted playback with tap-to-unmute"
           );
           video.muted = true;
           setIsAutoplayMuted(true);
@@ -201,16 +295,170 @@ export function useNetworkStreamPlayer({
             /* ignore muted play rejection */
           }
         } else if (err?.name === "AbortError") {
-          // Playback aborted by user pause or new load
+          // Playback aborted by user pause or new source load; safe to ignore
         } else {
           console.warn("[NetworkStreamPlayer] Play error:", err?.name, err?.message);
         }
+      } finally {
+        isPlayingPromisePendingRef.current = false;
       }
     },
     [updateDiagnostics]
   );
 
-  // Dedicated HLS pipeline helper (used for .m3u8 format and fallback)
+  // Native HTML5 Video setup helper
+  const setupNativePipeline = useCallback(
+    (urlToLoad: string, currentGen: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      setEngine("native");
+      setPlayerState("LOADING_MEDIA");
+      updateDiagnostics({
+        engine: "native",
+        playerState: "LOADING_MEDIA",
+        lastEvent: "native:loading",
+      });
+
+      setStageTimeout("native_media", 15000, () => {
+        if (currentGen !== loadGenerationRef.current) return;
+        reportError({
+          stage: "playback",
+          title: "Direct Video Loading Timeout",
+          message:
+            "The direct video stream did not return playable data within 15 seconds. The server may be unresponsive or slow.",
+          technicalDetails: `Timeout on ${sanitizeStreamUrlForLogging(urlToLoad)}`,
+          suggestedAction:
+            "Ensure the URL is accessible, publicly reachable, and points to a fast direct video file.",
+          canRetry: true,
+          failedUrl: sanitizeStreamUrlForLogging(urlToLoad),
+        });
+      });
+
+      if (video.src !== urlToLoad) {
+        video.src = urlToLoad;
+        video.load();
+      }
+    },
+    [videoRef, setStageTimeout, reportError, updateDiagnostics]
+  );
+
+  // Clean fallback from HLS to direct native video (destroys HLS instance first)
+  const switchToNativeFallback = useCallback(
+    (urlToLoad: string, currentGen: number) => {
+      if (currentGen !== loadGenerationRef.current) return;
+      console.log(
+        "[NetworkStreamPlayer] Switching to direct native fallback:",
+        sanitizeStreamUrlForLogging(urlToLoad)
+      );
+      attemptedDirectFallbackRef.current = true;
+      clearStageTimeout();
+      clearBufferingStallTimeout();
+
+      // Cleanly destroy HLS instance before setting native video src
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.stopLoad();
+          hlsRef.current.detachMedia();
+          hlsRef.current.destroy();
+        } catch {
+          /* ignore */
+        }
+        hlsRef.current = null;
+      }
+
+      const video = videoRef.current;
+      if (video) {
+        try {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        } catch {
+          /* ignore */
+        }
+      }
+
+      setupNativePipeline(urlToLoad, currentGen);
+    },
+    [videoRef, clearStageTimeout, clearBufferingStallTimeout, setupNativePipeline]
+  );
+
+  // Bounded reconnection trigger with backoff and stage timeout (eliminates infinite RECONNECTING hang)
+  const triggerReconnect = useCallback(
+    (reason: string, currentGen: number) => {
+      if (currentGen !== loadGenerationRef.current) return;
+
+      if (retryCountRef.current < 2) {
+        retryCountRef.current++;
+        setPlayerState("RECONNECTING");
+        updateDiagnostics({
+          playerState: "RECONNECTING",
+          lastEvent: `reconnecting:${reason}_${retryCountRef.current}`,
+        });
+        console.log(
+          `[NetworkStreamPlayer] Reconnecting (${reason}, attempt ${retryCountRef.current})...`
+        );
+
+        // Bounded reconnection timeout (12s) - prevents indefinite hang in RECONNECTING!
+        setStageTimeout("reconnecting", 12000, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          if (fallbackUrlRef.current && !attemptedDirectFallbackRef.current) {
+            switchToNativeFallback(fallbackUrlRef.current, currentGen);
+            return;
+          }
+          reportError({
+            stage: "network",
+            title: "Stream Reconnection Timed Out",
+            message:
+              "The player attempted to re-establish the connection to the media server, but received no response within 12 seconds.",
+            technicalDetails: `Reconnection failed after ${retryCountRef.current} attempts (${reason}).`,
+            suggestedAction:
+              "Verify your network connection, ensure the stream is accessible, or click 'Retry Stream'.",
+            canRetry: true,
+          });
+        });
+
+        if (hlsRef.current) {
+          try {
+            if (reason === "media") {
+              hlsRef.current.recoverMediaError();
+            } else {
+              hlsRef.current.startLoad();
+            }
+          } catch (e) {
+            console.warn("[NetworkStreamPlayer] Reconnect trigger error:", e);
+          }
+        }
+      } else {
+        if (fallbackUrlRef.current && !attemptedDirectFallbackRef.current) {
+          switchToNativeFallback(fallbackUrlRef.current, currentGen);
+          return;
+        }
+        reportError({
+          stage: "network",
+          title: "Stream Connection Lost",
+          message:
+            "Multiple attempts to reconnect to the stream origin failed. The connection was lost or refused.",
+          technicalDetails: `Retries exhausted (${reason}).`,
+          suggestedAction:
+            "Check that the media origin server is active and reachable, then click 'Retry Stream'.",
+          canRetry: true,
+        });
+      }
+    },
+    [reportError, setStageTimeout, switchToNativeFallback, updateDiagnostics]
+  );
+
+  const startBufferingStallTimer = useCallback(() => {
+    clearBufferingStallTimeout();
+    bufferingStallTimeoutRef.current = setTimeout(() => {
+      bufferingStallTimeoutRef.current = null;
+      console.warn("[NetworkStreamPlayer] Playback stalled in BUFFERING for 15s without forward progress");
+      triggerReconnect("buffer_stall", loadGenerationRef.current);
+    }, 15000);
+  }, [clearBufferingStallTimeout, triggerReconnect]);
+
+  // Dedicated HLS pipeline helper with stage tracking, event instrumentation & stage timeouts
   const setupHlsPipeline = useCallback(
     (streamUrlToLoad: string, currentGen: number): boolean => {
       const video = videoRef.current;
@@ -224,110 +472,368 @@ export function useNetworkStreamPlayer({
 
       if (shouldUseHlsJs) {
         setEngine("hlsjs");
-        updateDiagnostics({ engine: "hlsjs" });
+        setPlayerState("LOADING_MANIFEST");
+        updateDiagnostics({
+          engine: "hlsjs",
+          playerState: "LOADING_MANIFEST",
+          lastEvent: "hls:init",
+        });
+
+        hlsMetricsRef.current = {
+          mediaAttached: false,
+          manifestLoaded: false,
+          manifestParsed: false,
+          levelsLoaded: 0,
+          currentLevel: -1,
+          fragsLoaded: 0,
+          fragsBuffered: 0,
+          bufferAppends: 0,
+        };
 
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: false,
-          maxBufferLength: 60,
-          maxMaxBufferLength: 120,
-          backBufferLength: 60,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          backBufferLength: 30,
           manifestLoadingTimeOut: 12000,
-          manifestLoadingMaxRetry: 3,
+          manifestLoadingMaxRetry: 2,
+          manifestLoadingRetryDelay: 1000,
           levelLoadingTimeOut: 12000,
+          levelLoadingMaxRetry: 2,
+          levelLoadingRetryDelay: 1000,
           fragLoadingTimeOut: 15000,
+          fragLoadingMaxRetry: 2,
+          fragLoadingRetryDelay: 1000,
+          xhrSetup: (xhr) => {
+            xhr.withCredentials = false;
+          },
         });
         hlsRef.current = hls;
 
-        hls.attachMedia(video);
-        hls.loadSource(streamUrlToLoad);
+        // Stage 1 Timeout: Manifest Loading (12s)
+        setStageTimeout("manifest", 12000, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          if (fallbackUrlRef.current && !attemptedDirectFallbackRef.current) {
+            switchToNativeFallback(fallbackUrlRef.current, currentGen);
+            return;
+          }
+          reportError({
+            stage: "manifest",
+            title: "HLS Manifest Request Timed Out",
+            message:
+              "The adaptive HLS manifest took over 12 seconds to respond. The media server may be offline, slow, or rejecting cross-origin requests.",
+            technicalDetails: `Timeout on manifest URL: ${sanitizeStreamUrlForLogging(streamUrlToLoad)}`,
+            suggestedAction:
+              "Check that the stream origin is active, public, and allows CORS (Access-Control-Allow-Origin: *).",
+            canRetry: true,
+            failedUrl: sanitizeStreamUrlForLogging(streamUrlToLoad),
+          });
+        });
 
+        // 1. MEDIA ATTACHED
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          hlsMetricsRef.current.mediaAttached = true;
+          updateDiagnostics({
+            lastEvent: "hls:media_attached",
+            hlsMetrics: { ...hlsMetricsRef.current },
+          });
+        });
+
+        // 2. MANIFEST LOADING & LOADED
+        hls.on(Hls.Events.MANIFEST_LOADING, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          setPlayerState("LOADING_MANIFEST");
+          updateDiagnostics({
+            playerState: "LOADING_MANIFEST",
+            lastEvent: "hls:manifest_loading",
+          });
+        });
+
+        hls.on(Hls.Events.MANIFEST_LOADED, (_evt, data) => {
+          if (currentGen !== loadGenerationRef.current) return;
+          hlsMetricsRef.current.manifestLoaded = true;
+          hlsMetricsRef.current.levelsLoaded = data.levels?.length || 0;
+          updateDiagnostics({
+            lastEvent: "hls:manifest_loaded",
+            hlsMetrics: { ...hlsMetricsRef.current },
+          });
+        });
+
+        // 3. MANIFEST PARSED -> Transition to LOADING_MEDIA
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (currentGen !== loadGenerationRef.current) return;
+          clearStageTimeout();
           clearError();
-          isLoadingPipelineRef.current = false;
-          setPlayerState("READY");
-          updateDiagnostics({ playerState: "READY", lastEvent: "hls:manifest_parsed" });
+          hlsMetricsRef.current.manifestParsed = true;
+          setPlayerState("LOADING_MEDIA");
+          updateDiagnostics({
+            playerState: "LOADING_MEDIA",
+            lastEvent: "hls:manifest_parsed",
+            hlsMetrics: { ...hlsMetricsRef.current },
+          });
 
-          if (desiredPlaybackStateRef.current === "playing") {
+          // Stage 2 Timeout: Media Segments (15s)
+          setStageTimeout("media", 15000, () => {
+            if (currentGen !== loadGenerationRef.current) return;
+            if (fallbackUrlRef.current && !attemptedDirectFallbackRef.current) {
+              switchToNativeFallback(fallbackUrlRef.current, currentGen);
+              return;
+            }
+            reportError({
+              stage: "playback",
+              title: "Media Segments Failed to Load",
+              message:
+                "The HLS manifest was parsed successfully, but video segments could not be fetched or appended to the media buffer within 15 seconds.",
+              technicalDetails: `Timeout on media segments: ${sanitizeStreamUrlForLogging(streamUrlToLoad)}`,
+              suggestedAction:
+                "Ensure video segments are reachable, not blocked by CORS, and use standard H.264/AAC codecs.",
+              canRetry: true,
+              failedUrl: sanitizeStreamUrlForLogging(streamUrlToLoad),
+            });
+          });
+        });
+
+        // 4. LEVEL LOADED
+        hls.on(Hls.Events.LEVEL_LOADED, (_evt, data) => {
+          if (currentGen !== loadGenerationRef.current) return;
+          hlsMetricsRef.current.currentLevel = data.level;
+          updateDiagnostics({
+            lastEvent: `hls:level_${data.level}_loaded`,
+            hlsMetrics: { ...hlsMetricsRef.current },
+          });
+        });
+
+        // 5. FRAG LOADING & LOADED
+        hls.on(Hls.Events.FRAG_LOADING, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          updateDiagnostics({ lastEvent: "hls:frag_loading" });
+        });
+
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          hlsMetricsRef.current.fragsLoaded++;
+          fragErrorCountRef.current = 0;
+          updateDiagnostics({
+            lastEvent: "hls:frag_loaded",
+            hlsMetrics: { ...hlsMetricsRef.current },
+          });
+        });
+
+        // 6. BUFFER APPENDING & APPENDED
+        hls.on(Hls.Events.BUFFER_APPENDING, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          updateDiagnostics({ lastEvent: "hls:buffer_appending" });
+        });
+
+        hls.on(Hls.Events.BUFFER_APPENDED, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          hlsMetricsRef.current.bufferAppends++;
+          updateDiagnostics({
+            lastEvent: "hls:buffer_appended",
+            hlsMetrics: { ...hlsMetricsRef.current },
+          });
+
+          // Check if video has enough data to transition to READY
+          if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            clearStageTimeout();
+            setPlayerState((prev) =>
+              prev === "LOADING_MEDIA" || prev === "LOADING_MANIFEST" || prev === "RECONNECTING"
+                ? "READY"
+                : prev
+            );
+            if (desiredPlaybackStateRef.current === "playing" && video.paused) {
+              void executePlay(video);
+            }
+          }
+        });
+
+        // 7. FRAG BUFFERED
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          clearStageTimeout();
+          clearBufferingStallTimeout();
+          hlsMetricsRef.current.fragsBuffered++;
+          updateDiagnostics({
+            lastEvent: "hls:frag_buffered",
+            hlsMetrics: { ...hlsMetricsRef.current },
+          });
+
+          setPlayerState((prev) => {
+            if (prev === "LOADING_MEDIA" || prev === "LOADING_MANIFEST" || prev === "RECONNECTING") {
+              return "READY";
+            }
+            return prev;
+          });
+
+          if (desiredPlaybackStateRef.current === "playing" && video.paused) {
             void executePlay(video);
           }
         });
 
-        hls.on(Hls.Events.FRAG_BUFFERED, () => {
-          if (currentGen === loadGenerationRef.current) {
-            setPlayerState((prev) => (prev === "BUFFERING" ? "PLAYING" : prev));
-          }
-        });
-
+        // 8. ERROR HANDLING (Fatal and Non-Fatal)
         hls.on(Hls.Events.ERROR, (_evt, data) => {
           if (currentGen !== loadGenerationRef.current) return;
+
+          const httpStatus = data.response?.code || (data.networkDetails as any)?.status || 0;
+          const errorUrl = data.context?.url || (data.frag as any)?.url || "";
+          const sanitizedErrorUrl = sanitizeStreamUrlForLogging(errorUrl);
+
+          console.warn(
+            `[NetworkStreamPlayer] HLS error [${data.type}]: ${data.details}`,
+            `fatal: ${data.fatal}`,
+            `HTTP: ${httpStatus}`,
+            `URL: ${sanitizedErrorUrl}`
+          );
+
+          updateDiagnostics({
+            lastEvent: `hls:error:${data.details}`,
+            lastError: {
+              event: "Hls.Events.ERROR",
+              stage: playerStateRef.current,
+              fatal: Boolean(data.fatal),
+              details: data.details,
+              httpStatus,
+              retryCount: retryCountRef.current,
+              sanitizedUrl: sanitizedErrorUrl,
+              timestamp: Date.now(),
+            },
+          });
+
+          // HTTP 401 or 403: Authentication Required
+          if (httpStatus === 401 || httpStatus === 403) {
+            clearStageTimeout();
+            reportError({
+              stage: "manifest",
+              title: `Authentication Failed (HTTP ${httpStatus})`,
+              message:
+                "The media server refused access to the HLS stream. An API key, token, or session authorization is required.",
+              technicalDetails: `Server returned HTTP ${httpStatus} on ${sanitizedErrorUrl}`,
+              suggestedAction:
+                "Provide a stream URL with a valid API key (e.g. ?api_key=YOUR_KEY) or check user permissions on the media server.",
+              canRetry: true,
+              httpStatus,
+              failedUrl: sanitizedErrorUrl,
+            });
+            return;
+          }
+
+          // HTTP 404: Not Found
+          if (httpStatus === 404) {
+            clearStageTimeout();
+            reportError({
+              stage: "manifest",
+              title: "Stream Playlist or File Not Found (HTTP 404)",
+              message: "The requested HLS playlist or video segment does not exist on the remote media server.",
+              technicalDetails: `HTTP 404 on ${sanitizedErrorUrl}`,
+              suggestedAction: "Verify that the item exists on the media server and the URL is spelled correctly.",
+              canRetry: false,
+              httpStatus,
+              failedUrl: sanitizedErrorUrl,
+            });
+            return;
+          }
+
+          // Non-fatal fragment error accumulation
+          if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
+            fragErrorCountRef.current++;
+            if (fragErrorCountRef.current >= 3) {
+              clearStageTimeout();
+              if (fallbackUrlRef.current && !attemptedDirectFallbackRef.current) {
+                switchToNativeFallback(fallbackUrlRef.current, currentGen);
+                return;
+              }
+              reportError({
+                stage: "network",
+                title: "Media Segment Download Failed",
+                message:
+                  "Multiple consecutive video segments failed to download. The connection to the media server was lost or blocked.",
+                technicalDetails: `FRAG_LOAD_ERROR repeated ${fragErrorCountRef.current} times. Status: ${httpStatus}`,
+                suggestedAction:
+                  "Check server connectivity and CORS headers on video segment files (.ts / .m4s).",
+                canRetry: true,
+                httpStatus,
+                failedUrl: sanitizedErrorUrl,
+              });
+              return;
+            }
+          }
+
+          // Fatal HLS errors
           if (data.fatal) {
-            console.warn("[NetworkStreamPlayer] Hls fatal error:", data.type, data.details);
+            clearStageTimeout();
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              if (retryCountRef.current < 2) {
-                retryCountRef.current++;
-                console.log(
-                  "[NetworkStreamPlayer] Auto-recovering HLS network error (attempt " +
-                    retryCountRef.current +
-                    ")..."
-                );
-                hls.startLoad();
-              } else {
+              if (httpStatus === 401 || httpStatus === 403) {
                 reportError({
-                  stage: "network",
-                  title: "HLS Stream Unreachable",
+                  stage: "manifest",
+                  title: `Authentication Failed (HTTP ${httpStatus})`,
                   message:
-                    "The HLS stream or its video segments could not be reached. Ensure the stream is online, public, and allows cross-origin requests (CORS).",
-                  technicalDetails: `HLS Network Error: ${data.details}`,
+                    "The media server refused access to the HLS stream. An API key, token, or session authorization is required.",
+                  technicalDetails: `Server returned HTTP ${httpStatus} on ${sanitizedErrorUrl}`,
                   suggestedAction:
-                    "Check your internet connection, verify the URL is online, and confirm CORS headers are enabled on the stream server.",
+                    "Provide a stream URL with a valid API key (e.g. ?api_key=YOUR_KEY) or check user permissions on the media server.",
                   canRetry: true,
+                  httpStatus,
+                  failedUrl: sanitizedErrorUrl,
                 });
+                return;
               }
-            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-              if (retryCountRef.current < 2) {
-                retryCountRef.current++;
-                console.log("[NetworkStreamPlayer] Auto-recovering HLS media error...");
-                hls.recoverMediaError();
-              } else {
+
+              if (httpStatus === 404) {
                 reportError({
-                  stage: "codec",
-                  title: "HLS Codec Incompatibility",
-                  message: "The media stream codecs could not be decoded by your browser.",
-                  technicalDetails: `HLS Fatal Media Error: ${data.details}`,
-                  suggestedAction:
-                    "Ensure the stream uses standard H.264 video and AAC audio codecs.",
-                  canRetry: true,
+                  stage: "manifest",
+                  title: "Stream Playlist or File Not Found (HTTP 404)",
+                  message: "The requested HLS playlist or video segment does not exist on the remote media server.",
+                  technicalDetails: `HTTP 404 on ${sanitizedErrorUrl}`,
+                  suggestedAction: "Verify that the item exists on the media server and the URL is spelled correctly.",
+                  canRetry: false,
+                  httpStatus,
+                  failedUrl: sanitizedErrorUrl,
                 });
+                return;
               }
+
+              triggerReconnect("network", currentGen);
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              triggerReconnect("media", currentGen);
             } else {
               reportError({
                 stage: "manifest",
-                title: "HLS Playback Failure",
-                message:
-                  "HLS player encountered an unrecoverable error while demuxing the stream.",
+                title: "HLS Demuxing Failure",
+                message: "An unrecoverable fatal error occurred while demuxing the HLS stream.",
                 technicalDetails: `HLS Fatal Error: ${data.details}`,
-                suggestedAction:
-                  "Ensure the stream uses standard H.264 video and AAC audio codecs.",
+                suggestedAction: "Ensure the stream uses standard H.264 video and AAC audio codecs.",
                 canRetry: true,
+                failedUrl: sanitizedErrorUrl,
               });
             }
           }
         });
 
+        hls.attachMedia(video);
+        hls.loadSource(streamUrlToLoad);
         return true;
       } else if (canPlayNativeHls) {
         // Native Safari / iOS HLS
         setEngine("native");
-        updateDiagnostics({ engine: "native" });
+        setPlayerState("LOADING_MANIFEST");
+        updateDiagnostics({ engine: "native", playerState: "LOADING_MANIFEST", lastEvent: "native_hls:load" });
+
+        setStageTimeout("manifest", 12000, () => {
+          if (currentGen !== loadGenerationRef.current) return;
+          reportError({
+            stage: "manifest",
+            title: "Native HLS Stream Timed Out",
+            message: "The stream did not respond within 12 seconds.",
+            technicalDetails: `Timeout on ${sanitizeStreamUrlForLogging(streamUrlToLoad)}`,
+            suggestedAction: "Verify the stream URL is active and accessible.",
+            canRetry: true,
+          });
+        });
 
         video.src = streamUrlToLoad;
         video.load();
-
-        if (desiredPlaybackStateRef.current === "playing") {
-          void executePlay(video);
-        }
         return true;
       } else {
         reportError({
@@ -341,17 +847,32 @@ export function useNetworkStreamPlayer({
         return false;
       }
     },
-    [videoRef, clearError, executePlay, reportError, updateDiagnostics]
+    [
+      videoRef,
+      clearStageTimeout,
+      clearBufferingStallTimeout,
+      clearError,
+      executePlay,
+      reportError,
+      setStageTimeout,
+      switchToNativeFallback,
+      triggerReconnect,
+      updateDiagnostics,
+    ]
   );
 
-  // Main pipeline initialization
+  // Main stream pipeline initialization
   const initializeStreamPipeline = useCallback(
     async (url: string) => {
       const currentGen = ++loadGenerationRef.current;
       clearError();
       destroyCurrentEngines();
       attemptedHlsFallbackRef.current = false;
-      isLoadingPipelineRef.current = true;
+      attemptedDirectFallbackRef.current = false;
+      retryCountRef.current = 0;
+      fragErrorCountRef.current = 0;
+      fallbackUrlRef.current = fallbackUrl || null;
+      currentStreamUrlRef.current = url;
 
       const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
       const sanitized = sanitizeStreamUrlForLogging(url);
@@ -369,7 +890,6 @@ export function useNetworkStreamPlayer({
       updateDiagnostics({ format: validation.format });
 
       if (!validation.isValid) {
-        isLoadingPipelineRef.current = false;
         if (validation.format === "unsupported_container") {
           reportError({
             stage: "codec",
@@ -381,6 +901,7 @@ export function useNetworkStreamPlayer({
               validation.suggestedAction ||
               "Use an MP4 (H.264/AAC) or HLS stream, or play in VLC and click 'Share Screen'.",
             canRetry: false,
+            failedUrl: sanitized,
           });
           return;
         }
@@ -396,6 +917,7 @@ export function useNetworkStreamPlayer({
               validation.suggestedAction ||
               "Please provide an HTTP or HTTPS stream URL (HLS, DASH, or MP4).",
             canRetry: false,
+            failedUrl: sanitized,
           });
           return;
         }
@@ -411,6 +933,7 @@ export function useNetworkStreamPlayer({
               validation.suggestedAction ||
               "Please provide an HTTPS (https://) version of this stream.",
             canRetry: true,
+            failedUrl: sanitized,
           });
           return;
         }
@@ -426,6 +949,7 @@ export function useNetworkStreamPlayer({
               validation.suggestedAction ||
               "Please copy a direct video stream link ending in .mp4, .m3u8, or .mpd.",
             canRetry: false,
+            failedUrl: sanitized,
           });
           return;
         }
@@ -438,13 +962,13 @@ export function useNetworkStreamPlayer({
             "The stream URL could not be validated for browser playback.",
           suggestedAction: validation.suggestedAction || "Verify the URL and try again.",
           canRetry: false,
+          failedUrl: sanitized,
         });
         return;
       }
 
-      // Check if URL is YouTube (handled by YouTube embed)
+      // Check if URL is YouTube
       if (validation.format === "youtube") {
-        isLoadingPipelineRef.current = false;
         setEngine("youtube");
         setPlayerState("READY");
         updateDiagnostics({ engine: "youtube", playerState: "READY", lastEvent: "youtube:ready" });
@@ -454,18 +978,15 @@ export function useNetworkStreamPlayer({
       const video = videoRef.current;
       if (!video) return;
 
-      setPlayerState("LOADING");
-      updateDiagnostics({ playerState: "LOADING", lastEvent: "loading" });
-
       const format = validation.format;
 
       // 2. MPEG-DASH (.mpd) pipeline
       if (format === "dash") {
         setEngine("shaka");
-        updateDiagnostics({ engine: "shaka" });
+        setPlayerState("LOADING_MANIFEST");
+        updateDiagnostics({ engine: "shaka", playerState: "LOADING_MANIFEST" });
 
         if (!isShakaSupported()) {
-          isLoadingPipelineRef.current = false;
           reportError({
             stage: "unsupported",
             title: "MPEG-DASH Not Supported",
@@ -482,7 +1003,6 @@ export function useNetworkStreamPlayer({
         if (currentGen !== loadGenerationRef.current) return;
 
         if (!shaka || !shaka.Player) {
-          isLoadingPipelineRef.current = false;
           reportError({
             stage: "manifest",
             title: "DASH Engine Initialization Error",
@@ -519,7 +1039,6 @@ export function useNetworkStreamPlayer({
           await player.load(url);
           if (currentGen !== loadGenerationRef.current) return;
 
-          isLoadingPipelineRef.current = false;
           setPlayerState("READY");
           updateDiagnostics({ playerState: "READY", lastEvent: "shaka:loaded" });
 
@@ -529,7 +1048,6 @@ export function useNetworkStreamPlayer({
           return;
         } catch (err: any) {
           if (currentGen !== loadGenerationRef.current) return;
-          isLoadingPipelineRef.current = false;
           console.warn("[NetworkStreamPlayer] Shaka load failure:", err);
           reportError({
             stage: "network",
@@ -552,28 +1070,19 @@ export function useNetworkStreamPlayer({
         return;
       }
 
-      // 4. Native HTML5 Video pipeline (Direct MP4, WebM, OGG, or generic)
-      // IMPORTANT: No crossOrigin="anonymous" on direct video so browser does not block non-CORS direct media
-      setEngine("native");
-      updateDiagnostics({ engine: "native" });
-
-      if (video.src !== url) {
-        video.src = url;
-        video.load();
-      }
-
-      if (desiredPlaybackStateRef.current === "playing") {
-        void executePlay(video);
-      }
+      // 4. Native HTML5 Video pipeline (Direct MP4, WebM, OGG)
+      setupNativePipeline(url, currentGen);
     },
     [
-      videoRef,
+      fallbackUrl,
       clearError,
       destroyCurrentEngines,
       updateDiagnostics,
       reportError,
-      executePlay,
+      videoRef,
       setupHlsPipeline,
+      setupNativePipeline,
+      executePlay,
     ]
   );
 
@@ -605,15 +1114,23 @@ export function useNetworkStreamPlayer({
     };
   }, [streamUrl, initializeStreamPipeline, clearError, destroyCurrentEngines, updateDiagnostics]);
 
-  // Sync desired playback state with active video element
+  // Sync desired playback state with active video element (only when stream is READY or PLAYING)
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !streamUrl || playerState === "ERROR" || playerState === "VALIDATING") {
+    if (
+      !video ||
+      !streamUrl ||
+      playerState === "ERROR" ||
+      playerState === "VALIDATING" ||
+      playerState === "LOADING_MANIFEST" ||
+      playerState === "LOADING_MEDIA" ||
+      playerState === "RECONNECTING"
+    ) {
       return;
     }
 
     if (desiredPlaybackState === "playing") {
-      if (video.paused) {
+      if (video.paused && (playerState === "READY" || playerState === "PAUSED")) {
         void executePlay(video);
       }
     } else if (desiredPlaybackState === "paused") {
@@ -637,42 +1154,99 @@ export function useNetworkStreamPlayer({
         videoWidth: video.videoWidth,
         videoHeight: video.videoHeight,
         duration: dur,
+        readyState: video.readyState,
+        networkState: video.networkState,
         lastEvent: "loadedmetadata",
       });
     };
 
     const onCanPlay = () => {
-      isLoadingPipelineRef.current = false;
-      setPlayerState((prev) => (prev === "LOADING" || prev === "VALIDATING" ? "READY" : prev));
-      updateDiagnostics({ lastEvent: "canplay" });
+      clearStageTimeout();
+      setPlayerState((prev) => {
+        if (
+          prev === "LOADING_MANIFEST" ||
+          prev === "LOADING_MEDIA" ||
+          prev === "VALIDATING" ||
+          prev === "RECONNECTING"
+        ) {
+          return "READY";
+        }
+        return prev;
+      });
+      updateDiagnostics({
+        readyState: video.readyState,
+        lastEvent: "canplay",
+      });
       if (desiredPlaybackStateRef.current === "playing" && video.paused) {
         void executePlay(video);
       }
     };
 
     const onPlaying = () => {
-      isLoadingPipelineRef.current = false;
+      clearStageTimeout();
+      clearBufferingStallTimeout();
       setPlayerState("PLAYING");
-      updateDiagnostics({ playerState: "PLAYING", lastEvent: "playing" });
+      updateDiagnostics({
+        playerState: "PLAYING",
+        readyState: video.readyState,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        lastEvent: "playing",
+      });
       if (!isProgrammaticSyncRef.current) {
         onPlaybackStateChange?.("playing");
       }
     };
 
     const onPause = () => {
-      if (isDestroyingRef.current || isLoadingPipelineRef.current) {
-        return;
-      }
-      setPlayerState((prev) => (prev === "ERROR" ? prev : "PAUSED"));
-      updateDiagnostics({ playerState: "PAUSED", lastEvent: "pause" });
+      if (isDestroyingRef.current) return;
+      setPlayerState((prev) => {
+        if (
+          prev === "ERROR" ||
+          prev === "LOADING_MANIFEST" ||
+          prev === "LOADING_MEDIA" ||
+          prev === "VALIDATING"
+        ) {
+          return prev;
+        }
+        return "PAUSED";
+      });
+      updateDiagnostics({
+        playerState: "PAUSED",
+        isPaused: true,
+        lastEvent: "pause",
+      });
       if (!isProgrammaticSyncRef.current) {
         onPlaybackStateChange?.("paused");
       }
     };
 
     const onWaiting = () => {
-      setPlayerState((prev) => (prev === "ERROR" ? prev : "BUFFERING"));
-      updateDiagnostics({ playerState: "BUFFERING", lastEvent: "waiting" });
+      // ONLY transition to BUFFERING if we were actually PLAYING or READY
+      // Do NOT overwrite LOADING_MANIFEST, LOADING_MEDIA, VALIDATING, RECONNECTING, or ERROR
+      setPlayerState((prev) => {
+        if (prev === "PLAYING" || prev === "READY") {
+          updateDiagnostics({
+            playerState: "BUFFERING",
+            readyState: video.readyState,
+            lastEvent: "waiting",
+          });
+          startBufferingStallTimer();
+          return "BUFFERING";
+        }
+        updateDiagnostics({
+          readyState: video.readyState,
+          lastEvent: "waiting",
+        });
+        return prev;
+      });
+    };
+
+    const onStalled = () => {
+      updateDiagnostics({
+        networkState: video.networkState,
+        lastEvent: "stalled",
+      });
     };
 
     const onTimeUpdateNative = () => {
@@ -683,13 +1257,37 @@ export function useNetworkStreamPlayer({
 
       let bufEnd = 0;
       if (video.buffered && video.buffered.length > 0) {
-        bufEnd = Math.floor(video.buffered.end(video.buffered.length - 1));
+        for (let i = 0; i < video.buffered.length; i++) {
+          if (video.currentTime >= video.buffered.start(i) && video.currentTime <= video.buffered.end(i)) {
+            bufEnd = Math.floor(video.buffered.end(i));
+            break;
+          }
+        }
+        if (bufEnd === 0) {
+          bufEnd = Math.floor(video.buffered.end(video.buffered.length - 1));
+        }
+      }
+
+      const ahead = Math.max(0, bufEnd - cur);
+
+      if (
+        playerStateRef.current === "BUFFERING" &&
+        !video.paused &&
+        (ahead >= 0.5 || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA)
+      ) {
+        clearBufferingStallTimeout();
+        setPlayerState("PLAYING");
       }
 
       updateDiagnostics({
         currentTime: cur,
         duration: dur,
         bufferedEnd: bufEnd,
+        bufferAhead: ahead,
+        readyState: video.readyState,
+        networkState: video.networkState,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
       });
 
       onTimeUpdate?.(cur, dur);
@@ -699,10 +1297,18 @@ export function useNetworkStreamPlayer({
       const videoErr = video.error;
       console.warn("[NetworkStreamPlayer] Native HTML5 video error:", videoErr);
 
-      if (!streamUrl || isDestroyingRef.current) return;
+      if (!currentStreamUrlRef.current || isDestroyingRef.current) return;
 
       const code = videoErr?.code;
-      updateDiagnostics({ mediaErrorCode: code || null, lastEvent: "error" });
+      updateDiagnostics({
+        mediaErrorCode: code || null,
+        readyState: video.readyState,
+        networkState: video.networkState,
+        lastEvent: "native:error",
+      });
+
+      clearStageTimeout();
+      clearBufferingStallTimeout();
 
       if (code === 3) {
         // MEDIA_ERR_DECODE
@@ -713,23 +1319,31 @@ export function useNetworkStreamPlayer({
             "This video uses a codec (such as AC3/DTS audio, HEVC, or an MKV container) that web browsers cannot hardware-decode.",
           technicalDetails: "HTML5 Video error code: 3 (MEDIA_ERR_DECODE)",
           suggestedAction:
-            "You can play this video locally in VLC and click 'Share Screen' to stream your screen in synchronized 1080p with audio, or provide an MP4/HLS stream.",
+            "Play this video locally in VLC and click 'Share Screen' to stream your screen in 1080p with audio to your partner, or provide an MP4 stream.",
           canRetry: false,
         });
       } else if (code === 4) {
         // MEDIA_ERR_SRC_NOT_SUPPORTED
-        // If native HTML5 video failed, check if Hls.js fallback can decode it
         if (
           Hls.isSupported() &&
           engineRef.current === "native" &&
           !attemptedHlsFallbackRef.current &&
-          streamUrl
+          currentStreamUrlRef.current
         ) {
           attemptedHlsFallbackRef.current = true;
           console.log(
-            "[NetworkStreamPlayer] Native video source unsupported (error 4); attempting Hls.js fallback for stream"
+            "[NetworkStreamPlayer] Native source unsupported (error 4); attempting Hls.js fallback for stream"
           );
-          const ok = setupHlsPipeline(streamUrl, loadGenerationRef.current);
+          if (video) {
+            try {
+              video.pause();
+              video.removeAttribute("src");
+              video.load();
+            } catch {
+              /* ignore */
+            }
+          }
+          const ok = setupHlsPipeline(currentStreamUrlRef.current, loadGenerationRef.current);
           if (ok) return;
         }
 
@@ -755,8 +1369,7 @@ export function useNetworkStreamPlayer({
           canRetry: true,
         });
       } else if (code === 1) {
-        // MEDIA_ERR_ABORTED
-        // Normal abort during source switch; ignore
+        // MEDIA_ERR_ABORTED - normal during source switch
       } else {
         reportError({
           stage: "playback",
@@ -787,6 +1400,7 @@ export function useNetworkStreamPlayer({
     video.addEventListener("playing", onPlaying);
     video.addEventListener("pause", onPause);
     video.addEventListener("waiting", onWaiting);
+    video.addEventListener("stalled", onStalled);
     video.addEventListener("timeupdate", onTimeUpdateNative);
     video.addEventListener("error", onErrorNative);
     video.addEventListener("seeked", onSeeked);
@@ -797,6 +1411,7 @@ export function useNetworkStreamPlayer({
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("pause", onPause);
       video.removeEventListener("waiting", onWaiting);
+      video.removeEventListener("stalled", onStalled);
       video.removeEventListener("timeupdate", onTimeUpdateNative);
       video.removeEventListener("error", onErrorNative);
       video.removeEventListener("seeked", onSeeked);
@@ -807,10 +1422,12 @@ export function useNetworkStreamPlayer({
     };
   }, [
     videoRef,
-    streamUrl,
     duration,
     clearError,
     reportError,
+    clearStageTimeout,
+    clearBufferingStallTimeout,
+    startBufferingStallTimer,
     updateDiagnostics,
     onPlaybackStateChange,
     onTimeUpdate,
@@ -818,11 +1435,17 @@ export function useNetworkStreamPlayer({
     setupHlsPipeline,
   ]);
 
-  // Programmatic partner sync helper (suppresses echo broadcasts)
+  // Programmatic partner sync helper (avoids infinite echo broadcasts and preserves failing player state)
   const applyRemotePlayback = useCallback(
     (targetState: "playing" | "paused", targetPosition?: number) => {
       const video = videoRef.current;
       if (!video) return;
+
+      // DO NOT overwrite a failing player state!
+      if (playerStateRef.current === "ERROR") {
+        console.log("[NetworkStreamPlayer] Remote sync ignored because player is in ERROR state");
+        return;
+      }
 
       isProgrammaticSyncRef.current = true;
       if (programmaticSyncTimerRef.current) {
@@ -830,7 +1453,22 @@ export function useNetworkStreamPlayer({
         programmaticSyncTimerRef.current = null;
       }
 
-      if (typeof targetPosition === "number" && !isNaN(targetPosition)) {
+      // If stream is still validating or loading, simply save desiredPlaybackState without calling play() prematurely
+      if (
+        playerStateRef.current === "VALIDATING" ||
+        playerStateRef.current === "LOADING_MANIFEST" ||
+        playerStateRef.current === "LOADING_MEDIA" ||
+        playerStateRef.current === "RECONNECTING"
+      ) {
+        desiredPlaybackStateRef.current = targetState;
+        programmaticSyncTimerRef.current = setTimeout(() => {
+          isProgrammaticSyncRef.current = false;
+          programmaticSyncTimerRef.current = null;
+        }, 500);
+        return;
+      }
+
+      if (typeof targetPosition === "number" && !isNaN(targetPosition) && video.readyState >= 1) {
         const drift = Math.abs(video.currentTime - targetPosition);
         const threshold = targetState === "paused" ? 1.0 : 2.5;
         if (drift > threshold) {
@@ -838,8 +1476,15 @@ export function useNetworkStreamPlayer({
         }
       }
 
+      desiredPlaybackStateRef.current = targetState;
+
       if (targetState === "playing") {
-        if (video.paused) {
+        if (
+          video.paused &&
+          (playerStateRef.current === "READY" ||
+            playerStateRef.current === "PAUSED" ||
+            video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA)
+        ) {
           void executePlay(video);
         }
       } else {
@@ -848,11 +1493,10 @@ export function useNetworkStreamPlayer({
         }
       }
 
-      // Safe fallback timer resets programmatic sync suppression
       programmaticSyncTimerRef.current = setTimeout(() => {
         isProgrammaticSyncRef.current = false;
         programmaticSyncTimerRef.current = null;
-      }, 1200);
+      }, 800);
     },
     [videoRef, executePlay]
   );
@@ -861,6 +1505,7 @@ export function useNetworkStreamPlayer({
   const play = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    desiredPlaybackStateRef.current = "playing";
     void executePlay(video);
     onUserAction?.("play", video.currentTime || 0);
   }, [videoRef, executePlay, onUserAction]);
@@ -868,6 +1513,7 @@ export function useNetworkStreamPlayer({
   const pause = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    desiredPlaybackStateRef.current = "paused";
     video.pause();
     onUserAction?.("pause", video.currentTime || 0);
   }, [videoRef, onUserAction]);
@@ -886,7 +1532,10 @@ export function useNetworkStreamPlayer({
     (targetSeconds: number) => {
       const video = videoRef.current;
       if (!video) return;
-      const clamped = Math.max(0, Math.min(targetSeconds, duration || video.duration || targetSeconds));
+      const clamped = Math.max(
+        0,
+        Math.min(targetSeconds, duration || video.duration || targetSeconds)
+      );
       video.currentTime = clamped;
       setCurrentTime(clamped);
       onUserAction?.("seek", clamped);
@@ -915,6 +1564,9 @@ export function useNetworkStreamPlayer({
   const retry = useCallback(() => {
     if (streamUrl) {
       retryCountRef.current = 0;
+      fragErrorCountRef.current = 0;
+      attemptedDirectFallbackRef.current = false;
+      attemptedHlsFallbackRef.current = false;
       void initializeStreamPipeline(streamUrl);
     }
   }, [streamUrl, initializeStreamPipeline]);

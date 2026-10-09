@@ -220,6 +220,16 @@ export function VirtualRoom({
     return null;
   });
 
+  const [directMediaFallbackUrl, setDirectMediaFallbackUrl] = useState<string | null>(() => {
+    if (initialDirectMediaUrl) {
+      return resolveStreamUrl(initialDirectMediaUrl).fallbackUrl || null;
+    }
+    if (title.startsWith("http://") || title.startsWith("https://")) {
+      return resolveStreamUrl(title).fallbackUrl || null;
+    }
+    return null;
+  });
+
   const [directMediaTitle, setDirectMediaTitle] = useState<string | null>(() => {
     if (initialDirectMediaTitle) return initialDirectMediaTitle;
     if (initialDirectMediaUrl) {
@@ -246,10 +256,12 @@ export function VirtualRoom({
       if (initialDirectMediaUrl) {
         const resolved = resolveStreamUrl(initialDirectMediaUrl);
         setDirectMediaUrl(resolved.url);
+        setDirectMediaFallbackUrl(resolved.fallbackUrl || null);
         setDirectMediaTitle(initialDirectMediaTitle || resolved.derivedTitle || "Network Stream");
       } else if (title.startsWith("http://") || title.startsWith("https://")) {
         const resolved = resolveStreamUrl(title);
         setDirectMediaUrl(resolved.url);
+        setDirectMediaFallbackUrl(resolved.fallbackUrl || null);
         setDirectMediaTitle(providerName || resolved.derivedTitle || "Network Stream");
       }
     }
@@ -263,6 +275,7 @@ export function VirtualRoom({
     videoRef: directVideoRef,
     streamUrl: directMediaUrl,
     streamTitle: directMediaTitle,
+    fallbackUrl: directMediaFallbackUrl,
     desiredPlaybackState: playbackState,
     onPlaybackStateChange: (newState) => {
       if (newState !== playbackStateRef.current) {
@@ -1017,13 +1030,16 @@ export function VirtualRoom({
       .on("broadcast", { event: "theater:direct-media" }, ({ payload }: { payload: any }) => {
         if (payload?.url) {
           hasStoppedStreamRef.current = false;
-          const resolved = resolveStreamUrl(payload.url);
+          const streamToResolve = payload.originalUrl || payload.url;
+          const resolved = resolveStreamUrl(streamToResolve);
           setDirectMediaUrl(resolved.url);
+          setDirectMediaFallbackUrl(payload.fallbackUrl || resolved.fallbackUrl || null);
           setDirectMediaTitle(payload.title || resolved.derivedTitle || "Network Stream");
           if (payload.duration && Number.isFinite(payload.duration)) setEstimatedDuration(payload.duration);
         } else {
           hasStoppedStreamRef.current = true;
           setDirectMediaUrl(null);
+          setDirectMediaFallbackUrl(null);
           setDirectMediaTitle(null);
         }
       })
@@ -2181,9 +2197,11 @@ export function VirtualRoom({
                   );
                 }
                 const isBuffering =
-                  networkPlayer.playerState === "LOADING" ||
+                  networkPlayer.playerState === "LOADING_MANIFEST" ||
+                  networkPlayer.playerState === "LOADING_MEDIA" ||
                   networkPlayer.playerState === "BUFFERING" ||
-                  networkPlayer.playerState === "VALIDATING";
+                  networkPlayer.playerState === "VALIDATING" ||
+                  networkPlayer.playerState === "RECONNECTING";
 
                 const isPaused =
                   (networkPlayer.playerState === "READY" ||
@@ -2212,6 +2230,12 @@ export function VirtualRoom({
                             <p className="text-xs font-semibold text-white tracking-wide">
                               {networkPlayer.playerState === "VALIDATING"
                                 ? "Validating Stream Source"
+                                : networkPlayer.playerState === "LOADING_MANIFEST"
+                                ? "Loading Adaptive Manifest"
+                                : networkPlayer.playerState === "LOADING_MEDIA"
+                                ? "Buffering Media Segments"
+                                : networkPlayer.playerState === "RECONNECTING"
+                                ? "Reconnecting Stream"
                                 : "Buffering Cinema Stream"}
                             </p>
                             <p className="text-[11px] text-orange-300/90 font-mono mt-0.5">
@@ -2222,7 +2246,13 @@ export function VirtualRoom({
                                 : "Direct Browser Video Engine"}
                             </p>
                             <p className="text-[10px] text-zinc-400 mt-1 max-w-[240px]">
-                              Preparing video buffer &amp; synchronizing with partner…
+                              {networkPlayer.playerState === "LOADING_MANIFEST"
+                                ? "Fetching playlist from media origin…"
+                                : networkPlayer.playerState === "LOADING_MEDIA"
+                                ? "Downloading and demuxing initial segments…"
+                                : networkPlayer.playerState === "RECONNECTING"
+                                ? "Recovering network connection…"
+                                : "Preparing video buffer & synchronizing with partner…"}
                             </p>
                           </div>
                         </div>
@@ -2308,7 +2338,9 @@ export function VirtualRoom({
                         <button
                           type="button"
                           onClick={() => {
+                            hasStoppedStreamRef.current = true;
                             setDirectMediaUrl(null);
+                            setDirectMediaFallbackUrl(null);
                             setDirectMediaTitle(null);
                             void setWatchSessionDirectMediaAction(sessionId, null);
                             void channelRef.current?.send({
@@ -2356,7 +2388,15 @@ export function VirtualRoom({
                           </div>
                           <div className="flex justify-between">
                             <span className="text-zinc-500">State:</span>
-                            <span className="text-emerald-400 font-semibold">{networkPlayer.diagnostics.playerState}</span>
+                            <span className={
+                              networkPlayer.diagnostics.playerState === "PLAYING"
+                                ? "text-emerald-400 font-semibold"
+                                : networkPlayer.diagnostics.playerState === "ERROR"
+                                ? "text-rose-400 font-semibold"
+                                : "text-amber-400 font-semibold"
+                            }>
+                              {networkPlayer.diagnostics.playerState}
+                            </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-zinc-500">Resolution:</span>
@@ -2372,6 +2412,14 @@ export function VirtualRoom({
                               {Math.max(0, networkPlayer.diagnostics.bufferedEnd - networkPlayer.diagnostics.currentTime)}s
                             </span>
                           </div>
+                          {networkPlayer.diagnostics.hlsMetrics && (
+                            <div className="flex justify-between">
+                              <span className="text-zinc-500">HLS Segments:</span>
+                              <span className="text-zinc-300">
+                                {networkPlayer.diagnostics.hlsMetrics.fragsLoaded} loaded / {networkPlayer.diagnostics.hlsMetrics.fragsBuffered} buffered
+                              </span>
+                            </div>
+                          )}
                           <div className="flex justify-between">
                             <span className="text-zinc-500">Audio:</span>
                             <span className={networkPlayer.diagnostics.isMuted ? "text-amber-400" : "text-emerald-400"}>
@@ -2382,6 +2430,15 @@ export function VirtualRoom({
                             <span className="text-zinc-500">Last Event:</span>
                             <span className="text-zinc-400 truncate max-w-[160px]">{networkPlayer.diagnostics.lastEvent}</span>
                           </div>
+                          {networkPlayer.diagnostics.lastError && (
+                            <div className="flex justify-between text-rose-300/90 pt-1 border-t border-white/5">
+                              <span className="text-rose-400/80">Last Error:</span>
+                              <span className="truncate max-w-[150px]">
+                                {networkPlayer.diagnostics.lastError.details}
+                                {networkPlayer.diagnostics.lastError.httpStatus ? ` (${networkPlayer.diagnostics.lastError.httpStatus})` : ""}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -3793,7 +3850,9 @@ export function VirtualRoom({
                   <button
                     type="button"
                     onClick={() => {
+                      hasStoppedStreamRef.current = true;
                       setDirectMediaUrl(null);
+                      setDirectMediaFallbackUrl(null);
                       setDirectMediaTitle(null);
                       setShowDirectMediaModal(false);
                       void setWatchSessionDirectMediaAction(sessionId, null);
@@ -3834,17 +3893,24 @@ export function VirtualRoom({
                         resolved.derivedTitle ||
                         "Network Stream";
 
+                      hasStoppedStreamRef.current = false;
                       setDirectMediaUrl(resolved.url);
+                      setDirectMediaFallbackUrl(resolved.fallbackUrl || null);
                       setDirectMediaTitle(derivedTitle);
                       setShowDirectMediaModal(false);
 
-                      // Persist to database so partner joins and page reloads never revert to setup screen
-                      void setWatchSessionDirectMediaAction(sessionId, resolved.url, derivedTitle);
+                      // Persist original input to database so partner joins and page reloads never revert to setup screen
+                      void setWatchSessionDirectMediaAction(sessionId, raw, derivedTitle);
 
                       void channelRef.current?.send({
                         type: "broadcast",
                         event: "theater:direct-media",
-                        payload: { url: resolved.url, title: derivedTitle },
+                        payload: {
+                          url: resolved.url,
+                          originalUrl: raw,
+                          fallbackUrl: resolved.fallbackUrl || null,
+                          title: derivedTitle,
+                        },
                       });
 
                       void channelRef.current?.track({

@@ -20,6 +20,7 @@ export type StreamFormat =
 export interface ResolvedStream {
   url: string;
   originalUrl?: string;
+  fallbackUrl?: string;
   derivedTitle?: string;
   isHls?: boolean;
   isDash?: boolean;
@@ -77,6 +78,9 @@ export function sanitizeStreamUrlForLogging(rawUrl: string): string {
   if (!rawUrl || typeof rawUrl !== "string") return "";
   try {
     const parsed = new URL(rawUrl);
+    if (parsed.username) parsed.username = "REDACTED";
+    if (parsed.password) parsed.password = "REDACTED";
+
     const SENSITIVE_KEYS = [
       "token",
       "api_key",
@@ -89,6 +93,7 @@ export function sanitizeStreamUrlForLogging(rawUrl: string): string {
       "x-emby-token",
       "access_token",
       "credential",
+      "playsessionid",
     ];
     for (const key of Array.from(parsed.searchParams.keys())) {
       if (SENSITIVE_KEYS.some((s) => key.toLowerCase().includes(s))) {
@@ -207,7 +212,7 @@ export function detectStreamFormat(url: string): StreamFormat {
       return "ogg";
     }
 
-    // 7. Non-direct web pages / landing pages
+    // 7. Non-direct web pages / landing pages / media server web interfaces
     const isWebpageExtension =
       pathname.endsWith(".html") ||
       pathname.endsWith(".htm") ||
@@ -227,7 +232,17 @@ export function detectStreamFormat(url: string): StreamFormat {
       "hulu.com",
     ].some((d) => parsed.hostname.toLowerCase().includes(d));
 
-    if (isWebpageExtension || isVideoPortalDomain) {
+    const isMediaServerWebUi =
+      pathname === "/web" ||
+      pathname === "/web/" ||
+      pathname.startsWith("/web/") ||
+      pathname.endsWith("/web/index.html") ||
+      pathname.includes("/web/index.html") ||
+      parsed.hash.includes("#!/") ||
+      parsed.hash.includes("#/details") ||
+      parsed.hash.includes("#/item");
+
+    if (isWebpageExtension || isVideoPortalDomain || isMediaServerWebUi) {
       return "webpage";
     }
 
@@ -396,6 +411,14 @@ export function validateStreamUrl(
 
   // Web pages / portals
   if (format === "webpage") {
+    const isMediaServer =
+      parsed.pathname === "/web" ||
+      parsed.pathname === "/web/" ||
+      parsed.pathname.startsWith("/web/") ||
+      parsed.pathname.includes("/web/index.html") ||
+      parsed.hash.includes("details") ||
+      parsed.hash.includes("item");
+
     return {
       isValid: false,
       url: trimmed,
@@ -404,10 +427,12 @@ export function validateStreamUrl(
       derivedTitle,
       isBrowserCompatible: false,
       isInsecureHttp,
-      unsupportedReason:
-        "The provided URL leads to a web page rather than a direct playable media stream file.",
-      suggestedAction:
-        "Extract the direct video stream URL ending in .mp4, .m3u8, or .mpd, or use YouTube links directly.",
+      unsupportedReason: isMediaServer
+        ? "This URL points to the media server's web interface rather than a direct playable stream endpoint."
+        : "The provided URL leads to a web page rather than a direct playable media stream file.",
+      suggestedAction: isMediaServer
+        ? "In your media server (Jellyfin/Emby), open the media item, select 'Copy Stream Link' or 'Copy Download Link' (containing /stream or /Download with your API key/token), and paste that link here."
+        : "Extract the direct video stream URL ending in .mp4, .m3u8, or .mpd, or use YouTube links directly.",
     };
   }
 
@@ -456,41 +481,100 @@ export function resolveStreamUrl(rawUrl: string): ResolvedStream {
   try {
     const parsed = new URL(trimmed);
 
-    // Jellyfin & Emby Media Server Download URL Auto-Transformation
-    // Detects /Items/{id}/Download or /Videos/{id}/stream and provides safe master.m3u8 adaptive HLS
-    const isJellyfinOrEmbyDownload =
-      (parsed.pathname.toLowerCase().includes("jellyfin") ||
-        parsed.pathname.toLowerCase().includes("emby") ||
-        parsed.pathname.toLowerCase().includes("/items/")) &&
-      parsed.pathname.toLowerCase().includes("/download");
+    // Jellyfin & Emby Media Server Download / Stream URL Auto-Transformation
+    // Detects /Items/{id}/Download, /Videos/{id}/stream, or /Videos/{id}/master.m3u8 and provides robust adaptive HLS
+    const hasJellyfinIndicator =
+      parsed.pathname.toLowerCase().includes("jellyfin") ||
+      parsed.pathname.toLowerCase().includes("emby") ||
+      parsed.hostname.toLowerCase().includes("jellyfin") ||
+      parsed.hostname.toLowerCase().includes("emby") ||
+      Boolean(
+        parsed.searchParams.get("api_key") ||
+        parsed.searchParams.get("ApiKey") ||
+        parsed.searchParams.get("apikey") ||
+        parsed.searchParams.get("token") ||
+        parsed.searchParams.get("Token") ||
+        parsed.searchParams.get("X-Emby-Token") ||
+        parsed.searchParams.get("x-emby-token")
+      );
 
-    if (isJellyfinOrEmbyDownload) {
-      const match = parsed.pathname.match(/\/(?:items|videos)\/([a-f0-9]{32})/i);
+    const isJellyfinOrEmbyMedia =
+      hasJellyfinIndicator &&
+      (parsed.pathname.toLowerCase().includes("/items/") ||
+        parsed.pathname.toLowerCase().includes("/videos/")) &&
+      (parsed.pathname.toLowerCase().includes("/download") ||
+        parsed.pathname.toLowerCase().includes("/stream") ||
+        parsed.pathname.toLowerCase().includes("master.m3u8") ||
+        parsed.pathname.toLowerCase().includes("main.m3u8"));
+
+    if (isJellyfinOrEmbyMedia) {
+      const match = parsed.pathname.match(/\/(?:items|videos)\/([a-f0-9]{32}|[a-f0-9-]{36})/i);
       if (match) {
-        const itemId = match[1];
+        const itemId = match[1].replace(/-/g, "");
         const apiKey =
           parsed.searchParams.get("api_key") ||
+          parsed.searchParams.get("ApiKey") ||
+          parsed.searchParams.get("apikey") ||
           parsed.searchParams.get("token") ||
+          parsed.searchParams.get("Token") ||
           parsed.searchParams.get("X-Emby-Token") ||
+          parsed.searchParams.get("x-emby-token") ||
           "";
 
         const idx = parsed.pathname.toLowerCase().indexOf(match[0].toLowerCase());
         const basePath = idx > 0 ? parsed.pathname.slice(0, idx) : "";
 
-        // Jellyfin master HLS playlist
-        const hlsParams = new URLSearchParams({
-          api_key: apiKey,
-          MediaSourceId: itemId,
-          VideoCodec: "h264",
-          AudioCodec: "aac",
-          TranscodeReasons: "ContainerNotSupported",
-        });
+        const isAlreadyHls =
+          parsed.pathname.toLowerCase().includes("master.m3u8") ||
+          parsed.pathname.toLowerCase().includes("main.m3u8");
 
-        const hlsUrl = `${parsed.origin}${basePath}/videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
+        let hlsUrl: string;
+        if (isAlreadyHls) {
+          // If already an HLS URL, keep all existing parameters and ensure DeviceId & PlaySessionId are present
+          const hlsParams = new URLSearchParams(parsed.search);
+          if (apiKey && !hlsParams.has("api_key")) {
+            hlsParams.set("api_key", apiKey);
+          }
+          if (!hlsParams.has("DeviceId")) {
+            hlsParams.set("DeviceId", "SoulNestWeb");
+          }
+          if (!hlsParams.has("PlaySessionId")) {
+            hlsParams.set(
+              "PlaySessionId",
+              `cc_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`
+            );
+          }
+          hlsUrl = `${parsed.origin}${parsed.pathname}?${hlsParams.toString()}`;
+        } else {
+          // Construct Jellyfin adaptive HLS playlist with full session and codec specifications
+          const hlsParams = new URLSearchParams();
+          if (apiKey) {
+            hlsParams.set("api_key", apiKey);
+          }
+          hlsParams.set("MediaSourceId", itemId);
+          hlsParams.set("DeviceId", "SoulNestWeb");
+          hlsParams.set(
+            "PlaySessionId",
+            `cc_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`
+          );
+          hlsParams.set("VideoCodec", "h264");
+          hlsParams.set("AudioCodec", "aac");
+          hlsParams.set("TranscodeReasons", "ContainerNotSupported");
+          hlsParams.set("SegmentContainer", "ts");
+          hlsParams.set("MinSegments", "1");
+          hlsParams.set("BreakOnNonKeyFrames", "true");
+
+          hlsUrl = `${parsed.origin}${basePath}/videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
+        }
+
         return {
           url: hlsUrl,
           originalUrl: trimmed,
-          derivedTitle: "Jellyfin Cinema Stream",
+          fallbackUrl: isAlreadyHls ? undefined : trimmed,
+          derivedTitle:
+            validation.derivedTitle && !validation.derivedTitle.startsWith("Stream from")
+              ? validation.derivedTitle
+              : "Jellyfin Cinema Stream",
           isHls: true,
           format: "hls",
           isBrowserCompatible: true,
