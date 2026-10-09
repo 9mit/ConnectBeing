@@ -518,6 +518,46 @@ export async function updateWatchSessionStreamAction(
   }
 }
 
+export async function setWatchSessionDirectMediaAction(
+  sessionId: string,
+  mediaUrl: string | null,
+  mediaTitle?: string | null,
+): Promise<ActionResult<{ success: true }>> {
+  try {
+    const { couple } = await requireVerifiedCouple();
+    await assertWatchSessionOwned(sessionId, couple.id);
+
+    const updateData: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
+    if (mediaUrl) {
+      updateData.hostStreamActive = true;
+      updateData.hostStreamType = `network:${mediaUrl}`;
+      if (mediaTitle) {
+        updateData.invitationMessage = mediaTitle;
+      }
+    } else {
+      updateData.hostStreamActive = false;
+      updateData.hostStreamType = "none";
+    }
+
+    await db
+      .update(watchSessions)
+      .set(updateData)
+      .where(eq(watchSessions.id, sessionId));
+
+    try {
+      revalidatePath(`/together/room/${sessionId}`);
+    } catch {
+      // safe fallback
+    }
+
+    return ok({ success: true });
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 export async function getWatchSessionDetailsAction(
   sessionId: string,
 ): Promise<

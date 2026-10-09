@@ -74,7 +74,7 @@ function rewriteHlsPlaylist(manifestText: string, baseUrl: string, proxyEndpoint
         return line.replace(/URI="([^"]+)"/g, (_, uriValue) => {
           try {
             const absoluteUri = new URL(uriValue, baseUrl).href;
-            return `URI="${proxyEndpoint}?url=${encodeURIComponent(absoluteUri)}&raw=true"`;
+            return `URI="${proxyEndpoint}?url=${encodeURIComponent(absoluteUri)}"`;
           } catch {
             return `URI="${uriValue}"`;
           }
@@ -85,7 +85,7 @@ function rewriteHlsPlaylist(manifestText: string, baseUrl: string, proxyEndpoint
 
     try {
       const absoluteUri = new URL(trimmed, baseUrl).href;
-      return `${proxyEndpoint}?url=${encodeURIComponent(absoluteUri)}&raw=true`;
+      return `${proxyEndpoint}?url=${encodeURIComponent(absoluteUri)}`;
     } catch {
       return line;
     }
@@ -264,7 +264,7 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
       contentType.includes("application/x-mpegurl") ||
       contentType.includes("audio/x-mpegurl");
 
-    if (method === "GET" && !rawParam) {
+    if (method === "GET") {
       let manifestText: string | null = null;
       if (isHls) {
         manifestText = await upstreamRes.text();

@@ -41,7 +41,7 @@ export function resolveStreamUrl(rawUrl: string): ResolvedStream {
         const idx = parsed.pathname.toLowerCase().indexOf(match[0].toLowerCase());
         const basePath = idx > 0 ? parsed.pathname.slice(0, idx) : "";
 
-        // Construct high-grade browser HLS master stream (H.264 High profile, AAC stereo, 1080p, 8Mbps)
+        // Construct high-grade browser HLS stream forced to H.264 High profile, AAC stereo, 1080p
         const hlsParams = new URLSearchParams({
           api_key: apiKey,
           MediaSourceId: itemId,
@@ -54,14 +54,16 @@ export function resolveStreamUrl(rawUrl: string): ResolvedStream {
           MaxFramerate: "60",
           MaxWidth: "1920",
           MaxHeight: "1080",
-          PlaySessionId: `cc_${Date.now()}`,
           SegmentContainer: "ts",
           MinSegments: "2",
           BreakOnNonKeyFrames: "true",
+          AllowVideoStreamCopy: "false",
+          AllowAudioStreamCopy: "false",
           TranscodeReasons: "ContainerNotSupported,VideoCodecNotSupported,AudioCodecNotSupported",
         });
 
-        const hlsUrl = `${parsed.origin}${basePath}/videos/${itemId}/master.m3u8?${hlsParams.toString()}`;
+        // Use direct main.m3u8 media playlist to eliminate master manifest ambiguity and ensure pure H.264
+        const hlsUrl = `${parsed.origin}${basePath}/videos/${itemId}/main.m3u8?${hlsParams.toString()}`;
         console.log("[StreamResolver] Auto-converted Jellyfin/Emby raw download URL to browser HLS stream:", hlsUrl);
         return {
           url: hlsUrl,

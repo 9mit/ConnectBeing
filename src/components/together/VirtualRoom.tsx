@@ -52,6 +52,7 @@ import {
   getWatchMessagesAction,
   joinWatchSessionAction,
   sendWatchMessageAction,
+  setWatchSessionDirectMediaAction,
 } from "@/actions/together";
 import { authorizeRealtimeTopicAction } from "@/actions/realtime-auth";
 import { createClient } from "@/lib/supabase/client";
@@ -103,7 +104,10 @@ export function VirtualRoom({
   initialHostStreamActive = false,
   initialPlaybackState = "idle",
   initialPosition = 0,
+  initialDirectMediaUrl = null,
+  initialDirectMediaTitle = null,
   theme = "rose-dusk",
+  decor,
 }: {
   sessionId: string;
   userId: string;
@@ -116,6 +120,8 @@ export function VirtualRoom({
   initialHostStreamActive?: boolean;
   initialPlaybackState?: string;
   initialPosition?: number;
+  initialDirectMediaUrl?: string | null;
+  initialDirectMediaTitle?: string | null;
   theme?: string;
   decor?: Record<string, unknown>;
 }) {
@@ -204,8 +210,28 @@ export function VirtualRoom({
   const [partnerDrmReported, setPartnerDrmReported] = useState(false);
 
   // Direct Sync & Network Stream states (VLC-style Direct URL Playback)
-  const [directMediaUrl, setDirectMediaUrl] = useState<string | null>(null);
-  const [directMediaTitle, setDirectMediaTitle] = useState<string | null>(null);
+  const [directMediaUrl, setDirectMediaUrl] = useState<string | null>(() => {
+    if (initialDirectMediaUrl) {
+      return resolveStreamUrl(initialDirectMediaUrl).url;
+    }
+    if (title.startsWith("http://") || title.startsWith("https://")) {
+      return resolveStreamUrl(title).url;
+    }
+    return null;
+  });
+
+  const [directMediaTitle, setDirectMediaTitle] = useState<string | null>(() => {
+    if (initialDirectMediaTitle) return initialDirectMediaTitle;
+    if (initialDirectMediaUrl) {
+      return resolveStreamUrl(initialDirectMediaUrl).derivedTitle || "Network Stream";
+    }
+    if (title.startsWith("http://") || title.startsWith("https://")) {
+      return providerName || resolveStreamUrl(title).derivedTitle || "Network Stream";
+    }
+    return null;
+  });
+
+  const [isDirectBuffering, setIsDirectBuffering] = useState<boolean>(true);
   const [directMediaError, setDirectMediaError] = useState<string | null>(null);
   const [showDirectMediaModal, setShowDirectMediaModal] = useState(false);
   const [directMediaInput, setDirectMediaInput] = useState("");
@@ -229,14 +255,20 @@ export function VirtualRoom({
     });
   }, []);
 
-  // Auto-initialize network stream if session title is a direct http(s) URL
+  // Sync network stream if session title or initial directMedia changes
   useEffect(() => {
-    if (!directMediaUrl && (title.startsWith("http://") || title.startsWith("https://"))) {
-      const resolved = resolveStreamUrl(title);
-      setDirectMediaUrl(resolved.url);
-      setDirectMediaTitle(providerName || resolved.derivedTitle || "Network Stream");
+    if (!directMediaUrl) {
+      if (initialDirectMediaUrl) {
+        const resolved = resolveStreamUrl(initialDirectMediaUrl);
+        setDirectMediaUrl(resolved.url);
+        setDirectMediaTitle(initialDirectMediaTitle || resolved.derivedTitle || "Network Stream");
+      } else if (title.startsWith("http://") || title.startsWith("https://")) {
+        const resolved = resolveStreamUrl(title);
+        setDirectMediaUrl(resolved.url);
+        setDirectMediaTitle(providerName || resolved.derivedTitle || "Network Stream");
+      }
     }
-  }, [title, providerName, directMediaUrl]);
+  }, [title, providerName, directMediaUrl, initialDirectMediaUrl, initialDirectMediaTitle]);
 
   const playbackStateRef = useRef(playbackState);
   playbackStateRef.current = playbackState;
@@ -282,6 +314,7 @@ export function VirtualRoom({
     }
 
     setDirectMediaError(null);
+    setIsDirectBuffering(true);
 
     if (isHls && typeof window !== "undefined" && Hls.isSupported()) {
       const hls = new Hls({
@@ -301,6 +334,10 @@ export function VirtualRoom({
         if (playbackStateRef.current === "playing") {
           playDirectVideo(video);
         }
+      });
+
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        setIsDirectBuffering(false);
       });
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -705,6 +742,17 @@ export function VirtualRoom({
     return () => clearInterval(interval);
   }, [isHost, directMediaUrl, playbackState, userId, positionSeconds]);
 
+  // When partner enters/re-connects, re-announce active network stream so partner never sees setup lounge
+  useEffect(() => {
+    if (isHost && directMediaUrl && (partnerPresence === "watching" || partnerPresence === "online")) {
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "theater:direct-media",
+        payload: { url: directMediaUrl, title: directMediaTitle },
+      });
+    }
+  }, [isHost, directMediaUrl, directMediaTitle, partnerPresence]);
+
   // Auto-hiding OTT player controls timer (3.5s inactivity)
   const resetControlsTimer = useCallback(() => {
     setShowControls(true);
@@ -1024,11 +1072,13 @@ export function VirtualRoom({
           setDirectMediaUrl(resolved.url);
           setDirectMediaTitle(payload.title || resolved.derivedTitle || "Network Stream");
           setDirectMediaError(null);
+          setIsDirectBuffering(true);
           if (payload.duration) setEstimatedDuration(payload.duration);
         } else {
           setDirectMediaUrl(null);
           setDirectMediaTitle(null);
           setDirectMediaError(null);
+          setIsDirectBuffering(false);
         }
       })
       .on("broadcast", { event: "theater:message" }, ({ payload }: { payload: any }) => {
@@ -2285,7 +2335,31 @@ export function VirtualRoom({
                           });
                         }
                       }}
+                      onWaiting={() => setIsDirectBuffering(true)}
+                      onPlaying={() => setIsDirectBuffering(false)}
+                      onCanPlay={() => setIsDirectBuffering(false)}
+                      onLoadedData={() => setIsDirectBuffering(false)}
                     />
+
+                    {/* Cinematic Buffering & Warmup Overlay */}
+                    {isDirectBuffering && !directMediaError && (
+                      <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-none transition-opacity duration-300">
+                        <div className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-[#0c0e15]/90 border border-white/10 shadow-2xl">
+                          <Loader2 size={32} className="animate-spin text-orange-400" />
+                          <div className="text-center">
+                            <p className="text-xs font-semibold text-white tracking-wide">
+                              Buffering Cinema Stream
+                            </p>
+                            <p className="text-[11px] text-orange-300/90 font-mono mt-0.5">
+                              VLC Engine &bull; Adaptive HLS 1080p
+                            </p>
+                            <p className="text-[10px] text-zinc-400 mt-1 max-w-[240px]">
+                              Preparing video buffer &amp; synchronizing with partner…
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Network Stream Top Bar */}
                     <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-2 p-2 sm:px-3 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-xs shadow-xl pointer-events-auto">
@@ -2338,13 +2412,20 @@ export function VirtualRoom({
                         <button
                           type="button"
                           onClick={() => {
+                            setIsDirectBuffering(false);
                             setDirectMediaUrl(null);
                             setDirectMediaTitle(null);
                             setDirectMediaError(null);
+                            void setWatchSessionDirectMediaAction(sessionId, null);
                             void channelRef.current?.send({
                               type: "broadcast",
                               event: "theater:direct-media",
                               payload: { url: null },
+                            });
+                            void channelRef.current?.track({
+                              userId,
+                              directMediaUrl: null,
+                              directMediaTitle: null,
                             });
                           }}
                           className="px-2.5 py-1 rounded-lg text-xs font-medium text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-colors"
@@ -2398,13 +2479,20 @@ export function VirtualRoom({
                             <button
                               type="button"
                               onClick={() => {
+                                setIsDirectBuffering(false);
                                 setDirectMediaUrl(null);
                                 setDirectMediaTitle(null);
                                 setDirectMediaError(null);
+                                void setWatchSessionDirectMediaAction(sessionId, null);
                                 void channelRef.current?.send({
                                   type: "broadcast",
                                   event: "theater:direct-media",
                                   payload: { url: null },
+                                });
+                                void channelRef.current?.track({
+                                  userId,
+                                  directMediaUrl: null,
+                                  directMediaTitle: null,
                                 });
                               }}
                               className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 text-xs transition-all"
@@ -3706,15 +3794,22 @@ export function VirtualRoom({
                   <button
                     type="button"
                     onClick={() => {
+                      setIsDirectBuffering(false);
                       setDirectMediaUrl(null);
                       setDirectMediaTitle(null);
                       setDirectMediaError(null);
                       setIsUsingProxyFallback(false);
                       setShowDirectMediaModal(false);
+                      void setWatchSessionDirectMediaAction(sessionId, null);
                       void channelRef.current?.send({
                         type: "broadcast",
                         event: "theater:direct-media",
                         payload: { url: null },
+                      });
+                      void channelRef.current?.track({
+                        userId,
+                        directMediaUrl: null,
+                        directMediaTitle: null,
                       });
                     }}
                     className="px-3.5 py-2 text-xs font-medium text-rose-300 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-full transition-colors"
@@ -3744,14 +3839,25 @@ export function VirtualRoom({
                         "Network Stream";
 
                       setIsUsingProxyFallback(false);
+                      setIsDirectBuffering(true);
                       setDirectMediaUrl(resolved.url);
                       setDirectMediaTitle(derivedTitle);
                       setDirectMediaError(null);
                       setShowDirectMediaModal(false);
+
+                      // Persist to database so partner joins and page reloads never revert to setup screen
+                      void setWatchSessionDirectMediaAction(sessionId, resolved.url, derivedTitle);
+
                       void channelRef.current?.send({
                         type: "broadcast",
                         event: "theater:direct-media",
                         payload: { url: resolved.url, title: derivedTitle },
+                      });
+
+                      void channelRef.current?.track({
+                        userId,
+                        directMediaUrl: resolved.url,
+                        directMediaTitle: derivedTitle,
                       });
                     }}
                     disabled={!directMediaInput.trim()}

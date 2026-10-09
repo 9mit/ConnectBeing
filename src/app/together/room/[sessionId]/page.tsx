@@ -55,6 +55,10 @@ export default async function RoomPage({
   const theme = room.ok ? room.data.theme : "rose-dusk";
   const decor = room.ok ? room.data.decor : {};
 
+  const isNetworkStream = session.hostStreamType?.startsWith("network:");
+  const initialDirectMediaUrl = isNetworkStream ? session.hostStreamType!.slice(8) : null;
+  const initialDirectMediaTitle = isNetworkStream ? (session.invitationMessage || "Network Stream") : null;
+
   return (
     <AppShell coupleId={couple.id} userId={user.id} isTheater={true}>
       <div className="h-full w-full overflow-hidden">
@@ -70,6 +74,8 @@ export default async function RoomPage({
           initialHostStreamActive={!!session.hostStreamActive}
           initialPlaybackState={session.playbackState || "idle"}
           initialPosition={session.currentPosition || 0}
+          initialDirectMediaUrl={initialDirectMediaUrl}
+          initialDirectMediaTitle={initialDirectMediaTitle}
           theme={theme}
           decor={decor}
         />
