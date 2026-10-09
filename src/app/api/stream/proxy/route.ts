@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveStreamUrl } from "@/lib/stream-resolver";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -122,9 +123,12 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
     );
   }
 
+  const resolved = resolveStreamUrl(targetUrl);
+  const effectiveTargetUrl = resolved.url;
+
   let parsedTarget: URL;
   try {
-    parsedTarget = new URL(targetUrl);
+    parsedTarget = new URL(effectiveTargetUrl);
     if (parsedTarget.protocol !== "http:" && parsedTarget.protocol !== "https:") {
       throw new Error("Invalid protocol");
     }
@@ -348,6 +352,13 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
     responseHeaders.set("Content-Disposition", "inline");
 
     if (method === "HEAD") {
+      if (upstreamRes.status === 405) {
+        // Upstream server (like Jellyfin/Nginx) forbids HEAD requests with 405. Emulate HEAD with 200.
+        return new Response(null, {
+          status: 200,
+          headers: responseHeaders,
+        });
+      }
       return new Response(null, {
         status: upstreamRes.status,
         headers: responseHeaders,

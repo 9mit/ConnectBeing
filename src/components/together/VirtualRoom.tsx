@@ -43,6 +43,7 @@ import {
 import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
+import { resolveStreamUrl } from "@/lib/stream-resolver";
 
 import {
   endWatchSessionAction,
@@ -231,8 +232,9 @@ export function VirtualRoom({
   // Auto-initialize network stream if session title is a direct http(s) URL
   useEffect(() => {
     if (!directMediaUrl && (title.startsWith("http://") || title.startsWith("https://"))) {
-      setDirectMediaUrl(title);
-      setDirectMediaTitle(providerName || "Network Stream");
+      const resolved = resolveStreamUrl(title);
+      setDirectMediaUrl(resolved.url);
+      setDirectMediaTitle(providerName || resolved.derivedTitle || "Network Stream");
     }
   }, [title, providerName, directMediaUrl]);
 
@@ -267,6 +269,7 @@ export function VirtualRoom({
     const isHls =
       directMediaUrl.toLowerCase().includes(".m3u8") ||
       directMediaUrl.toLowerCase().includes("/m3u8") ||
+      directMediaUrl.toLowerCase().includes("master.m3u8") ||
       isTs;
 
     const effectiveSrc = shouldProxy
@@ -1017,8 +1020,9 @@ export function VirtualRoom({
       })
       .on("broadcast", { event: "theater:direct-media" }, ({ payload }: { payload: any }) => {
         if (payload?.url) {
-          setDirectMediaUrl(payload.url);
-          setDirectMediaTitle(payload.title || "Network Stream");
+          const resolved = resolveStreamUrl(payload.url);
+          setDirectMediaUrl(resolved.url);
+          setDirectMediaTitle(payload.title || resolved.derivedTitle || "Network Stream");
           setDirectMediaError(null);
           if (payload.duration) setEstimatedDuration(payload.duration);
         } else {
@@ -3696,92 +3700,6 @@ export function VirtualRoom({
                 />
               </div>
 
-              {/* Curated Sample Streams */}
-              <div className="space-y-2 pt-1">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-medium">
-                  Quick Network Stream Presets:
-                </span>
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4");
-                      setDirectMediaTitleInput("Big Buck Bunny (720p)");
-                    }}
-                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
-                  >
-                    <div className="font-semibold text-white">🐰 Big Buck Bunny</div>
-                    <div className="text-[10px] text-zinc-400">Open Movie Direct MP4</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("https://archive.org/download/Tears-of-Steel/tears_of_steel_720p.mp4");
-                      setDirectMediaTitleInput("Tears of Steel (Sci-Fi)");
-                    }}
-                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
-                  >
-                    <div className="font-semibold text-white">🤖 Tears of Steel</div>
-                    <div className="text-[10px] text-zinc-400">Sci-Fi VFX Direct MP4</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("https://archive.org/download/Sintel/sintel-2048-surround.mp4");
-                      setDirectMediaTitleInput("Sintel (Fantasy)");
-                    }}
-                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
-                  >
-                    <div className="font-semibold text-white">🐉 Sintel</div>
-                    <div className="text-[10px] text-zinc-400">Fantasy Animation MP4</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("https://archive.org/download/ElephantsDream/ed_hd.mp4");
-                      setDirectMediaTitleInput("Elephants Dream");
-                    }}
-                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
-                  >
-                    <div className="font-semibold text-white">🐘 Elephants Dream</div>
-                    <div className="text-[10px] text-zinc-400">Open Source CGI MP4</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
-                      setDirectMediaTitleInput("Big Buck Bunny 4K (YouTube)");
-                    }}
-                    className="p-2.5 rounded-xl border border-red-500/20 bg-red-500/5 text-left hover:border-red-500/50 hover:bg-red-500/10 text-zinc-300 transition-all active:scale-[0.98]"
-                  >
-                    <div className="font-semibold text-red-200">▶️ YouTube 4K Sync</div>
-                    <div className="text-[10px] text-zinc-400">Synchronized YouTube Stream</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("/souls.mp4");
-                      setDirectMediaTitleInput("Soul Connection Demo");
-                    }}
-                    className="p-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-left hover:border-orange-500/50 hover:bg-orange-500/10 text-zinc-300 transition-all active:scale-[0.98]"
-                  >
-                    <div className="font-semibold text-white">🎬 Soul Connection</div>
-                    <div className="text-[10px] text-zinc-400">Built-in Local Demo Video</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectMediaInput("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8");
-                      setDirectMediaTitleInput("Big Buck Bunny (HLS .m3u8)");
-                    }}
-                    className="p-2.5 rounded-xl border border-orange-500/30 bg-orange-500/10 text-left hover:border-orange-500/60 hover:bg-orange-500/20 text-orange-200 transition-all active:scale-[0.98] col-span-2"
-                  >
-                    <div className="font-semibold text-orange-300">⚡ HLS Adaptive Stream (.m3u8)</div>
-                    <div className="text-[10px] text-zinc-400">Test Multi-Bitrate HLS Live Streaming</div>
-                  </button>
-                </div>
-              </div>
-
               {/* Action Buttons */}
               <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/[0.08]">
                 {directMediaUrl ? (
@@ -3817,29 +3735,23 @@ export function VirtualRoom({
                   <button
                     type="button"
                     onClick={() => {
-                      const url = directMediaInput.trim();
-                      if (!url) return;
+                      const raw = directMediaInput.trim();
+                      if (!raw) return;
+                      const resolved = resolveStreamUrl(raw);
                       const derivedTitle =
                         directMediaTitleInput.trim() ||
-                        (() => {
-                          try {
-                            const parsed = new URL(url);
-                            const pathname = parsed.pathname;
-                            const filename = pathname.split("/").pop() || "Network Stream";
-                            return decodeURIComponent(filename.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "));
-                          } catch {
-                            return "Network Stream";
-                          }
-                        })();
+                        resolved.derivedTitle ||
+                        "Network Stream";
+
                       setIsUsingProxyFallback(false);
-                      setDirectMediaUrl(url);
+                      setDirectMediaUrl(resolved.url);
                       setDirectMediaTitle(derivedTitle);
                       setDirectMediaError(null);
                       setShowDirectMediaModal(false);
                       void channelRef.current?.send({
                         type: "broadcast",
                         event: "theater:direct-media",
-                        payload: { url, title: derivedTitle },
+                        payload: { url: resolved.url, title: derivedTitle },
                       });
                     }}
                     disabled={!directMediaInput.trim()}
