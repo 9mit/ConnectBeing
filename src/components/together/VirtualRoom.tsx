@@ -214,7 +214,19 @@ export function VirtualRoom({
   // VLC Engine States: Proxy acceleration & HLS instance management
   const [useVlcProxy, setUseVlcProxy] = useState<boolean>(true); // Enabled by default to eliminate CORS, mixed content, and referrer blocks
   const [isUsingProxyFallback, setIsUsingProxyFallback] = useState<boolean>(false);
+  const [isDirectAutoplayMuted, setIsDirectAutoplayMuted] = useState(false);
   const hlsInstanceRef = useRef<Hls | null>(null);
+
+  const playDirectVideo = useCallback((videoEl: HTMLVideoElement) => {
+    videoEl.play().catch((err: any) => {
+      if (err?.name === "NotAllowedError") {
+        console.log("[VirtualRoom] Unmuted autoplay blocked by browser; falling back to muted playback with unmute cue");
+        videoEl.muted = true;
+        setIsDirectAutoplayMuted(true);
+        void videoEl.play().catch(() => {});
+      }
+    });
+  }, []);
 
   // Auto-initialize network stream if session title is a direct http(s) URL
   useEffect(() => {
@@ -284,7 +296,7 @@ export function VirtualRoom({
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setDirectMediaError(null);
         if (playbackStateRef.current === "playing") {
-          void video.play().catch(() => {});
+          playDirectVideo(video);
         }
       });
 
@@ -318,7 +330,7 @@ export function VirtualRoom({
         video.load();
       }
       if (playbackStateRef.current === "playing") {
-        void video.play().catch(() => {});
+        playDirectVideo(video);
       }
     }
 
@@ -2180,6 +2192,45 @@ export function VirtualRoom({
                         const isInsecureHttp = directMediaUrl ? directMediaUrl.startsWith("http://") && isHttps : false;
                         const alreadyProxying = useVlcProxy || isUsingProxyFallback || isInsecureHttp;
 
+                        // Check if browser native player rejected HLS or media container (code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED)
+                        // If so and Hls.isSupported() and no HLS instance is active, attempt HLS.js demuxing
+                        if (
+                          videoErr?.code === 4 &&
+                          typeof window !== "undefined" &&
+                          Hls.isSupported() &&
+                          !hlsInstanceRef.current &&
+                          directMediaUrl
+                        ) {
+                          console.log("[VirtualRoom] Native player failed with MEDIA_ERR_SRC_NOT_SUPPORTED; attempting Hls.js fallback...");
+                          const effectiveSrc = alreadyProxying
+                            ? `/api/stream/proxy?url=${encodeURIComponent(directMediaUrl)}`
+                            : directMediaUrl;
+                          const hls = new Hls({
+                            enableWorker: true,
+                            lowLatencyMode: false,
+                            maxBufferLength: 60,
+                            maxMaxBufferLength: 120,
+                            backBufferLength: 60,
+                          });
+                          hlsInstanceRef.current = hls;
+                          hls.loadSource(effectiveSrc);
+                          hls.attachMedia(e.currentTarget);
+                          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                            setDirectMediaError(null);
+                            if (playbackStateRef.current === "playing") {
+                              playDirectVideo(e.currentTarget);
+                            }
+                          });
+                          hls.on(Hls.Events.ERROR, (_evt, data) => {
+                            if (data.fatal) {
+                              setDirectMediaError(
+                                "Network stream could not be loaded. Please ensure the URL is online and accessible."
+                              );
+                            }
+                          });
+                          return;
+                        }
+
                         if (videoErr?.code === 3) {
                           // MEDIA_ERR_DECODE
                           setDirectMediaError(
@@ -2229,6 +2280,22 @@ export function VirtualRoom({
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
+                        {isDirectAutoplayMuted && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (directVideoRef.current) {
+                                directVideoRef.current.muted = false;
+                                setIsDirectAutoplayMuted(false);
+                              }
+                            }}
+                            title="Unmute audio"
+                            className="px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 animate-pulse transition-colors flex items-center gap-1"
+                          >
+                            <VolumeX size={12} />
+                            <span>Tap to Unmute 🔊</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={handleResyncStream}

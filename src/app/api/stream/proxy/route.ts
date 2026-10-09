@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Max allowed duration on Vercel Functions to eliminate stream cutoffs
+export const maxDuration = 10; // Vercel Free Tier (Hobby) hard cap is 10s
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -13,13 +13,14 @@ const CORS_HEADERS: Record<string, string> = {
 };
 
 /**
- * 3MB bounded byte-range chunks.
- * On Vercel serverless, unbounded range requests (e.g. bytes=0-) force the proxy to download
- * gigabytes of video over a single connection, which inevitably triggers Vercel's 15s execution
- * timeout and freezes playback at ~0:17 seconds. Clamping to 3MB guarantees instant downloads (~150ms)
- * that never hit Vercel timeouts while allowing fluid hardware decoding & infinite seeking.
+ * 1.5MB bounded byte-range chunks.
+ * On Vercel Free Tier (Hobby), serverless execution has a strict 10s timeout.
+ * Clamping each chunk to 1.5MB guarantees lightning-fast downloads (~150-350ms)
+ * that never hit Vercel 10s timeouts even on cellular/mobile connections,
+ * while allowing instant seeking and zero buffer stall.
  */
-const MAX_CHUNK_SIZE = 3 * 1024 * 1024;
+const MAX_CHUNK_SIZE = 1.5 * 1024 * 1024;
+const UPSTREAM_TIMEOUT_MS = 8000; // 8s timeout to fail fast before Vercel 10s kills the process
 
 const VLC_USER_AGENT = "VLC/3.0.20 LibVLC/3.0.20";
 const BROWSER_USER_AGENT =
@@ -221,21 +222,26 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
   };
 
   try {
-    let upstreamRes = await fetch(parsedTarget.href, {
-      method,
-      headers: buildHeaders(primaryUA),
-      redirect: "follow",
-    });
+    const fetchWithTimeout = (ua: string, timeoutMs = UPSTREAM_TIMEOUT_MS) => {
+      return fetch(parsedTarget.href, {
+        method,
+        headers: buildHeaders(ua),
+        redirect: "follow",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    };
+
+    let upstreamRes = await fetchWithTimeout(primaryUA);
 
     // Dual-UA Auto-Recovery: If primary UA was rejected with 403 or 401, retry with alternate UA
     if ((upstreamRes.status === 403 || upstreamRes.status === 401) && !uaParam) {
-      const retryRes = await fetch(parsedTarget.href, {
-        method,
-        headers: buildHeaders(fallbackUA),
-        redirect: "follow",
-      });
-      if (retryRes.ok || retryRes.status === 206) {
-        upstreamRes = retryRes;
+      try {
+        const retryRes = await fetchWithTimeout(fallbackUA, 5000);
+        if (retryRes.ok || retryRes.status === 206) {
+          upstreamRes = retryRes;
+        }
+      } catch {
+        /* keep original upstreamRes on retry timeout */
       }
     }
 

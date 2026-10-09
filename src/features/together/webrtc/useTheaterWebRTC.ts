@@ -604,6 +604,7 @@ export function useTheaterWebRTC({
   const makingOfferRef = useRef(false);
   const activeOfferIdRef = useRef<string | null>(null);
   const offerSentTimestampRef = useRef<number>(0);
+  const lastOfferReceivedTimestampRef = useRef<number>(0);
   const pendingRenegotiateRef = useRef<boolean>(false);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
@@ -1096,7 +1097,7 @@ export function useTheaterWebRTC({
     // DO NOT destroy the PC! That destroys the offer before the viewer can answer.
     if (pc && pc.signalingState === "have-local-offer") {
       const elapsedSinceOffer = Date.now() - offerSentTimestampRef.current;
-      if (elapsedSinceOffer < 10000) {
+      if (elapsedSinceOffer < 25000) {
         emitDiagnosticLog({
           sessionId,
           role: "host",
@@ -1121,7 +1122,7 @@ export function useTheaterWebRTC({
         });
         return;
       }
-      // If elapsed >= 10000ms, offer timed out; fall through to create a fresh offer.
+      // If elapsed >= 25000ms, offer timed out; fall through to create a fresh offer.
     }
 
     // 3. If existing PC is in 'stable' signaling state and ICE is actively connecting/checking
@@ -1132,7 +1133,7 @@ export function useTheaterWebRTC({
       (pc.connectionState === "connecting" || pc.iceConnectionState === "checking")
     ) {
       const elapsedSinceOffer = Date.now() - offerSentTimestampRef.current;
-      if (elapsedSinceOffer < 15000) {
+      if (elapsedSinceOffer < 25000) {
         emitDiagnosticLog({
           sessionId,
           role: "host",
@@ -1162,13 +1163,12 @@ export function useTheaterWebRTC({
     makingOfferRef.current = true;
 
     try {
-      // Only instantiate fresh PC if none exists, or closed, or failed, or offer explicitly timed out
+      // Only instantiate fresh PC if none exists, closed, failed, or offer expired after 25s
       const needFresh =
         !pcRef.current ||
         pcRef.current.signalingState === "closed" ||
         pcRef.current.connectionState === "failed" ||
-        pcRef.current.connectionState === "disconnected" ||
-        (pcRef.current.signalingState === "have-local-offer" && (now - offerSentTimestampRef.current >= 10000));
+        (pcRef.current.signalingState === "have-local-offer" && (now - offerSentTimestampRef.current >= 25000));
 
       const activePc = getOrCreatePc(needFresh);
 
@@ -1799,6 +1799,7 @@ export function useTheaterWebRTC({
         signalingDiagRef.current.offerReceived = true;
         signalingDiagRef.current.offerId = payload.offerId || null;
         signalingDiagRef.current.offerReceivedForPcId = currentPcIdRef.current;
+        lastOfferReceivedTimestampRef.current = Date.now();
 
         emitDiagnosticLog({
           sessionId,
@@ -1869,9 +1870,18 @@ export function useTheaterWebRTC({
           const needFresh =
             !pcRef.current ||
             pcRef.current.signalingState === "closed" ||
-            pcRef.current.connectionState === "failed" ||
-            isNewOffer;
+            pcRef.current.connectionState === "failed";
           const pc = getOrCreatePc(needFresh);
+
+          // W3C Perfect Negotiation: Polite peer (Viewer) rolls back local offer if glare occurs
+          if (!isHost && pc.signalingState === "have-local-offer") {
+            try {
+              console.log("[WebRTC Viewer] Signaling glare detected; rolling back local offer as polite peer");
+              await pc.setLocalDescription({ type: "rollback" });
+            } catch (rbErr) {
+              console.warn("[WebRTC Viewer] Rollback error (proceeding):", rbErr);
+            }
+          }
 
           const rawSdp = typeof payload.sdp === "string" ? payload.sdp : payload.sdp?.sdp || "";
           const safeOfferSdp = prioritizeCodecsInSdp(rawSdp);
@@ -2027,16 +2037,16 @@ export function useTheaterWebRTC({
           },
         });
 
-        // OfferId validation to prevent SDP session mismatch on host PC
+        // OfferId validation: log mismatch but permit application if Host PC is actively awaiting an answer
         if (activeOfferIdRef.current && payload.offerId && payload.offerId !== activeOfferIdRef.current) {
           const mismatchMsg = `OfferId mismatch: expected ${activeOfferIdRef.current}, received ${payload.offerId}`;
-          signalingDiagRef.current.answerApplyError = mismatchMsg;
+          console.warn(`[WebRTC Host] ${mismatchMsg}`);
           emitDiagnosticLog({
             sessionId,
             role: "host",
             pcId: currentPcIdRef.current,
             offerId: payload.offerId,
-            eventName: "answer-offerId-mismatch",
+            eventName: "answer-offerId-mismatch-tolerated",
             signalingState: pcRef.current?.signalingState || "none",
             connectionState: pcRef.current?.connectionState || "none",
             iceConnectionState: pcRef.current?.iceConnectionState || "none",
@@ -2045,28 +2055,17 @@ export function useTheaterWebRTC({
               receivedOfferId: payload.offerId,
             },
           });
-          return;
+          if (pcRef.current?.signalingState !== "have-local-offer") {
+            return;
+          }
         }
 
-        // Host PC ID validation: reject answers intended for an older/closed Host PC instance
+        // Host PC ID validation: allow if Host PC is in have-local-offer
         if (payload.hostPcId && payload.hostPcId !== currentPcIdRef.current) {
-          const mismatchMsg = `Host PC ID mismatch: expected PC #${currentPcIdRef.current}, received for PC #${payload.hostPcId}`;
-          signalingDiagRef.current.answerApplyError = mismatchMsg;
-          emitDiagnosticLog({
-            sessionId,
-            role: "host",
-            pcId: currentPcIdRef.current,
-            offerId: payload.offerId,
-            eventName: "answer-hostPcId-mismatch",
-            signalingState: pcRef.current?.signalingState || "none",
-            connectionState: pcRef.current?.connectionState || "none",
-            iceConnectionState: pcRef.current?.iceConnectionState || "none",
-            details: {
-              expectedHostPcId: currentPcIdRef.current,
-              receivedHostPcId: payload.hostPcId,
-            },
-          });
-          return;
+          console.warn(`[WebRTC Host] PC ID mismatch (payload #${payload.hostPcId} vs local #${currentPcIdRef.current})`);
+          if (pcRef.current?.signalingState !== "have-local-offer") {
+            return;
+          }
         }
 
         try {
@@ -2253,7 +2252,7 @@ export function useTheaterWebRTC({
             const isActivelyConnecting =
               pcRef.current?.connectionState === "connecting" ||
               pcRef.current?.iceConnectionState === "checking" ||
-              (activeOfferIdRef.current !== null && Date.now() - offerSentTimestampRef.current < 10000);
+              (activeOfferIdRef.current !== null && Date.now() - lastOfferReceivedTimestampRef.current < 20000);
 
             // Only request offer if viewer is not already in-flight connecting/negotiating
             if (!isActivelyConnecting) {
@@ -2460,7 +2459,7 @@ export function useTheaterWebRTC({
 
     const interval = setInterval(() => {
       count++;
-      if (count > 40) {
+      if (count > 20) {
         clearInterval(interval);
         return;
       }
@@ -2473,15 +2472,17 @@ export function useTheaterWebRTC({
       const isActivelyConnecting =
         pcRef.current?.connectionState === "connecting" ||
         pcRef.current?.iceConnectionState === "checking";
+      const hasRecentOffer = Date.now() - lastOfferReceivedTimestampRef.current < 15000;
 
       if (
         !hasLiveVideo &&
         !isActivelyConnecting &&
+        !hasRecentOffer &&
         roomStateRef.current !== "STREAM_ENDED"
       ) {
         sendViewerReady();
       }
-    }, 3000);
+    }, 8000);
 
     // Media watchdog: if PC reaches "connected" but no video track arrives
     // within 8 seconds, force a viewer-ready renegotiation to recover.
