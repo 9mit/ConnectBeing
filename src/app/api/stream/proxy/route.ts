@@ -73,7 +73,7 @@ function rewriteHlsPlaylist(manifestText: string, baseUrl: string, proxyEndpoint
         return line.replace(/URI="([^"]+)"/g, (_, uriValue) => {
           try {
             const absoluteUri = new URL(uriValue, baseUrl).href;
-            return `URI="${proxyEndpoint}?url=${encodeURIComponent(absoluteUri)}"`;
+            return `URI="${proxyEndpoint}?url=${encodeURIComponent(absoluteUri)}&raw=true"`;
           } catch {
             return `URI="${uriValue}"`;
           }
@@ -84,7 +84,7 @@ function rewriteHlsPlaylist(manifestText: string, baseUrl: string, proxyEndpoint
 
     try {
       const absoluteUri = new URL(trimmed, baseUrl).href;
-      return `${proxyEndpoint}?url=${encodeURIComponent(absoluteUri)}`;
+      return `${proxyEndpoint}?url=${encodeURIComponent(absoluteUri)}&raw=true`;
     } catch {
       return line;
     }
@@ -142,9 +142,8 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
     );
   }
 
-  // Handle MPEG-TS HLS synthesis wrapper so browsers with Hls.js can play raw .ts streams
-  const isTsExtension = parsedTarget.pathname.toLowerCase().endsWith(".ts");
-  if ((wrapParam === "hls" || isTsExtension) && !rawParam && method === "GET") {
+  // Only synthesize HLS manifest when explicitly requested via wrap=hls (never on raw .ts segments)
+  if (wrapParam === "hls" && !rawParam && method === "GET") {
     const rawProxyUrl = `/api/stream/proxy?url=${encodeURIComponent(targetUrl)}&raw=true`;
     const syntheticM3u8 = [
       "#EXTM3U",
@@ -185,13 +184,6 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
     } else {
       clampedRangeHeader = clientRange;
     }
-  } else if (method === "GET") {
-    // For initial GET requests on binary streams, request first chunk to prevent full-file 2GB pull
-    const ext = parsedTarget.pathname.split(".").pop()?.toLowerCase();
-    const isManifest = ext === "m3u8" || ext === "mpd";
-    if (!isManifest) {
-      clampedRangeHeader = `bytes=0-${MAX_CHUNK_SIZE - 1}`;
-    }
   }
 
   // Determine initial User-Agent (VLC emulation vs Browser emulation)
@@ -206,15 +198,16 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
     fallbackUA = BROWSER_USER_AGENT;
   }
 
-  const buildHeaders = (ua: string) => {
+  const buildHeaders = (ua: string, withReferer = false) => {
     const headers: Record<string, string> = {
       "user-agent": ua,
       accept: "*/*",
       "accept-encoding": "identity",
-      referer: `${parsedTarget.origin}/`,
-      origin: parsedTarget.origin,
-      connection: "keep-alive",
     };
+    if (withReferer) {
+      headers["referer"] = `${parsedTarget.origin}/`;
+      headers["origin"] = parsedTarget.origin;
+    }
     if (clampedRangeHeader) {
       headers["range"] = clampedRangeHeader;
     }
@@ -222,21 +215,21 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
   };
 
   try {
-    const fetchWithTimeout = (ua: string, timeoutMs = UPSTREAM_TIMEOUT_MS) => {
+    const fetchWithTimeout = (ua: string, withReferer = false, timeoutMs = UPSTREAM_TIMEOUT_MS) => {
       return fetch(parsedTarget.href, {
         method,
-        headers: buildHeaders(ua),
+        headers: buildHeaders(ua, withReferer),
         redirect: "follow",
         signal: AbortSignal.timeout(timeoutMs),
       });
     };
 
-    let upstreamRes = await fetchWithTimeout(primaryUA);
+    let upstreamRes = await fetchWithTimeout(primaryUA, false);
 
-    // Dual-UA Auto-Recovery: If primary UA was rejected with 403 or 401, retry with alternate UA
+    // Dual-UA Auto-Recovery: If primary UA was rejected with 403 or 401, retry with alternate UA + referer
     if ((upstreamRes.status === 403 || upstreamRes.status === 401) && !uaParam) {
       try {
-        const retryRes = await fetchWithTimeout(fallbackUA, 5000);
+        const retryRes = await fetchWithTimeout(fallbackUA, true, 5000);
         if (retryRes.ok || retryRes.status === 206) {
           upstreamRes = retryRes;
         }
@@ -260,16 +253,36 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
       );
     }
 
-    // Check if the response is an HLS playlist
-    const isHls =
+    // Check if the response is an HLS playlist (via MIME, extension, or content sniffing)
+    let isHls =
       isM3u8Extension ||
       contentType.includes("application/vnd.apple.mpegurl") ||
       contentType.includes("application/x-mpegurl") ||
       contentType.includes("audio/x-mpegurl");
 
-    if (method === "GET" && isHls) {
-      const manifestText = await upstreamRes.text();
-      if (manifestText.trim().startsWith("#EXTM3U") || isM3u8Extension) {
+    if (method === "GET" && !rawParam) {
+      let manifestText: string | null = null;
+      if (isHls) {
+        manifestText = await upstreamRes.text();
+      } else if (
+        contentType.includes("text/") ||
+        !contentType ||
+        contentType.includes("octet-stream")
+      ) {
+        // Sniff for #EXTM3U magic bytes for extensionless streams
+        const cloned = upstreamRes.clone();
+        try {
+          const sample = await cloned.text();
+          if (sample.trim().startsWith("#EXTM3U")) {
+            isHls = true;
+            manifestText = sample;
+          }
+        } catch {
+          /* ignore clone failure */
+        }
+      }
+
+      if (manifestText && (manifestText.trim().startsWith("#EXTM3U") || isM3u8Extension)) {
         const proxyEndpoint = "/api/stream/proxy";
         const finalBaseUrl = upstreamRes.url || parsedTarget.href;
         const rewrittenManifest = rewriteHlsPlaylist(manifestText, finalBaseUrl, proxyEndpoint);
@@ -336,6 +349,16 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
 
     if (method === "HEAD") {
       return new Response(null, {
+        status: upstreamRes.status,
+        headers: responseHeaders,
+      });
+    }
+
+    // For bounded byte range chunks, return exact-length ArrayBuffer to eliminate Transfer-Encoding: chunked on 206
+    if (upstreamRes.status === 206 || clampedRangeHeader) {
+      const arrayBuf = await upstreamRes.arrayBuffer();
+      responseHeaders.set("content-length", String(arrayBuf.byteLength));
+      return new Response(arrayBuf, {
         status: upstreamRes.status,
         headers: responseHeaders,
       });

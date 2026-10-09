@@ -358,6 +358,21 @@ export function VirtualRoom({
     }
   }, [directMediaUrl, positionSeconds]);
 
+  const retryStreamPlayback = useCallback((enableProxy: boolean) => {
+    setDirectMediaError(null);
+    setUseVlcProxy(enableProxy);
+    setIsUsingProxyFallback(enableProxy);
+    if (hlsInstanceRef.current) {
+      hlsInstanceRef.current.destroy();
+      hlsInstanceRef.current = null;
+    }
+    const video = directVideoRef.current;
+    if (video) {
+      video.removeAttribute("src");
+      video.load();
+    }
+  }, []);
+
   // OTT Mobile & Cinema Player States
   const [estimatedDuration, setEstimatedDuration] = useState(7200);
   const [showControls, setShowControls] = useState(true);
@@ -2351,15 +2366,19 @@ export function VirtualRoom({
                           <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                setUseVlcProxy(true);
-                                setIsUsingProxyFallback(true);
-                                setDirectMediaError(null);
-                              }}
+                              onClick={() => retryStreamPlayback(!useVlcProxy)}
                               className="px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-1.5"
                             >
                               <Sparkles size={13} />
-                              <span>Retry via VLC Engine ⚡</span>
+                              <span>{useVlcProxy ? "Try Direct Mode (Bypass Proxy)" : "Retry via VLC Engine ⚡"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => retryStreamPlayback(useVlcProxy)}
+                              className="px-3.5 py-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-200 text-xs font-semibold transition-all flex items-center gap-1.5"
+                            >
+                              <RotateCw size={12} />
+                              <span>Reload Stream</span>
                             </button>
                             <button
                               type="button"
@@ -2368,7 +2387,7 @@ export function VirtualRoom({
                                 setDirectMediaTitleInput(directMediaTitle || "");
                                 setShowDirectMediaModal(true);
                               }}
-                              className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-200 text-xs font-semibold transition-all"
+                              className="px-3.5 py-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-200 text-xs font-semibold transition-all"
                             >
                               Change Stream
                             </button>
