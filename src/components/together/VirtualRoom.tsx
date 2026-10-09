@@ -40,10 +40,10 @@ import {
   Activity,
   Globe,
 } from "lucide-react";
-import Hls from "hls.js";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { resolveStreamUrl } from "@/lib/stream-resolver";
+import { resolveStreamUrl, validateStreamUrl } from "@/lib/stream-resolver";
+import { useNetworkStreamPlayer } from "@/features/together/stream/useNetworkStreamPlayer";
 
 import {
   endWatchSessionAction,
@@ -231,32 +231,17 @@ export function VirtualRoom({
     return null;
   });
 
-  const [isDirectBuffering, setIsDirectBuffering] = useState<boolean>(true);
-  const [directMediaError, setDirectMediaError] = useState<string | null>(null);
   const [showDirectMediaModal, setShowDirectMediaModal] = useState(false);
+  const [showDiagnosticsOverlay, setShowDiagnosticsOverlay] = useState(false);
   const [directMediaInput, setDirectMediaInput] = useState("");
   const [directMediaTitleInput, setDirectMediaTitleInput] = useState("");
   const directVideoRef = useRef<HTMLVideoElement>(null);
 
-  // VLC Engine States: Proxy acceleration & HLS instance management
-  const [useVlcProxy, setUseVlcProxy] = useState<boolean>(true); // Enabled by default to eliminate CORS, mixed content, and referrer blocks
-  const [isUsingProxyFallback, setIsUsingProxyFallback] = useState<boolean>(false);
-  const [isDirectAutoplayMuted, setIsDirectAutoplayMuted] = useState(false);
-  const hlsInstanceRef = useRef<Hls | null>(null);
-
-  const playDirectVideo = useCallback((videoEl: HTMLVideoElement) => {
-    videoEl.play().catch((err: any) => {
-      if (err?.name === "NotAllowedError") {
-        console.log("[VirtualRoom] Unmuted autoplay blocked by browser; falling back to muted playback with unmute cue");
-        videoEl.muted = true;
-        setIsDirectAutoplayMuted(true);
-        void videoEl.play().catch(() => {});
-      }
-    });
-  }, []);
+  const hasStoppedStreamRef = useRef(false);
 
   // Sync network stream if session title or initial directMedia changes
   useEffect(() => {
+    if (hasStoppedStreamRef.current) return;
     if (!directMediaUrl) {
       if (initialDirectMediaUrl) {
         const resolved = resolveStreamUrl(initialDirectMediaUrl);
@@ -270,151 +255,49 @@ export function VirtualRoom({
     }
   }, [title, providerName, directMediaUrl, initialDirectMediaUrl, initialDirectMediaTitle]);
 
+  // Integrated Multi-Engine Network Stream Player (Native HTML5, HLS.js, Shaka DASH)
   const playbackStateRef = useRef(playbackState);
   playbackStateRef.current = playbackState;
 
-  // Universal Network Stream Loader & Player Engine (HLS.js + Native HTML5 + VLC Streaming Proxy)
-  useEffect(() => {
-    const video = directVideoRef.current;
-    if (!directMediaUrl || !video) {
-      if (hlsInstanceRef.current) {
-        hlsInstanceRef.current.destroy();
-        hlsInstanceRef.current = null;
+  const networkPlayer = useNetworkStreamPlayer({
+    videoRef: directVideoRef,
+    streamUrl: directMediaUrl,
+    streamTitle: directMediaTitle,
+    desiredPlaybackState: playbackState,
+    onPlaybackStateChange: (newState) => {
+      if (newState !== playbackStateRef.current) {
+        setPlaybackState(newState);
+        void channelRef.current?.send({
+          type: "broadcast",
+          event: "theater:playback",
+          payload: {
+            userId,
+            state: newState,
+            position: directVideoRef.current ? Math.floor(directVideoRef.current.currentTime) : positionSeconds,
+          },
+        });
       }
-      return;
-    }
-
-    // YouTube URLs are handled by the dedicated YouTube player iframe
-    if (extractYouTubeId(directMediaUrl)) {
-      if (hlsInstanceRef.current) {
-        hlsInstanceRef.current.destroy();
-        hlsInstanceRef.current = null;
+    },
+    onTimeUpdate: (cur, dur) => {
+      setPositionSeconds(cur);
+      if (dur > 0 && Number.isFinite(dur)) {
+        setEstimatedDuration(dur);
       }
-      return;
-    }
-
-    const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
-    const isInsecureHttp = directMediaUrl.startsWith("http://") && isHttps;
-    const shouldProxy = useVlcProxy || isUsingProxyFallback || isInsecureHttp;
-
-    const isTs = directMediaUrl.toLowerCase().includes(".ts");
-    const isHls =
-      directMediaUrl.toLowerCase().includes(".m3u8") ||
-      directMediaUrl.toLowerCase().includes("/m3u8") ||
-      directMediaUrl.toLowerCase().includes("master.m3u8") ||
-      isTs;
-
-    const effectiveSrc = shouldProxy
-      ? `/api/stream/proxy?url=${encodeURIComponent(directMediaUrl)}${isTs ? "&wrap=hls" : ""}`
-      : directMediaUrl;
-
-    if (hlsInstanceRef.current) {
-      hlsInstanceRef.current.destroy();
-      hlsInstanceRef.current = null;
-    }
-
-    setDirectMediaError(null);
-    setIsDirectBuffering(true);
-
-    if (isHls && typeof window !== "undefined" && Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120,
-        backBufferLength: 60,
-      });
-      hlsInstanceRef.current = hls;
-
-      hls.loadSource(effectiveSrc);
-      hls.attachMedia(video);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setDirectMediaError(null);
-        if (playbackStateRef.current === "playing") {
-          playDirectVideo(video);
-        }
-      });
-
-      hls.on(Hls.Events.FRAG_BUFFERED, () => {
-        setIsDirectBuffering(false);
-      });
-
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          console.warn("[VirtualRoom] Hls.js fatal error:", data.type, data.details);
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            console.log("[VirtualRoom] Auto-recovering HLS network error...");
-            hls.startLoad();
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            console.log("[VirtualRoom] Auto-recovering HLS media error...");
-            hls.recoverMediaError();
-          } else {
-            if (!shouldProxy) {
-              console.log("[VirtualRoom] Auto-switching HLS to VLC stream proxy...");
-              setIsUsingProxyFallback(true);
-            } else {
-              hls.destroy();
-              hlsInstanceRef.current = null;
-              setDirectMediaError(
-                "Network stream could not be loaded. Please verify the stream URL is online and accessible."
-              );
-            }
-          }
-        }
-      });
-    } else {
-      // Standard video (or Safari native HLS)
-      if (video.src !== effectiveSrc && !video.src.endsWith(effectiveSrc)) {
-        video.src = effectiveSrc;
-        video.load();
-      }
-      if (playbackStateRef.current === "playing") {
-        playDirectVideo(video);
-      }
-    }
-
-    return () => {
-      if (hlsInstanceRef.current) {
-        hlsInstanceRef.current.destroy();
-        hlsInstanceRef.current = null;
-      }
-    };
-  }, [directMediaUrl, useVlcProxy, isUsingProxyFallback]);
+    },
+  });
 
   const handleResyncStream = useCallback(() => {
-    const video = directVideoRef.current;
-    if (!video || !directMediaUrl) return;
-    setDirectMediaError(null);
-    const curTime = video.currentTime || positionSeconds || 0;
-    if (hlsInstanceRef.current) {
-      hlsInstanceRef.current.startLoad(curTime);
-      video.currentTime = curTime;
-      void video.play().catch(() => {});
-    } else {
-      video.load();
-      video.currentTime = curTime;
-      void video.play().catch(() => {});
-    }
-  }, [directMediaUrl, positionSeconds]);
+    networkPlayer.retry();
+  }, [networkPlayer]);
 
-  const retryStreamPlayback = useCallback((enableProxy: boolean) => {
-    setDirectMediaError(null);
-    setUseVlcProxy(enableProxy);
-    setIsUsingProxyFallback(enableProxy);
-    if (hlsInstanceRef.current) {
-      hlsInstanceRef.current.destroy();
-      hlsInstanceRef.current = null;
-    }
-    const video = directVideoRef.current;
-    if (video) {
-      video.removeAttribute("src");
-      video.load();
-    }
-  }, []);
+  // True whenever OTT provider natively supports controls OR an embedded direct media stream is active
+  const canControlPlayback = useMemo(() => {
+    return capabilities.canPlaybackControl || Boolean(directMediaUrl);
+  }, [capabilities.canPlaybackControl, directMediaUrl]);
 
   // OTT Mobile & Cinema Player States
   const [estimatedDuration, setEstimatedDuration] = useState(7200);
+  const isLiveStream = Boolean(directMediaUrl) && (!Number.isFinite(estimatedDuration) || estimatedDuration <= 0);
   const [showControls, setShowControls] = useState(true);
   const [isImmersiveTheater, setIsImmersiveTheater] = useState(false);
   const [isPiP, setIsPiP] = useState(false);
@@ -727,20 +610,23 @@ export function VirtualRoom({
   }, [playbackState]);
 
   // Periodic playback sync broadcast for Direct Sync / Network Stream
+  const positionSecondsRef = useRef(positionSeconds);
+  positionSecondsRef.current = positionSeconds;
+
   useEffect(() => {
     if (!isHost || !directMediaUrl || playbackState !== "playing") return;
     const interval = window.setInterval(() => {
       const currentPos = directVideoRef.current
         ? Math.floor(directVideoRef.current.currentTime)
-        : positionSeconds;
+        : positionSecondsRef.current;
       void channelRef.current?.send({
         type: "broadcast",
         event: "theater:playback",
-        payload: { userId, state: "playing", position: currentPos },
+        payload: { userId, state: "playing", position: currentPos, sentAt: Date.now() },
       });
-    }, 4500);
+    }, 4000);
     return () => clearInterval(interval);
-  }, [isHost, directMediaUrl, playbackState, userId, positionSeconds]);
+  }, [isHost, directMediaUrl, playbackState, userId]);
 
   // When partner enters/re-connects, re-announce active network stream so partner never sees setup lounge
   useEffect(() => {
@@ -778,7 +664,9 @@ export function VirtualRoom({
   const seekToPosition = useCallback((newPos: number) => {
     const clamped = Math.max(0, Math.min(newPos, estimatedDuration));
     setPositionSeconds(clamped);
-    if (directVideoRef.current) {
+    if (directMediaUrl) {
+      networkPlayer.seek(clamped);
+    } else if (directVideoRef.current) {
       directVideoRef.current.currentTime = clamped;
     }
     void channelRef.current?.send({
@@ -786,12 +674,14 @@ export function VirtualRoom({
       event: "theater:playback",
       payload: { userId, state: playbackState, position: clamped },
     });
-  }, [estimatedDuration, playbackState, userId]);
+  }, [estimatedDuration, playbackState, userId, directMediaUrl, networkPlayer]);
 
   const seekBy = useCallback((delta: number) => {
     setPositionSeconds((prev) => {
       const next = Math.max(0, Math.min(prev + delta, estimatedDuration));
-      if (directVideoRef.current) {
+      if (directMediaUrl) {
+        networkPlayer.seek(next);
+      } else if (directVideoRef.current) {
         directVideoRef.current.currentTime = next;
       }
       void channelRef.current?.send({
@@ -801,7 +691,7 @@ export function VirtualRoom({
       });
       return next;
     });
-  }, [estimatedDuration, playbackState, userId]);
+  }, [estimatedDuration, playbackState, userId, directMediaUrl, networkPlayer]);
 
   useEffect(() => {
     return () => {
@@ -815,7 +705,13 @@ export function VirtualRoom({
     setPlayPausePulse(next);
     if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
     pulseTimerRef.current = setTimeout(() => setPlayPausePulse(null), 800);
-    if (directVideoRef.current) {
+    if (directMediaUrl) {
+      if (next === "playing") {
+        networkPlayer.play();
+      } else {
+        networkPlayer.pause();
+      }
+    } else if (directVideoRef.current) {
       if (next === "playing") {
         void directVideoRef.current.play().catch(() => {});
       } else {
@@ -827,19 +723,27 @@ export function VirtualRoom({
       event: "theater:playback",
       payload: { userId, state: next, position: positionSeconds },
     });
-  }, [playbackState, positionSeconds, userId]);
+  }, [playbackState, positionSeconds, userId, directMediaUrl, networkPlayer]);
 
   const toggleVideoMute = useCallback(() => {
+    if (directMediaUrl && directVideoRef.current) {
+      const v = directVideoRef.current;
+      v.muted = !v.muted;
+      setIsVideoMuted(v.muted);
+      return;
+    }
     const video = isHost ? localVideoRef.current : remoteVideoRef.current;
     if (video) {
       video.muted = !video.muted;
       setIsVideoMuted(video.muted);
     }
-  }, [isHost]);
+  }, [isHost, directMediaUrl]);
 
   // OTT Picture-in-Picture
   const togglePiP = useCallback(async () => {
-    const video = isHost ? localVideoRef.current : remoteVideoRef.current;
+    const video = (directMediaUrl && directVideoRef.current)
+      ? directVideoRef.current
+      : (isHost ? localVideoRef.current : remoteVideoRef.current);
     if (!video) return;
     try {
       if (document.pictureInPictureElement) {
@@ -852,7 +756,7 @@ export function VirtualRoom({
     } catch (err) {
       console.warn("[VirtualRoom] PiP failed:", err);
     }
-  }, [isHost]);
+  }, [isHost, directMediaUrl]);
 
   // Cinema Mode & Fullscreen Controls
   const enterCinemaMode = useCallback(() => {
@@ -973,7 +877,7 @@ export function VirtualRoom({
       ) {
         // Double-tap recognized!
         lastTapRef.current = null;
-        if (capabilities.canPlaybackControl) {
+        if (canControlPlayback) {
           if (relativeX < 0.35) {
             seekBy(-10);
             setSkipRipple({ direction: "left", id: now });
@@ -1007,18 +911,54 @@ export function VirtualRoom({
         resetControlsTimer();
       }
     },
-    [capabilities.canPlaybackControl, handleUnmuteRemote, isAutoplayMuted, isHost, isScreenLocked, resetControlsTimer, seekBy, toggleFullscreen, togglePlayback, toggleVideoMute]
+    [canControlPlayback, handleUnmuteRemote, isAutoplayMuted, isHost, isScreenLocked, resetControlsTimer, seekBy, toggleFullscreen, togglePlayback, toggleVideoMute]
   );
 
   const formatSeconds = useCallback((sec: number) => {
+    if (!Number.isFinite(sec) || sec < 0) return "0:00";
     const hrs = Math.floor(sec / 3600);
     const mins = Math.floor((sec % 3600) / 60);
-    const secs = sec % 60;
+    const secs = Math.floor(sec % 60);
     if (hrs > 0) {
       return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
     }
     return `${mins}:${String(secs).padStart(2, "0")}`;
   }, []);
+
+  // Media Player Keyboard Shortcuts (Space, K, Left, Right, J, L, M, F, D)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = (document.activeElement?.tagName || "").toLowerCase();
+      if (
+        activeTag === "input" ||
+        activeTag === "textarea" ||
+        (document.activeElement as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+      if (e.code === "Space" || e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        togglePlayback();
+      } else if (e.code === "ArrowLeft" || e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        seekBy(-10);
+      } else if (e.code === "ArrowRight" || e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        seekBy(10);
+      } else if (e.key === "m" || e.key === "M") {
+        e.preventDefault();
+        toggleVideoMute();
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        toggleFullscreen();
+      } else if (e.key === "d" || e.key === "D") {
+        e.preventDefault();
+        setShowDiagnosticsOverlay((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [togglePlayback, seekBy, toggleVideoMute, toggleFullscreen]);
 
   // Scroll chat to bottom on new message
   useEffect(() => {
@@ -1026,6 +966,12 @@ export function VirtualRoom({
   }, [messages.length]);
 
   // Realtime channel for chat & emoji reactions
+  const directMediaUrlRef = useRef(directMediaUrl);
+  directMediaUrlRef.current = directMediaUrl;
+
+  const networkPlayerRef = useRef(networkPlayer);
+  networkPlayerRef.current = networkPlayer;
+
   useEffect(() => {
     let disposed = false;
     let supabase: ReturnType<typeof createClient>;
@@ -1048,17 +994,19 @@ export function VirtualRoom({
         if (payload.userId === userId) return;
         if (payload.state) {
           setPlaybackState(payload.state);
-          if (directVideoRef.current) {
-            if (payload.state === "playing") {
-              void directVideoRef.current.play().catch(() => {});
-            } else {
-              directVideoRef.current.pause();
-            }
-          }
         }
         if (typeof payload.position === "number") {
           setPositionSeconds(payload.position);
-          if (directVideoRef.current && Math.abs(directVideoRef.current.currentTime - payload.position) > 2) {
+        }
+        if (directMediaUrlRef.current) {
+          networkPlayerRef.current.applyRemotePlayback(payload.state, payload.position);
+        } else if (directVideoRef.current) {
+          if (payload.state === "playing") {
+            void directVideoRef.current.play().catch(() => {});
+          } else {
+            directVideoRef.current.pause();
+          }
+          if (typeof payload.position === "number" && Math.abs(directVideoRef.current.currentTime - payload.position) > 2) {
             directVideoRef.current.currentTime = payload.position;
           }
         }
@@ -1068,17 +1016,15 @@ export function VirtualRoom({
       })
       .on("broadcast", { event: "theater:direct-media" }, ({ payload }: { payload: any }) => {
         if (payload?.url) {
+          hasStoppedStreamRef.current = false;
           const resolved = resolveStreamUrl(payload.url);
           setDirectMediaUrl(resolved.url);
           setDirectMediaTitle(payload.title || resolved.derivedTitle || "Network Stream");
-          setDirectMediaError(null);
-          setIsDirectBuffering(true);
-          if (payload.duration) setEstimatedDuration(payload.duration);
+          if (payload.duration && Number.isFinite(payload.duration)) setEstimatedDuration(payload.duration);
         } else {
+          hasStoppedStreamRef.current = true;
           setDirectMediaUrl(null);
           setDirectMediaTitle(null);
-          setDirectMediaError(null);
-          setIsDirectBuffering(false);
         }
       })
       .on("broadcast", { event: "theater:message" }, ({ payload }: { payload: any }) => {
@@ -1972,7 +1918,7 @@ export function VirtualRoom({
                 </div>
 
                 {/* CENTER HUD: -10s, PLAY/PAUSE, +10s (Rendered ONLY if provider genuinely supports playback control) */}
-                {capabilities.canPlaybackControl && (
+                {canControlPlayback && (
                   <div className="flex items-center justify-center gap-8 sm:gap-12 pointer-events-auto">
                     <button
                       type="button"
@@ -2016,7 +1962,7 @@ export function VirtualRoom({
 
                 {/* BOTTOM HUD ROW: PROGRESS / LIVE STREAM INDICATOR & CONTROLS */}
                 <div className="space-y-2 pointer-events-auto pb-[env(safe-area-inset-bottom,0px)]">
-                  {capabilities.canPlaybackControl ? (
+                  {canControlPlayback ? (
                     <div className="flex items-center gap-3">
                       <span className="text-xs font-mono text-zinc-300 min-w-[45px]">{formattedTime}</span>
                       <input
@@ -2100,13 +2046,13 @@ export function VirtualRoom({
             )}
 
             {/* OTT DOUBLE-TAP SKIP RIPPLE OVERLAYS (Only if provider genuinely supports seek control) */}
-            {capabilities.canPlaybackControl && skipRipple?.direction === "left" && (
+            {canControlPlayback && skipRipple?.direction === "left" && (
               <div className="absolute left-8 top-1/2 -translate-y-1/2 z-40 pointer-events-none flex flex-col items-center gap-1 text-white bg-black/75 px-5 py-4 rounded-full border border-white/20 backdrop-blur-md animate-ott-ripple-left shadow-2xl">
                 <RotateCcw size={28} />
                 <span className="text-xs font-bold font-mono tracking-wider">-10s</span>
               </div>
             )}
-            {capabilities.canPlaybackControl && skipRipple?.direction === "right" && (
+            {canControlPlayback && skipRipple?.direction === "right" && (
               <div className="absolute right-8 top-1/2 -translate-y-1/2 z-40 pointer-events-none flex flex-col items-center gap-1 text-white bg-black/75 px-5 py-4 rounded-full border border-white/20 backdrop-blur-md animate-ott-ripple-right shadow-2xl">
                 <RotateCw size={28} />
                 <span className="text-xs font-bold font-mono tracking-wider">+10s</span>
@@ -2114,7 +2060,7 @@ export function VirtualRoom({
             )}
 
             {/* OTT CENTER PLAY/PAUSE MOMENTARY PULSE */}
-            {capabilities.canPlaybackControl && playPausePulse && (
+            {canControlPlayback && playPausePulse && (
               <div className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center">
                 <div className="w-16 h-16 rounded-full bg-black/75 border border-white/25 backdrop-blur-md flex items-center justify-center text-white shadow-2xl scale-125 transition-transform">
                   {playPausePulse === "playing" ? (
@@ -2234,6 +2180,18 @@ export function VirtualRoom({
                     </div>
                   );
                 }
+                const isBuffering =
+                  networkPlayer.playerState === "LOADING" ||
+                  networkPlayer.playerState === "BUFFERING" ||
+                  networkPlayer.playerState === "VALIDATING";
+
+                const isPaused =
+                  (networkPlayer.playerState === "READY" ||
+                    networkPlayer.playerState === "PAUSED" ||
+                    playbackState === "paused") &&
+                  !isBuffering &&
+                  !networkPlayer.errorInfo;
+
                 return (
                   <div className="relative h-full w-full flex items-center justify-center">
                     <video
@@ -2241,117 +2199,27 @@ export function VirtualRoom({
                       playsInline
                       webkit-playsinline="true"
                       x5-playsinline="true"
-                      crossOrigin="anonymous"
                       className="h-full w-full object-contain block z-10"
                       style={{ maxHeight: "100%", maxWidth: "100%" }}
-                      onTimeUpdate={(e) => {
-                        const cur = Math.floor(e.currentTarget.currentTime);
-                        setPositionSeconds(cur);
-                      }}
-                      onLoadedMetadata={(e) => {
-                        setDirectMediaError(null);
-                        if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
-                          setEstimatedDuration(Math.floor(e.currentTarget.duration));
-                        }
-                      }}
-                      onError={(e) => {
-                        const videoErr = e.currentTarget.error;
-                        console.warn("[VirtualRoom] Direct video error:", videoErr);
-                        const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
-                        const isInsecureHttp = directMediaUrl ? directMediaUrl.startsWith("http://") && isHttps : false;
-                        const alreadyProxying = useVlcProxy || isUsingProxyFallback || isInsecureHttp;
-
-                        // Check if browser native player rejected HLS or media container (code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED)
-                        // If so and Hls.isSupported() and no HLS instance is active, attempt HLS.js demuxing
-                        if (
-                          videoErr?.code === 4 &&
-                          typeof window !== "undefined" &&
-                          Hls.isSupported() &&
-                          !hlsInstanceRef.current &&
-                          directMediaUrl
-                        ) {
-                          console.log("[VirtualRoom] Native player failed with MEDIA_ERR_SRC_NOT_SUPPORTED; attempting Hls.js fallback...");
-                          const effectiveSrc = alreadyProxying
-                            ? `/api/stream/proxy?url=${encodeURIComponent(directMediaUrl)}`
-                            : directMediaUrl;
-                          const hls = new Hls({
-                            enableWorker: true,
-                            lowLatencyMode: false,
-                            maxBufferLength: 60,
-                            maxMaxBufferLength: 120,
-                            backBufferLength: 60,
-                          });
-                          hlsInstanceRef.current = hls;
-                          hls.loadSource(effectiveSrc);
-                          hls.attachMedia(e.currentTarget);
-                          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                            setDirectMediaError(null);
-                            if (playbackStateRef.current === "playing") {
-                              playDirectVideo(e.currentTarget);
-                            }
-                          });
-                          hls.on(Hls.Events.ERROR, (_evt, data) => {
-                            if (data.fatal) {
-                              setDirectMediaError(
-                                "Network stream could not be loaded. Please ensure the URL is online and accessible."
-                              );
-                            }
-                          });
-                          return;
-                        }
-
-                        if (videoErr?.code === 3) {
-                          // MEDIA_ERR_DECODE
-                          setDirectMediaError(
-                            "Audio/Video Codec Decode Error: This video uses a codec (such as AC3/DTS audio or MKV container) that web browsers cannot hardware-decode. You can play it locally in VLC and click 'Share Screen' to stream the VLC window with synchronized 1080p WebRTC audio and video, or provide an MP4/HLS stream."
-                          );
-                        } else if (!alreadyProxying) {
-                          console.log("[VirtualRoom] Direct playback blocked, auto-falling back to VLC Streaming Proxy...");
-                          setIsUsingProxyFallback(true);
-                          setDirectMediaError(null);
-                        } else {
-                          setDirectMediaError(
-                            "Network stream could not be loaded. Please ensure the URL is online, publicly reachable, and points to a direct video or HLS stream."
-                          );
-                        }
-                      }}
-                      onPlay={() => {
-                        if (playbackState !== "playing") {
-                          setPlaybackState("playing");
-                          void channelRef.current?.send({
-                            type: "broadcast",
-                            event: "theater:playback",
-                            payload: { userId, state: "playing", position: positionSeconds },
-                          });
-                        }
-                      }}
-                      onPause={() => {
-                        if (playbackState !== "paused") {
-                          setPlaybackState("paused");
-                          void channelRef.current?.send({
-                            type: "broadcast",
-                            event: "theater:playback",
-                            payload: { userId, state: "paused", position: positionSeconds },
-                          });
-                        }
-                      }}
-                      onWaiting={() => setIsDirectBuffering(true)}
-                      onPlaying={() => setIsDirectBuffering(false)}
-                      onCanPlay={() => setIsDirectBuffering(false)}
-                      onLoadedData={() => setIsDirectBuffering(false)}
                     />
 
                     {/* Cinematic Buffering & Warmup Overlay */}
-                    {isDirectBuffering && !directMediaError && (
+                    {isBuffering && !networkPlayer.errorInfo && (
                       <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-none transition-opacity duration-300">
                         <div className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-[#0c0e15]/90 border border-white/10 shadow-2xl">
                           <Loader2 size={32} className="animate-spin text-orange-400" />
                           <div className="text-center">
                             <p className="text-xs font-semibold text-white tracking-wide">
-                              Buffering Cinema Stream
+                              {networkPlayer.playerState === "VALIDATING"
+                                ? "Validating Stream Source"
+                                : "Buffering Cinema Stream"}
                             </p>
                             <p className="text-[11px] text-orange-300/90 font-mono mt-0.5">
-                              VLC Engine &bull; Adaptive HLS 1080p
+                              {networkPlayer.engine === "hlsjs"
+                                ? "Adaptive HLS 1080p Engine"
+                                : networkPlayer.engine === "shaka"
+                                ? "MPEG-DASH Adaptive Engine"
+                                : "Direct Browser Video Engine"}
                             </p>
                             <p className="text-[10px] text-zinc-400 mt-1 max-w-[240px]">
                               Preparing video buffer &amp; synchronizing with partner…
@@ -2361,27 +2229,42 @@ export function VirtualRoom({
                       </div>
                     )}
 
+                    {/* Center Tap-to-Play Cue when stream is ready or paused */}
+                    {isPaused && (
+                      <div
+                        onClick={() => {
+                          if (playbackState === "paused") {
+                            togglePlayback();
+                          } else {
+                            networkPlayer.play();
+                          }
+                        }}
+                        className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] cursor-pointer group"
+                      >
+                        <div className="w-16 h-16 rounded-full bg-orange-600 group-hover:bg-orange-500 text-white flex items-center justify-center shadow-2xl shadow-orange-600/40 group-active:scale-95 transition-all">
+                          <Play size={30} className="translate-x-0.5" />
+                        </div>
+                        <p className="text-xs font-semibold text-white mt-3">Click or Tap to Play</p>
+                        <span className="text-[10px] text-zinc-400 mt-0.5">Stream is ready for synchronized viewing</span>
+                      </div>
+                    )}
+
                     {/* Network Stream Top Bar */}
                     <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-2 p-2 sm:px-3 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-xs shadow-xl pointer-events-auto">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30 shrink-0">
-                          <Globe size={11} className="animate-spin text-orange-400" />
-                          Direct Sync &bull; VLC Engine
+                          <Globe size={11} className={isBuffering ? "animate-spin text-orange-400" : "text-orange-400"} />
+                          Direct Sync &bull; {networkPlayer.engine === "shaka" ? "DASH" : networkPlayer.engine === "hlsjs" ? "HLS" : "Direct"}
                         </span>
                         <span className="font-semibold text-white truncate text-xs sm:text-sm">
                           {directMediaTitle || "Network Stream"}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        {isDirectAutoplayMuted && (
+                        {networkPlayer.isAutoplayMuted && (
                           <button
                             type="button"
-                            onClick={() => {
-                              if (directVideoRef.current) {
-                                directVideoRef.current.muted = false;
-                                setIsDirectAutoplayMuted(false);
-                              }
-                            }}
+                            onClick={() => networkPlayer.unmute()}
                             title="Unmute audio"
                             className="px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 animate-pulse transition-colors flex items-center gap-1"
                           >
@@ -2389,6 +2272,19 @@ export function VirtualRoom({
                             <span>Tap to Unmute 🔊</span>
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setShowDiagnosticsOverlay((v) => !v)}
+                          title="Toggle stream diagnostics inspector"
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1 ${
+                            showDiagnosticsOverlay
+                              ? "text-orange-200 bg-orange-500/30 border-orange-500/50"
+                              : "text-zinc-300 bg-white/10 hover:bg-white/20 border-white/10"
+                          }`}
+                        >
+                          <Activity size={11} />
+                          <span className="hidden sm:inline">Diagnostics</span>
+                        </button>
                         <button
                           type="button"
                           onClick={handleResyncStream}
@@ -2412,10 +2308,8 @@ export function VirtualRoom({
                         <button
                           type="button"
                           onClick={() => {
-                            setIsDirectBuffering(false);
                             setDirectMediaUrl(null);
                             setDirectMediaTitle(null);
-                            setDirectMediaError(null);
                             void setWatchSessionDirectMediaAction(sessionId, null);
                             void channelRef.current?.send({
                               type: "broadcast",
@@ -2435,36 +2329,97 @@ export function VirtualRoom({
                       </div>
                     </div>
 
+                    {/* Diagnostics Inspector Overlay */}
+                    {showDiagnosticsOverlay && (
+                      <div className="absolute top-16 right-3 z-40 max-w-sm w-full p-4 rounded-2xl bg-[#0c0e15]/95 backdrop-blur-md border border-white/15 text-xs text-zinc-300 shadow-2xl space-y-2.5 font-mono pointer-events-auto">
+                        <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                          <span className="font-semibold text-white flex items-center gap-1.5">
+                            <Activity size={13} className="text-orange-400" />
+                            Stream Diagnostics
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowDiagnosticsOverlay(false)}
+                            className="text-zinc-400 hover:text-white"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                        <div className="space-y-1.5 text-[11px]">
+                          <div className="flex justify-between">
+                            <span className="text-zinc-500">Engine:</span>
+                            <span className="text-orange-300 font-semibold uppercase">{networkPlayer.diagnostics.engine}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-500">Format:</span>
+                            <span className="text-zinc-200 uppercase">{networkPlayer.diagnostics.format}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-500">State:</span>
+                            <span className="text-emerald-400 font-semibold">{networkPlayer.diagnostics.playerState}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-500">Resolution:</span>
+                            <span className="text-zinc-200">
+                              {networkPlayer.diagnostics.videoWidth > 0
+                                ? `${networkPlayer.diagnostics.videoWidth} × ${networkPlayer.diagnostics.videoHeight}`
+                                : "Detecting…"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-500">Buffer Ahead:</span>
+                            <span className="text-zinc-200">
+                              {Math.max(0, networkPlayer.diagnostics.bufferedEnd - networkPlayer.diagnostics.currentTime)}s
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-500">Audio:</span>
+                            <span className={networkPlayer.diagnostics.isMuted ? "text-amber-400" : "text-emerald-400"}>
+                              {networkPlayer.diagnostics.isMuted ? "Muted (Autoplay policy)" : "Unmuted"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-zinc-500">Last Event:</span>
+                            <span className="text-zinc-400 truncate max-w-[160px]">{networkPlayer.diagnostics.lastEvent}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Network Stream Error Overlay */}
-                    {directMediaError && (
+                    {networkPlayer.errorInfo && (
                       <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/90 p-6 text-center">
                         <div className="max-w-md w-full rounded-2xl border border-rose-500/30 bg-[#0d0f17] p-6 shadow-2xl space-y-4">
                           <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto">
                             <AlertTriangle size={24} />
                           </div>
                           <div>
-                            <h4 className="text-base font-semibold text-white">Network Stream Error</h4>
-                            <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
-                              {directMediaError}
+                            <h4 className="text-base font-semibold text-white">{networkPlayer.errorInfo.title}</h4>
+                            <p className="text-xs text-zinc-300 mt-1.5 leading-relaxed">
+                              {networkPlayer.errorInfo.message}
                             </p>
+                            {networkPlayer.errorInfo.suggestedAction && (
+                              <p className="text-[11px] text-amber-300/90 mt-2 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 text-left leading-snug">
+                                <strong>Suggestion:</strong> {networkPlayer.errorInfo.suggestedAction}
+                              </p>
+                            )}
+                            {networkPlayer.errorInfo.technicalDetails && (
+                              <p className="text-[10px] text-zinc-500 font-mono mt-1.5 truncate">
+                                {networkPlayer.errorInfo.technicalDetails}
+                              </p>
+                            )}
                           </div>
                           <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-                            <button
-                              type="button"
-                              onClick={() => retryStreamPlayback(!useVlcProxy)}
-                              className="px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-1.5"
-                            >
-                              <Sparkles size={13} />
-                              <span>{useVlcProxy ? "Try Direct Mode (Bypass Proxy)" : "Retry via VLC Engine ⚡"}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => retryStreamPlayback(useVlcProxy)}
-                              className="px-3.5 py-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-200 text-xs font-semibold transition-all flex items-center gap-1.5"
-                            >
-                              <RotateCw size={12} />
-                              <span>Reload Stream</span>
-                            </button>
+                            {networkPlayer.errorInfo.canRetry && (
+                              <button
+                                type="button"
+                                onClick={() => networkPlayer.retry()}
+                                className="px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-1.5"
+                              >
+                                <RotateCw size={12} />
+                                <span>Retry Stream</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
@@ -2478,11 +2433,16 @@ export function VirtualRoom({
                             </button>
                             <button
                               type="button"
+                              onClick={() => setShowDiagnosticsOverlay((v) => !v)}
+                              className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-300 text-xs transition-all"
+                            >
+                              Diagnostics
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => {
-                                setIsDirectBuffering(false);
                                 setDirectMediaUrl(null);
                                 setDirectMediaTitle(null);
-                                setDirectMediaError(null);
                                 void setWatchSessionDirectMediaAction(sessionId, null);
                                 void channelRef.current?.send({
                                   type: "broadcast",
@@ -3091,7 +3051,7 @@ export function VirtualRoom({
               </div>
 
               {/* Truthful Timeline or Live OTT Stream Status Bar */}
-              {capabilities.canPlaybackControl ? (
+              {canControlPlayback ? (
                 <div className="space-y-1.5 pt-0.5">
                   <div className="flex items-center gap-2">
                     <button
@@ -3119,19 +3079,33 @@ export function VirtualRoom({
                     </button>
 
                     <div className="flex-1 flex flex-col justify-center px-1">
-                      <input
-                        type="range"
-                        min={0}
-                        max={estimatedDuration}
-                        value={positionSeconds}
-                        onChange={(e) => seekToPosition(Number(e.target.value))}
-                        className="ott-slider w-full"
-                        aria-label="Seek timeline position"
-                      />
-                      <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 mt-0.5">
-                        <span className="text-white font-medium">{formattedTime}</span>
-                        <span>{formatSeconds(estimatedDuration)}</span>
-                      </div>
+                      {isLiveStream ? (
+                        <div className="flex items-center justify-between py-1">
+                          <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                            LIVE STREAM
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-400">
+                            Elapsed: <span className="text-white font-medium">{formattedTime}</span>
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <input
+                            type="range"
+                            min={0}
+                            max={estimatedDuration}
+                            value={positionSeconds}
+                            onChange={(e) => seekToPosition(Number(e.target.value))}
+                            className="ott-slider w-full"
+                            aria-label="Seek timeline position"
+                          />
+                          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 mt-0.5">
+                            <span className="text-white font-medium">{formattedTime}</span>
+                            <span>{formatSeconds(estimatedDuration)}</span>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <button
@@ -3696,7 +3670,7 @@ export function VirtualRoom({
               {/* Protocol Badges */}
               <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
                 <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
-                  HTTP / HTTPS Direct MP4
+                  Direct MP4
                 </span>
                 <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
                   WebM
@@ -3705,30 +3679,27 @@ export function VirtualRoom({
                   HLS (.m3u8)
                 </span>
                 <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
+                  MPEG-DASH (.mpd)
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
                   YouTube
                 </span>
               </div>
 
-              {/* VLC Compatibility Engine Toggle */}
+              {/* Direct Browser Playback Notice */}
               <div className="flex items-center justify-between p-3 rounded-2xl bg-orange-500/10 border border-orange-500/20">
                 <div className="space-y-0.5 pr-2">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-orange-200">
                     <Sparkles size={13} className="text-orange-400" />
-                    <span>VLC Compatibility Engine</span>
+                    <span>Direct Browser Stream Engine</span>
                   </div>
                   <p className="text-[10px] text-zinc-400 leading-tight">
-                    Emulates VLC network player headers to bypass CORS, mixed content, and CDN hotlink blocks.
+                    Direct browser-to-CDN streaming with synchronized play, pause, and seek for both partners.
                   </p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={useVlcProxy}
-                    onChange={(e) => setUseVlcProxy(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500" />
-                </label>
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                  DIRECT MODE
+                </span>
               </div>
 
               {/* URL Input with Paste action */}
@@ -3766,12 +3737,40 @@ export function VirtualRoom({
                 <div className="relative">
                   <input
                     type="url"
-                    placeholder="https://example.com/movie.mp4, .m3u8, or YouTube URL"
+                    placeholder="https://example.com/movie.mp4, .m3u8, .mpd, or YouTube URL"
                     value={directMediaInput}
                     onChange={(e) => setDirectMediaInput(e.target.value)}
                     className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 font-mono transition-colors"
                   />
                 </div>
+
+                {/* Real-time URL validation feedback */}
+                {directMediaInput && (() => {
+                  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+                  const validation = validateStreamUrl(directMediaInput, isHttps);
+                  return (
+                    <div className="mt-1.5 space-y-1">
+                      {validation.isValid && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-mono">
+                          <CheckCircle2 size={12} />
+                          <span>Supported {validation.format.toUpperCase()} stream detected</span>
+                        </div>
+                      )}
+                      {!validation.isValid && validation.unsupportedReason && (
+                        <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 leading-relaxed">
+                          <p className="font-semibold flex items-center gap-1">
+                            <AlertTriangle size={12} className="text-amber-400" />
+                            <span>Compatibility Notice</span>
+                          </p>
+                          <p className="mt-0.5 text-zinc-300 text-[10px]">{validation.unsupportedReason}</p>
+                          {validation.suggestedAction && (
+                            <p className="mt-1 text-amber-200 text-[10px] font-medium">{validation.suggestedAction}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Stream Title Input */}
@@ -3794,11 +3793,8 @@ export function VirtualRoom({
                   <button
                     type="button"
                     onClick={() => {
-                      setIsDirectBuffering(false);
                       setDirectMediaUrl(null);
                       setDirectMediaTitle(null);
-                      setDirectMediaError(null);
-                      setIsUsingProxyFallback(false);
                       setShowDirectMediaModal(false);
                       void setWatchSessionDirectMediaAction(sessionId, null);
                       void channelRef.current?.send({
@@ -3838,11 +3834,8 @@ export function VirtualRoom({
                         resolved.derivedTitle ||
                         "Network Stream";
 
-                      setIsUsingProxyFallback(false);
-                      setIsDirectBuffering(true);
                       setDirectMediaUrl(resolved.url);
                       setDirectMediaTitle(derivedTitle);
-                      setDirectMediaError(null);
                       setShowDirectMediaModal(false);
 
                       // Persist to database so partner joins and page reloads never revert to setup screen

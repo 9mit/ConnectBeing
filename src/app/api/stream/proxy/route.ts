@@ -365,12 +365,12 @@ async function handleProxyRequest(request: NextRequest, method: "GET" | "HEAD") 
       });
     }
 
-    // For bounded byte range chunks, return exact-length ArrayBuffer to eliminate Transfer-Encoding: chunked on 206
-    if (upstreamRes.status === 206 || clampedRangeHeader) {
+    // For bounded byte range chunks, return exact-length ArrayBuffer only on actual 206 responses
+    if (upstreamRes.status === 206) {
       const arrayBuf = await upstreamRes.arrayBuffer();
       responseHeaders.set("content-length", String(arrayBuf.byteLength));
       return new Response(arrayBuf, {
-        status: upstreamRes.status,
+        status: 206,
         headers: responseHeaders,
       });
     }
