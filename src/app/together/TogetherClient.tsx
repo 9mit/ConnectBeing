@@ -3,7 +3,7 @@
 import { motion, Variants } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Trash2, Loader2, Play, Clock, Film, AlertTriangle, X } from "lucide-react";
+import { Trash2, Loader2, Play, Clock, Film, AlertTriangle, X, Laptop } from "lucide-react";
 import { deleteWatchSessionAction, deleteMovieMemoryAction } from "@/actions/together";
 import { BRAND } from "@/lib/brand";
 import { formatSessionDateTime, formatDateMedium } from "@/lib/date";
@@ -169,6 +169,24 @@ export function TogetherClient({ upNextSessions, vaultMemories }: TogetherProps)
           </div>
         </div>
       </motion.header>
+
+      {/* PC-to-PC Streaming Advisory */}
+      <motion.div
+        variants={itemVariants}
+        className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+      >
+        <div className="flex items-start sm:items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+            <Laptop size={16} />
+          </div>
+          <div>
+            <p className="font-semibold text-white">Recommended Setup: Watch PC to PC</p>
+            <p className="text-[11px] text-zinc-400">
+              For crisp 1080p video and synced tab audio, both partners should join from a PC or laptop (Chrome, Edge, Brave). Mobile devices work best in Companion Mode.
+            </p>
+          </div>
+        </div>
+      </motion.div>
 
       {/* UP NEXT SECTION */}
       <div className="space-y-6">

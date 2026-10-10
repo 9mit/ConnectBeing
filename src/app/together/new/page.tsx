@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { Search, Sparkles, Tv, ShieldCheck, Film, Check } from "lucide-react";
+import { Search, Sparkles, Tv, ShieldCheck, Film, Check, Laptop } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import {
@@ -279,6 +279,16 @@ export default function NewWatchSessionPage() {
                 placeholder="Bring warm blankets and popcorn ❤️"
                 className="w-full resize-none rounded-2xl border border-amber-500/30 bg-purple-950/60 px-4 py-3 text-sm text-white placeholder-slate-400 outline-none focus:border-amber-400 transition-all"
               />
+            </div>
+
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 space-y-1.5 text-left">
+              <div className="flex items-center gap-2 text-emerald-300 font-semibold text-xs">
+                <Laptop size={15} className="text-emerald-400 shrink-0" />
+                <span>PC-to-PC Streaming Strongly Recommended</span>
+              </div>
+              <p className="text-[11px] text-zinc-300 leading-relaxed">
+                Movie tab sharing with synced audio works best when both partners join on a <strong>PC or laptop</strong> (Chrome, Edge, Brave). Mobile browsers block screen capture and throttle background connections.
+              </p>
             </div>
 
             <div className="p-3 bg-black/40 border border-white/10 rounded-xl text-[11px] text-zinc-400 flex items-center gap-2">

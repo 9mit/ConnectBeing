@@ -128,14 +128,8 @@ export function getProviderTechnicalCapability(
   const norm = (providerId || "").toLowerCase();
   const screenSharePossible = isBrowserScreenShareSupported();
 
-  // Direct web video, Network Stream, and YouTube support embedded synchronized control
-  if (
-    norm === "youtube" ||
-    norm === "webvideo" ||
-    norm === "direct" ||
-    norm.includes("network stream") ||
-    norm.includes("direct sync")
-  ) {
+  // YouTube supports embedded synchronized control
+  if (norm === "youtube") {
     return {
       canDeepLink: true,
       canScreenShare: screenSharePossible,

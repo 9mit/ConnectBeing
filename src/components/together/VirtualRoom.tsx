@@ -25,25 +25,21 @@ import {
   Volume2,
   VolumeX,
   X,
+  Radio,
+  Laptop,
+  Smartphone,
+  ChevronLeft,
+  LogOut,
+  Lock,
+  Activity,
+  PictureInPicture2,
   RotateCcw,
   RotateCw,
-  PictureInPicture2,
-  Radio,
-  Lock,
-  Unlock,
-  ChevronLeft,
-  Sliders,
-  Smile,
   Bookmark,
   CheckCircle2,
-  LogOut,
-  Activity,
-  Globe,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { resolveStreamUrl, validateStreamUrl } from "@/lib/stream-resolver";
-import { useNetworkStreamPlayer } from "@/features/together/stream/useNetworkStreamPlayer";
 
 import {
   endWatchSessionAction,
@@ -52,7 +48,6 @@ import {
   getWatchMessagesAction,
   joinWatchSessionAction,
   sendWatchMessageAction,
-  setWatchSessionDirectMediaAction,
 } from "@/actions/together";
 import { authorizeRealtimeTopicAction } from "@/actions/realtime-auth";
 import { createClient } from "@/lib/supabase/client";
@@ -104,8 +99,6 @@ export function VirtualRoom({
   initialHostStreamActive = false,
   initialPlaybackState = "idle",
   initialPosition = 0,
-  initialDirectMediaUrl = null,
-  initialDirectMediaTitle = null,
   theme = "rose-dusk",
   decor,
 }: {
@@ -120,8 +113,6 @@ export function VirtualRoom({
   initialHostStreamActive?: boolean;
   initialPlaybackState?: string;
   initialPosition?: number;
-  initialDirectMediaUrl?: string | null;
-  initialDirectMediaTitle?: string | null;
   theme?: string;
   decor?: Record<string, unknown>;
 }) {
@@ -209,108 +200,14 @@ export function VirtualRoom({
   const [isDrmBlackScreenDetected, setIsDrmBlackScreenDetected] = useState(false);
   const [partnerDrmReported, setPartnerDrmReported] = useState(false);
 
-  // Direct Sync & Network Stream states (VLC-style Direct URL Playback)
-  const [directMediaUrl, setDirectMediaUrl] = useState<string | null>(() => {
-    if (initialDirectMediaUrl) {
-      return resolveStreamUrl(initialDirectMediaUrl).url;
-    }
-    if (title.startsWith("http://") || title.startsWith("https://")) {
-      return resolveStreamUrl(title).url;
-    }
-    return null;
-  });
-
-  const [directMediaFallbackUrl, setDirectMediaFallbackUrl] = useState<string | null>(() => {
-    if (initialDirectMediaUrl) {
-      return resolveStreamUrl(initialDirectMediaUrl).fallbackUrl || null;
-    }
-    if (title.startsWith("http://") || title.startsWith("https://")) {
-      return resolveStreamUrl(title).fallbackUrl || null;
-    }
-    return null;
-  });
-
-  const [directMediaTitle, setDirectMediaTitle] = useState<string | null>(() => {
-    if (initialDirectMediaTitle) return initialDirectMediaTitle;
-    if (initialDirectMediaUrl) {
-      return resolveStreamUrl(initialDirectMediaUrl).derivedTitle || "Network Stream";
-    }
-    if (title.startsWith("http://") || title.startsWith("https://")) {
-      return providerName || resolveStreamUrl(title).derivedTitle || "Network Stream";
-    }
-    return null;
-  });
-
-  const [showDirectMediaModal, setShowDirectMediaModal] = useState(false);
-  const [showDiagnosticsOverlay, setShowDiagnosticsOverlay] = useState(false);
-  const [directMediaInput, setDirectMediaInput] = useState("");
-  const [directMediaTitleInput, setDirectMediaTitleInput] = useState("");
-  const directVideoRef = useRef<HTMLVideoElement>(null);
-
-  const hasStoppedStreamRef = useRef(false);
-
-  // Sync network stream if session title or initial directMedia changes
-  useEffect(() => {
-    if (hasStoppedStreamRef.current) return;
-    if (!directMediaUrl) {
-      if (initialDirectMediaUrl) {
-        const resolved = resolveStreamUrl(initialDirectMediaUrl);
-        setDirectMediaUrl(resolved.url);
-        setDirectMediaFallbackUrl(resolved.fallbackUrl || null);
-        setDirectMediaTitle(initialDirectMediaTitle || resolved.derivedTitle || "Network Stream");
-      } else if (title.startsWith("http://") || title.startsWith("https://")) {
-        const resolved = resolveStreamUrl(title);
-        setDirectMediaUrl(resolved.url);
-        setDirectMediaFallbackUrl(resolved.fallbackUrl || null);
-        setDirectMediaTitle(providerName || resolved.derivedTitle || "Network Stream");
-      }
-    }
-  }, [title, providerName, directMediaUrl, initialDirectMediaUrl, initialDirectMediaTitle]);
-
-  // Integrated Multi-Engine Network Stream Player (Native HTML5, HLS.js, Shaka DASH)
-  const playbackStateRef = useRef(playbackState);
-  playbackStateRef.current = playbackState;
-
-  const networkPlayer = useNetworkStreamPlayer({
-    videoRef: directVideoRef,
-    streamUrl: directMediaUrl,
-    streamTitle: directMediaTitle,
-    fallbackUrl: directMediaFallbackUrl,
-    desiredPlaybackState: playbackState,
-    onPlaybackStateChange: (newState) => {
-      if (newState !== playbackStateRef.current) {
-        setPlaybackState(newState);
-        void channelRef.current?.send({
-          type: "broadcast",
-          event: "theater:playback",
-          payload: {
-            userId,
-            state: newState,
-            position: directVideoRef.current ? Math.floor(directVideoRef.current.currentTime) : positionSeconds,
-          },
-        });
-      }
-    },
-    onTimeUpdate: (cur, dur) => {
-      setPositionSeconds(cur);
-      if (dur > 0 && Number.isFinite(dur)) {
-        setEstimatedDuration(dur);
-      }
-    },
-  });
-
-  const handleResyncStream = useCallback(() => {
-    networkPlayer.retry();
-  }, [networkPlayer]);
-
-  // True whenever OTT provider natively supports controls OR an embedded direct media stream is active
+  // True whenever OTT provider natively supports playback controls
   const canControlPlayback = useMemo(() => {
-    return capabilities.canPlaybackControl || Boolean(directMediaUrl);
-  }, [capabilities.canPlaybackControl, directMediaUrl]);
+    return capabilities.canPlaybackControl;
+  }, [capabilities.canPlaybackControl]);
 
   // OTT Mobile & Cinema Player States
   const [estimatedDuration, setEstimatedDuration] = useState(7200);
-  const isLiveStream = Boolean(directMediaUrl) && (!Number.isFinite(estimatedDuration) || estimatedDuration <= 0);
+  const isLiveStream = false;
   const [showControls, setShowControls] = useState(true);
   const [isImmersiveTheater, setIsImmersiveTheater] = useState(false);
   const [isPiP, setIsPiP] = useState(false);
@@ -622,36 +519,6 @@ export function VirtualRoom({
     };
   }, [playbackState]);
 
-  // Periodic playback sync broadcast for Direct Sync / Network Stream
-  const positionSecondsRef = useRef(positionSeconds);
-  positionSecondsRef.current = positionSeconds;
-
-  useEffect(() => {
-    if (!isHost || !directMediaUrl || playbackState !== "playing") return;
-    const interval = window.setInterval(() => {
-      const currentPos = directVideoRef.current
-        ? Math.floor(directVideoRef.current.currentTime)
-        : positionSecondsRef.current;
-      void channelRef.current?.send({
-        type: "broadcast",
-        event: "theater:playback",
-        payload: { userId, state: "playing", position: currentPos, sentAt: Date.now() },
-      });
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [isHost, directMediaUrl, playbackState, userId]);
-
-  // When partner enters/re-connects, re-announce active network stream so partner never sees setup lounge
-  useEffect(() => {
-    if (isHost && directMediaUrl && (partnerPresence === "watching" || partnerPresence === "online")) {
-      void channelRef.current?.send({
-        type: "broadcast",
-        event: "theater:direct-media",
-        payload: { url: directMediaUrl, title: directMediaTitle },
-      });
-    }
-  }, [isHost, directMediaUrl, directMediaTitle, partnerPresence]);
-
   // Auto-hiding OTT player controls timer (3.5s inactivity)
   const resetControlsTimer = useCallback(() => {
     setShowControls(true);
@@ -677,26 +544,16 @@ export function VirtualRoom({
   const seekToPosition = useCallback((newPos: number) => {
     const clamped = Math.max(0, Math.min(newPos, estimatedDuration));
     setPositionSeconds(clamped);
-    if (directMediaUrl) {
-      networkPlayer.seek(clamped);
-    } else if (directVideoRef.current) {
-      directVideoRef.current.currentTime = clamped;
-    }
     void channelRef.current?.send({
       type: "broadcast",
       event: "theater:playback",
       payload: { userId, state: playbackState, position: clamped },
     });
-  }, [estimatedDuration, playbackState, userId, directMediaUrl, networkPlayer]);
+  }, [estimatedDuration, playbackState, userId]);
 
   const seekBy = useCallback((delta: number) => {
     setPositionSeconds((prev) => {
       const next = Math.max(0, Math.min(prev + delta, estimatedDuration));
-      if (directMediaUrl) {
-        networkPlayer.seek(next);
-      } else if (directVideoRef.current) {
-        directVideoRef.current.currentTime = next;
-      }
       void channelRef.current?.send({
         type: "broadcast",
         event: "theater:playback",
@@ -704,7 +561,7 @@ export function VirtualRoom({
       });
       return next;
     });
-  }, [estimatedDuration, playbackState, userId, directMediaUrl, networkPlayer]);
+  }, [estimatedDuration, playbackState, userId]);
 
   useEffect(() => {
     return () => {
@@ -718,45 +575,24 @@ export function VirtualRoom({
     setPlayPausePulse(next);
     if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
     pulseTimerRef.current = setTimeout(() => setPlayPausePulse(null), 800);
-    if (directMediaUrl) {
-      if (next === "playing") {
-        networkPlayer.play();
-      } else {
-        networkPlayer.pause();
-      }
-    } else if (directVideoRef.current) {
-      if (next === "playing") {
-        void directVideoRef.current.play().catch(() => {});
-      } else {
-        directVideoRef.current.pause();
-      }
-    }
     void channelRef.current?.send({
       type: "broadcast",
       event: "theater:playback",
       payload: { userId, state: next, position: positionSeconds },
     });
-  }, [playbackState, positionSeconds, userId, directMediaUrl, networkPlayer]);
+  }, [playbackState, positionSeconds, userId]);
 
   const toggleVideoMute = useCallback(() => {
-    if (directMediaUrl && directVideoRef.current) {
-      const v = directVideoRef.current;
-      v.muted = !v.muted;
-      setIsVideoMuted(v.muted);
-      return;
-    }
     const video = isHost ? localVideoRef.current : remoteVideoRef.current;
     if (video) {
       video.muted = !video.muted;
       setIsVideoMuted(video.muted);
     }
-  }, [isHost, directMediaUrl]);
+  }, [isHost]);
 
   // OTT Picture-in-Picture
   const togglePiP = useCallback(async () => {
-    const video = (directMediaUrl && directVideoRef.current)
-      ? directVideoRef.current
-      : (isHost ? localVideoRef.current : remoteVideoRef.current);
+    const video = isHost ? localVideoRef.current : remoteVideoRef.current;
     if (!video) return;
     try {
       if (document.pictureInPictureElement) {
@@ -769,7 +605,7 @@ export function VirtualRoom({
     } catch (err) {
       console.warn("[VirtualRoom] PiP failed:", err);
     }
-  }, [isHost, directMediaUrl]);
+  }, [isHost]);
 
   // Cinema Mode & Fullscreen Controls
   const enterCinemaMode = useCallback(() => {
@@ -966,7 +802,7 @@ export function VirtualRoom({
         toggleFullscreen();
       } else if (e.key === "d" || e.key === "D") {
         e.preventDefault();
-        setShowDiagnosticsOverlay((prev) => !prev);
+        setShowDiagModal((prev) => !prev);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -979,12 +815,6 @@ export function VirtualRoom({
   }, [messages.length]);
 
   // Realtime channel for chat & emoji reactions
-  const directMediaUrlRef = useRef(directMediaUrl);
-  directMediaUrlRef.current = directMediaUrl;
-
-  const networkPlayerRef = useRef(networkPlayer);
-  networkPlayerRef.current = networkPlayer;
-
   useEffect(() => {
     let disposed = false;
     let supabase: ReturnType<typeof createClient>;
@@ -1011,37 +841,9 @@ export function VirtualRoom({
         if (typeof payload.position === "number") {
           setPositionSeconds(payload.position);
         }
-        if (directMediaUrlRef.current) {
-          networkPlayerRef.current.applyRemotePlayback(payload.state, payload.position);
-        } else if (directVideoRef.current) {
-          if (payload.state === "playing") {
-            void directVideoRef.current.play().catch(() => {});
-          } else {
-            directVideoRef.current.pause();
-          }
-          if (typeof payload.position === "number" && Math.abs(directVideoRef.current.currentTime - payload.position) > 2) {
-            directVideoRef.current.currentTime = payload.position;
-          }
-        }
       })
       .on("broadcast", { event: "theater:drm-detected" }, ({ payload }: { payload: any }) => {
         setPartnerDrmReported(Boolean(payload?.isBlack));
-      })
-      .on("broadcast", { event: "theater:direct-media" }, ({ payload }: { payload: any }) => {
-        if (payload?.url) {
-          hasStoppedStreamRef.current = false;
-          const streamToResolve = payload.originalUrl || payload.url;
-          const resolved = resolveStreamUrl(streamToResolve);
-          setDirectMediaUrl(resolved.url);
-          setDirectMediaFallbackUrl(payload.fallbackUrl || resolved.fallbackUrl || null);
-          setDirectMediaTitle(payload.title || resolved.derivedTitle || "Network Stream");
-          if (payload.duration && Number.isFinite(payload.duration)) setEstimatedDuration(payload.duration);
-        } else {
-          hasStoppedStreamRef.current = true;
-          setDirectMediaUrl(null);
-          setDirectMediaFallbackUrl(null);
-          setDirectMediaTitle(null);
-        }
       })
       .on("broadcast", { event: "theater:message" }, ({ payload }: { payload: any }) => {
         if (!payload || payload.userId === userId) return;
@@ -1380,7 +1182,6 @@ export function VirtualRoom({
   const isSourceResolutionLow = Boolean(
     isHost &&
     isHostCapturing &&
-    !directMediaUrl &&
     typeof sourceWidth === "number" &&
     sourceWidth > 0 &&
     sourceWidth < 1280
@@ -1397,7 +1198,7 @@ export function VirtualRoom({
     }
 
     const video = localVideoRef.current;
-    if (!video || !hasActiveStream || Boolean(directMediaUrl)) {
+    if (!video || !hasActiveStream) {
       setIsDrmBlackScreenDetected(false);
       return;
     }
@@ -1443,7 +1244,7 @@ export function VirtualRoom({
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [directMediaUrl, hasActiveStream, isHost]);
+  }, [hasActiveStream, isHost]);
 
   // Companion Mode decision:
   // Companion Mode is ONLY for:
@@ -1452,7 +1253,7 @@ export function VirtualRoom({
   // A viewer MUST NEVER be automatically forced into Companion Mode merely because they are on mobile or WebRTC is connecting/reconnecting!
   const isCompanionMode =
     userSwitchedToCompanion ||
-    (isHost && !canShareScreen && !hasActiveStream && !directMediaUrl);
+    (isHost && !canShareScreen && !hasActiveStream);
 
   const isCinemaFullscreen = isImmersiveTheater || isFullscreen || isLandscape;
 
@@ -1629,23 +1430,6 @@ export function VirtualRoom({
               </button>
             )}
 
-            {/* Direct Sync / Network Stream Button */}
-            <button
-              type="button"
-              onClick={() => {
-                setDirectMediaInput(directMediaUrl || "");
-                setDirectMediaTitleInput(directMediaTitle || "");
-                setShowDirectMediaModal(true);
-              }}
-              className={`p-1.5 rounded-full transition-colors ${
-                directMediaUrl ? "text-orange-400 bg-orange-500/15 ring-1 ring-orange-500/30" : "text-zinc-400 hover:text-white hover:bg-white/[0.05]"
-              }`}
-              title="Direct Sync — Open Network Stream"
-              aria-label="Direct Sync — Open Network Stream"
-            >
-              <Globe size={14} />
-            </button>
-
             {/* Fullscreen Button */}
             <button
               type="button"
@@ -1692,6 +1476,25 @@ export function VirtualRoom({
             </button>
           </div>
         </header>
+      )}
+
+      {/* Mobile Device Honest Advisory Banner */}
+      {deviceCaps.isMobile && !isCompanionMode && (
+        <div className="bg-amber-500/15 border-b border-amber-500/25 px-4 py-2 text-xs text-amber-200 flex items-center justify-between gap-3 shrink-0 z-30">
+          <div className="flex items-center gap-2 min-w-0">
+            <Smartphone size={15} className="text-amber-400 shrink-0" />
+            <span className="truncate">
+              <strong>Mobile Device Notice:</strong> PC-to-PC streaming is what works reliably. Mobile browsers may pause when switching tabs or locking the screen.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUserSwitchedToCompanion(true)}
+            className="text-[11px] font-semibold text-amber-300 hover:text-white underline shrink-0 whitespace-nowrap"
+          >
+            Companion Mode →
+          </button>
+        </div>
       )}
 
       {/* MAIN CINEMA STAGE: RESPONSIVE COMPOSITION */}
@@ -2156,7 +1959,7 @@ export function VirtualRoom({
                   }
                 }}
                 className={`h-full w-full object-contain ${
-                  isHostCapturing && !directMediaUrl ? "block" : "hidden"
+                  isHostCapturing ? "block" : "hidden"
                 }`}
               />
             )}
@@ -2171,362 +1974,13 @@ export function VirtualRoom({
                 playsInline
                 webkit-playsinline="true"
                 x5-playsinline="true"
-                className={`h-full w-full object-contain ${
-                  !directMediaUrl ? "block" : "hidden"
-                }`}
+                className="h-full w-full object-contain block"
                 style={{ maxHeight: "100%", maxWidth: "100%" }}
               />
             )}
 
-            {/* C. SYNCHRONIZED DIRECT MEDIA PLAYER (Direct Network Stream / Open-Source / YouTube) */}
-            {directMediaUrl && (
-              (() => {
-                const ytId = extractYouTubeId(directMediaUrl);
-                if (ytId) {
-                  return (
-                    <div className="relative h-full w-full flex items-center justify-center bg-black z-10">
-                      <iframe
-                        src={`https://www.youtube-nocookie.com/embed/${ytId}?autoplay=1&enablejsapi=1&playsinline=1&rel=0&iv_load_policy=3&controls=1`}
-                        title="Synchronized YouTube Player"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                        className="h-full w-full aspect-video max-h-full max-w-full rounded-lg shadow-2xl"
-                        style={{ border: "none" }}
-                      />
-                    </div>
-                  );
-                }
-                const isBuffering =
-                  networkPlayer.playerState === "LOADING_MANIFEST" ||
-                  networkPlayer.playerState === "LOADING_MEDIA" ||
-                  networkPlayer.playerState === "BUFFERING" ||
-                  networkPlayer.playerState === "VALIDATING" ||
-                  networkPlayer.playerState === "RECONNECTING";
-
-                const isPaused =
-                  (networkPlayer.playerState === "READY" ||
-                    networkPlayer.playerState === "PAUSED" ||
-                    playbackState === "paused") &&
-                  !isBuffering &&
-                  !networkPlayer.errorInfo;
-
-                return (
-                  <div className="relative h-full w-full flex items-center justify-center">
-                    <video
-                      ref={directVideoRef}
-                      playsInline
-                      webkit-playsinline="true"
-                      x5-playsinline="true"
-                      className="h-full w-full object-contain block z-10"
-                      style={{ maxHeight: "100%", maxWidth: "100%" }}
-                    />
-
-                    {/* Cinematic Buffering & Warmup Overlay */}
-                    {isBuffering && !networkPlayer.errorInfo && (
-                      <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-none transition-opacity duration-300">
-                        <div className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-[#0c0e15]/90 border border-white/10 shadow-2xl">
-                          <Loader2 size={32} className="animate-spin text-orange-400" />
-                          <div className="text-center">
-                            <p className="text-xs font-semibold text-white tracking-wide">
-                              {networkPlayer.playerState === "VALIDATING"
-                                ? "Validating Stream Source"
-                                : networkPlayer.playerState === "LOADING_MANIFEST"
-                                ? "Loading Adaptive Manifest"
-                                : networkPlayer.playerState === "LOADING_MEDIA"
-                                ? "Buffering Media Segments"
-                                : networkPlayer.playerState === "RECONNECTING"
-                                ? "Reconnecting Stream"
-                                : "Buffering Cinema Stream"}
-                            </p>
-                            <p className="text-[11px] text-orange-300/90 font-mono mt-0.5">
-                              {networkPlayer.engine === "hlsjs"
-                                ? "Adaptive HLS 1080p Engine"
-                                : networkPlayer.engine === "shaka"
-                                ? "MPEG-DASH Adaptive Engine"
-                                : "Direct Browser Video Engine"}
-                            </p>
-                            <p className="text-[10px] text-zinc-400 mt-1 max-w-[240px]">
-                              {networkPlayer.playerState === "LOADING_MANIFEST"
-                                ? "Fetching playlist from media origin…"
-                                : networkPlayer.playerState === "LOADING_MEDIA"
-                                ? "Downloading and demuxing initial segments…"
-                                : networkPlayer.playerState === "RECONNECTING"
-                                ? "Recovering network connection…"
-                                : "Preparing video buffer & synchronizing with partner…"}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Center Tap-to-Play Cue when stream is ready or paused */}
-                    {isPaused && (
-                      <div
-                        onClick={() => {
-                          if (playbackState === "paused") {
-                            togglePlayback();
-                          } else {
-                            networkPlayer.play();
-                          }
-                        }}
-                        className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] cursor-pointer group"
-                      >
-                        <div className="w-16 h-16 rounded-full bg-orange-600 group-hover:bg-orange-500 text-white flex items-center justify-center shadow-2xl shadow-orange-600/40 group-active:scale-95 transition-all">
-                          <Play size={30} className="translate-x-0.5" />
-                        </div>
-                        <p className="text-xs font-semibold text-white mt-3">Click or Tap to Play</p>
-                        <span className="text-[10px] text-zinc-400 mt-0.5">Stream is ready for synchronized viewing</span>
-                      </div>
-                    )}
-
-                    {/* Network Stream Top Bar */}
-                    <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-2 p-2 sm:px-3 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-xs shadow-xl pointer-events-auto">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold uppercase tracking-wider bg-orange-500/20 text-orange-300 border border-orange-500/30 shrink-0">
-                          <Globe size={11} className={isBuffering ? "animate-spin text-orange-400" : "text-orange-400"} />
-                          Direct Sync &bull; {networkPlayer.engine === "shaka" ? "DASH" : networkPlayer.engine === "hlsjs" ? "HLS" : "Direct"}
-                        </span>
-                        <span className="font-semibold text-white truncate text-xs sm:text-sm">
-                          {directMediaTitle || "Network Stream"}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {networkPlayer.isAutoplayMuted && (
-                          <button
-                            type="button"
-                            onClick={() => networkPlayer.unmute()}
-                            title="Unmute audio"
-                            className="px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 animate-pulse transition-colors flex items-center gap-1"
-                          >
-                            <VolumeX size={12} />
-                            <span>Tap to Unmute 🔊</span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setShowDiagnosticsOverlay((v) => !v)}
-                          title="Toggle stream diagnostics inspector"
-                          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1 ${
-                            showDiagnosticsOverlay
-                              ? "text-orange-200 bg-orange-500/30 border-orange-500/50"
-                              : "text-zinc-300 bg-white/10 hover:bg-white/20 border-white/10"
-                          }`}
-                        >
-                          <Activity size={11} />
-                          <span className="hidden sm:inline">Diagnostics</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleResyncStream}
-                          title="Re-sync and kickstart stream buffer"
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium text-orange-300 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/25 transition-colors flex items-center gap-1"
-                        >
-                          <RotateCw size={11} />
-                          <span>Re-sync</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDirectMediaInput(directMediaUrl || "");
-                            setDirectMediaTitleInput(directMediaTitle || "");
-                            setShowDirectMediaModal(true);
-                          }}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-200 bg-white/10 hover:bg-white/20 border border-white/10 transition-colors"
-                        >
-                          Change Stream
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            hasStoppedStreamRef.current = true;
-                            setDirectMediaUrl(null);
-                            setDirectMediaFallbackUrl(null);
-                            setDirectMediaTitle(null);
-                            void setWatchSessionDirectMediaAction(sessionId, null);
-                            void channelRef.current?.send({
-                              type: "broadcast",
-                              event: "theater:direct-media",
-                              payload: { url: null },
-                            });
-                            void channelRef.current?.track({
-                              userId,
-                              directMediaUrl: null,
-                              directMediaTitle: null,
-                            });
-                          }}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-colors"
-                        >
-                          Stop Stream
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Diagnostics Inspector Overlay */}
-                    {showDiagnosticsOverlay && (
-                      <div className="absolute top-16 right-3 z-40 max-w-sm w-full p-4 rounded-2xl bg-[#0c0e15]/95 backdrop-blur-md border border-white/15 text-xs text-zinc-300 shadow-2xl space-y-2.5 font-mono pointer-events-auto">
-                        <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                          <span className="font-semibold text-white flex items-center gap-1.5">
-                            <Activity size={13} className="text-orange-400" />
-                            Stream Diagnostics
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setShowDiagnosticsOverlay(false)}
-                            className="text-zinc-400 hover:text-white"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                        <div className="space-y-1.5 text-[11px]">
-                          <div className="flex justify-between">
-                            <span className="text-zinc-500">Engine:</span>
-                            <span className="text-orange-300 font-semibold uppercase">{networkPlayer.diagnostics.engine}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-zinc-500">Format:</span>
-                            <span className="text-zinc-200 uppercase">{networkPlayer.diagnostics.format}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-zinc-500">State:</span>
-                            <span className={
-                              networkPlayer.diagnostics.playerState === "PLAYING"
-                                ? "text-emerald-400 font-semibold"
-                                : networkPlayer.diagnostics.playerState === "ERROR"
-                                ? "text-rose-400 font-semibold"
-                                : "text-amber-400 font-semibold"
-                            }>
-                              {networkPlayer.diagnostics.playerState}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-zinc-500">Resolution:</span>
-                            <span className="text-zinc-200">
-                              {networkPlayer.diagnostics.videoWidth > 0
-                                ? `${networkPlayer.diagnostics.videoWidth} × ${networkPlayer.diagnostics.videoHeight}`
-                                : "Detecting…"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-zinc-500">Buffer Ahead:</span>
-                            <span className="text-zinc-200">
-                              {Math.max(0, networkPlayer.diagnostics.bufferedEnd - networkPlayer.diagnostics.currentTime)}s
-                            </span>
-                          </div>
-                          {networkPlayer.diagnostics.hlsMetrics && (
-                            <div className="flex justify-between">
-                              <span className="text-zinc-500">HLS Segments:</span>
-                              <span className="text-zinc-300">
-                                {networkPlayer.diagnostics.hlsMetrics.fragsLoaded} loaded / {networkPlayer.diagnostics.hlsMetrics.fragsBuffered} buffered
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex justify-between">
-                            <span className="text-zinc-500">Audio:</span>
-                            <span className={networkPlayer.diagnostics.isMuted ? "text-amber-400" : "text-emerald-400"}>
-                              {networkPlayer.diagnostics.isMuted ? "Muted (Autoplay policy)" : "Unmuted"}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-zinc-500">Last Event:</span>
-                            <span className="text-zinc-400 truncate max-w-[160px]">{networkPlayer.diagnostics.lastEvent}</span>
-                          </div>
-                          {networkPlayer.diagnostics.lastError && (
-                            <div className="flex justify-between text-rose-300/90 pt-1 border-t border-white/5">
-                              <span className="text-rose-400/80">Last Error:</span>
-                              <span className="truncate max-w-[150px]">
-                                {networkPlayer.diagnostics.lastError.details}
-                                {networkPlayer.diagnostics.lastError.httpStatus ? ` (${networkPlayer.diagnostics.lastError.httpStatus})` : ""}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Network Stream Error Overlay */}
-                    {networkPlayer.errorInfo && (
-                      <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/90 p-6 text-center">
-                        <div className="max-w-md w-full rounded-2xl border border-rose-500/30 bg-[#0d0f17] p-6 shadow-2xl space-y-4">
-                          <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto">
-                            <AlertTriangle size={24} />
-                          </div>
-                          <div>
-                            <h4 className="text-base font-semibold text-white">{networkPlayer.errorInfo.title}</h4>
-                            <p className="text-xs text-zinc-300 mt-1.5 leading-relaxed">
-                              {networkPlayer.errorInfo.message}
-                            </p>
-                            {networkPlayer.errorInfo.suggestedAction && (
-                              <p className="text-[11px] text-amber-300/90 mt-2 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 text-left leading-snug">
-                                <strong>Suggestion:</strong> {networkPlayer.errorInfo.suggestedAction}
-                              </p>
-                            )}
-                            {networkPlayer.errorInfo.technicalDetails && (
-                              <p className="text-[10px] text-zinc-500 font-mono mt-1.5 truncate">
-                                {networkPlayer.errorInfo.technicalDetails}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-                            {networkPlayer.errorInfo.canRetry && (
-                              <button
-                                type="button"
-                                onClick={() => networkPlayer.retry()}
-                                className="px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-1.5"
-                              >
-                                <RotateCw size={12} />
-                                <span>Retry Stream</span>
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDirectMediaInput(directMediaUrl || "");
-                                setDirectMediaTitleInput(directMediaTitle || "");
-                                setShowDirectMediaModal(true);
-                              }}
-                              className="px-3.5 py-2 rounded-full bg-white/10 hover:bg-white/20 text-zinc-200 text-xs font-semibold transition-all"
-                            >
-                              Change Stream
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setShowDiagnosticsOverlay((v) => !v)}
-                              className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-300 text-xs transition-all"
-                            >
-                              Diagnostics
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDirectMediaUrl(null);
-                                setDirectMediaTitle(null);
-                                void setWatchSessionDirectMediaAction(sessionId, null);
-                                void channelRef.current?.send({
-                                  type: "broadcast",
-                                  event: "theater:direct-media",
-                                  payload: { url: null },
-                                });
-                                void channelRef.current?.track({
-                                  userId,
-                                  directMediaUrl: null,
-                                  directMediaTitle: null,
-                                });
-                              }}
-                              className="px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 text-xs transition-all"
-                            >
-                              Dismiss
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()
-            )}
-
             {/* MOBILE TAP TO START VIDEO OVERLAY (When remote stream is ready but mobile browser requires user tap to play) */}
-            {!isHost && hasActiveStream && (!isMediaRendering || !isVideoActuallyPlaying) && !isCompanionMode && !directMediaUrl && (
+            {!isHost && hasActiveStream && (!isMediaRendering || !isVideoActuallyPlaying) && !isCompanionMode && (
               <div
                 onClick={async (e) => {
                   e.stopPropagation();
@@ -2579,7 +2033,7 @@ export function VirtualRoom({
             )}
 
             {/* DRM BLACK SCREEN DETECTED BANNER ON HOST (PC) */}
-            {isHost && isDrmBlackScreenDetected && !directMediaUrl && (
+            {isHost && isDrmBlackScreenDetected && (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-lg w-[94%] rounded-2xl border border-amber-500/40 bg-[#0d0f17]/95 p-4 shadow-2xl backdrop-blur-xl text-left space-y-2 pointer-events-auto">
                 <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
                   <AlertCircle size={16} className="text-amber-400 shrink-0" />
@@ -2592,22 +2046,12 @@ export function VirtualRoom({
                   <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-mono text-[10px] border border-amber-500/20">
                     Fix: Chrome Settings &rarr; System &rarr; Turn OFF graphics acceleration &rarr; Restart Chrome
                   </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowDirectMediaModal(true);
-                    }}
-                    className="text-xs font-semibold text-rose-300 hover:text-white underline ml-auto"
-                  >
-                    Play Direct Movie Link &rarr;
-                  </button>
                 </div>
               </div>
             )}
 
-            {/* DRM PROTECTION NOTICE ON VIEWER (MOBILE) */}
-            {!isHost && (isDrmBlackScreenDetected || partnerDrmReported) && !directMediaUrl && (
+            {/* DRM PROTECTION NOTICE ON VIEWER */}
+            {!isHost && (isDrmBlackScreenDetected || partnerDrmReported) && (
               <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 max-w-md w-[94%] rounded-2xl border border-amber-500/40 bg-[#0d0f17]/95 p-4 shadow-2xl backdrop-blur-xl text-left space-y-2 pointer-events-auto">
                 <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
                   <AlertCircle size={16} className="text-amber-400 shrink-0" />
@@ -2627,22 +2071,12 @@ export function VirtualRoom({
                   >
                     Switch to Companion Mode
                   </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowDirectMediaModal(true);
-                    }}
-                    className="text-xs text-zinc-300 hover:text-white underline ml-1"
-                  >
-                    Direct Movie Player
-                  </button>
                 </div>
               </div>
             )}
 
             {/* C. HOST SETUP GUIDE (When no screen capture is active) */}
-            {isHost && !isHostCapturing && !isCompanionMode && !directMediaUrl && (
+            {isHost && !isHostCapturing && !isCompanionMode && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-gradient-to-b from-[#090b11]/90 via-[#07080d]/95 to-black backdrop-blur-md overflow-y-auto">
                 <div className="max-w-lg w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15]/90 p-6 sm:p-8 shadow-2xl space-y-5 sm:space-y-6 my-auto">
                   <div
@@ -2665,6 +2099,20 @@ export function VirtualRoom({
                     <p className="text-xs text-zinc-400 font-light mt-2 leading-relaxed">
                       To watch together, launch the movie in a separate browser tab, then share
                       that tab with your partner. Audio & video stream privately via WebRTC.
+                    </p>
+                  </div>
+
+                  {/* PROMINENT PC-TO-PC STREAMING GUIDANCE BANNER */}
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 space-y-1.5 text-left">
+                    <div className="flex items-center gap-2 text-emerald-300 font-semibold text-xs">
+                      <Laptop size={15} className="text-emerald-400 shrink-0" />
+                      <span>PC-to-PC Streaming Strongly Recommended</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-300 leading-relaxed">
+                      CoupleConnect screen sharing is built for <strong>PC-to-PC (Laptop/Desktop to Laptop/Desktop)</strong> streaming. Both partners watching on a PC browser (Chrome, Edge, or Brave) delivers full 1080p video, crisp synchronized tab audio, and rock-solid stability.
+                    </p>
+                    <p className="text-[10px] text-zinc-400 leading-relaxed">
+                      ⚠️ <em>Mobile phone limitation:</em> Mobile browsers (iOS Safari, Android Chrome) block tab screen sharing, aggressively sleep background tabs, and drop WebRTC streams. For the best movie night experience, both partners should join on a PC or laptop.
                     </p>
                   </div>
 
@@ -2693,7 +2141,7 @@ export function VirtualRoom({
                     <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 space-y-1 col-span-1 sm:col-span-2 text-left">
                       <span className="text-[10px] font-mono text-sky-400 font-bold">1080P HD QUALITY TIP</span>
                       <p className="text-[11px] text-zinc-300 leading-relaxed">
-                        Tip: Keep the movie in its own maximized window. Do NOT click minimize (_) on it. Minimizing the movie window forces Chrome to shrink capture to a 226x108 blurry thumbnail. Keep the movie window open behind this browser window. For YouTube, use Direct Movie Sync below for native 1080p quality!
+                        Keep the movie in its own maximized window. Do NOT click minimize (_) on it. Minimizing the movie window forces Chrome to shrink capture to a blurry thumbnail. Keep the movie window open behind this browser window.
                       </p>
                     </div>
                   </div>
@@ -2733,18 +2181,6 @@ export function VirtualRoom({
                     >
                       <Share2 size={13} /> 2. Share Movie Tab
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDirectMediaInput(directMediaUrl || "");
-                        setDirectMediaTitleInput(directMediaTitle || "");
-                        setShowDirectMediaModal(true);
-                      }}
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-xs font-semibold text-zinc-200 bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.1] transition-all active:scale-95"
-                    >
-                      <Globe size={13} className="text-orange-400" /> Direct Sync (Network Stream) 🎬
-                    </button>
                   </div>
 
                   {/* Window Guidance Instruction */}
@@ -2774,7 +2210,7 @@ export function VirtualRoom({
             )}
 
             {/* D. VIEWER WAITING LOUNGE (When viewer is waiting for remote stream to establish) */}
-            {!isHost && !hasActiveStream && !isCompanionMode && roomState !== "STREAM_ENDED" && !directMediaUrl && (
+            {!isHost && !hasActiveStream && !isCompanionMode && roomState !== "STREAM_ENDED" && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-gradient-to-b from-[#090b11]/90 via-[#07080d]/95 to-black backdrop-blur-md overflow-y-auto">
                 <div className="max-w-md w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15]/90 p-6 sm:p-8 shadow-2xl space-y-5 sm:space-y-6 my-auto">
                   <div className="relative w-16 h-24 sm:w-20 sm:h-28 rounded-xl overflow-hidden mx-auto border border-white/[0.1] shadow-2xl">
@@ -2799,6 +2235,20 @@ export function VirtualRoom({
                     </p>
                   </div>
 
+                  {/* PROMINENT PC-TO-PC RECOMMENDATION IN VIEWER LOUNGE */}
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-1 text-left">
+                    <div className="flex items-center gap-1.5 text-emerald-300 font-semibold text-xs">
+                      <Laptop size={14} className="text-emerald-400 shrink-0" />
+                      <span>Best Quality: Watch PC to PC</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-300 leading-relaxed">
+                      Watching together works best when both partners are on a PC or laptop. Mobile phone browsers frequently sleep WebRTC connections when backgrounded.
+                    </p>
+                    <p className="text-[10px] text-zinc-400 leading-relaxed">
+                      If you experience disconnections or frozen video on your phone, join from a PC or laptop, or switch to Companion Mode below.
+                    </p>
+                  </div>
+
                   <div className="flex items-center justify-center gap-2 text-xs text-zinc-300 bg-white/[0.03] border border-white/[0.06] rounded-full py-2 px-4 w-fit mx-auto">
                     <RefreshCw size={12} className="animate-spin text-rose-400" />
                     <span>
@@ -2818,17 +2268,6 @@ export function VirtualRoom({
                       <Sparkles size={12} />
                       <span>{roomState === "LIVE" || roomState === "STREAM_CONNECTING" ? "Tap to Connect / Refresh Stream ⚡" : "Partner started? Request stream now ⚡"}</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDirectMediaInput(directMediaUrl || "");
-                        setDirectMediaTitleInput(directMediaTitle || "");
-                        setShowDirectMediaModal(true);
-                      }}
-                      className="text-[11px] text-orange-300 hover:text-orange-200 underline transition-colors"
-                    >
-                      Or open network stream directly 🎬
-                    </button>
                   </div>
 
                   <div className="pt-2 border-t border-white/[0.06]">
@@ -2845,7 +2284,7 @@ export function VirtualRoom({
             )}
 
             {/* E. STREAM ENDED OVERLAY */}
-            {roomState === "STREAM_ENDED" && !isCompanionMode && !directMediaUrl && (
+            {roomState === "STREAM_ENDED" && !isCompanionMode && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center bg-black/90 backdrop-blur-md">
                 <div className="max-w-md w-full rounded-2xl border border-white/[0.08] bg-[#0c0e15] p-8 shadow-2xl space-y-5">
                   <Film size={32} className="text-zinc-500 mx-auto" />
@@ -2878,7 +2317,7 @@ export function VirtualRoom({
             )}
 
             {/* F. COMPANION MODE (Optimized for Mobile & DRM OTTs) */}
-            {isCompanionMode && !directMediaUrl && (
+            {isCompanionMode && (
               <div className="relative inset-0 flex-1 w-full h-full flex flex-col items-center justify-center p-4 sm:p-6 overflow-hidden">
                 {/* Cinematic Ambient Backdrop */}
                 <div
@@ -3283,26 +2722,6 @@ export function VirtualRoom({
                   </button>
                 )}
 
-                {/* Direct Sync / Network Stream Pill */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDirectMediaInput(directMediaUrl || "");
-                    setDirectMediaTitleInput(directMediaTitle || "");
-                    setShowDirectMediaModal(true);
-                  }}
-                  className={`min-h-[44px] px-3.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-all active:scale-95 shrink-0 ${
-                    directMediaUrl
-                      ? "bg-orange-500/20 text-orange-300 border-orange-500/40 shadow-sm"
-                      : "bg-white/[0.04] text-zinc-300 border-white/[0.08] hover:bg-white/[0.08]"
-                  }`}
-                  title="Direct Sync — Open Network Stream"
-                  aria-label="Direct Sync — Open Network Stream"
-                >
-                  <Globe size={13} className={directMediaUrl ? "text-orange-400" : ""} />
-                  <span>{directMediaUrl ? "Network Stream Active" : "Network Stream"}</span>
-                </button>
-
                 {/* OTT Native App Deep Link */}
                 <a
                   href={nativeAppDeepLink}
@@ -3691,246 +3110,7 @@ export function VirtualRoom({
         )}
       </AnimatePresence>
 
-      {/* DIRECT SYNCHRONIZED NETWORK STREAM MODAL (VLC-STYLE) */}
-      <AnimatePresence>
-        {showDirectMediaModal && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="max-w-lg w-full rounded-3xl border border-white/[0.12] bg-[#0c0e15] p-5 sm:p-6 shadow-2xl space-y-4 text-left max-h-[90vh] overflow-y-auto"
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-orange-500/20 border border-orange-500/40 text-orange-400 flex items-center justify-center shadow-lg shadow-orange-500/20">
-                    <Globe size={18} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm sm:text-base font-semibold text-white tracking-wide">
-                      Direct Sync &bull; Open Network Stream
-                    </h3>
-                    <p className="text-[11px] text-zinc-400">
-                      VLC-style direct media playback synchronized for both partners
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowDirectMediaModal(false)}
-                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
 
-              {/* Protocol Badges */}
-              <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
-                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
-                  Direct MP4
-                </span>
-                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
-                  WebM
-                </span>
-                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
-                  HLS (.m3u8)
-                </span>
-                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
-                  MPEG-DASH (.mpd)
-                </span>
-                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.1] text-zinc-300">
-                  YouTube
-                </span>
-              </div>
-
-              {/* Direct Browser Playback Notice */}
-              <div className="flex items-center justify-between p-3 rounded-2xl bg-orange-500/10 border border-orange-500/20">
-                <div className="space-y-0.5 pr-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-orange-200">
-                    <Sparkles size={13} className="text-orange-400" />
-                    <span>Direct Browser Stream Engine</span>
-                  </div>
-                  <p className="text-[10px] text-zinc-400 leading-tight">
-                    Direct browser-to-CDN streaming with synchronized play, pause, and seek for both partners.
-                  </p>
-                </div>
-                <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-                  DIRECT MODE
-                </span>
-              </div>
-
-              {/* URL Input with Paste action */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-mono uppercase tracking-wider text-amber-300/90 font-medium">
-                    Network Stream URL
-                  </label>
-                  <div className="flex items-center gap-2">
-                    {directMediaInput && (
-                      <button
-                        type="button"
-                        onClick={() => setDirectMediaInput("")}
-                        className="text-[10px] text-zinc-400 hover:text-zinc-200"
-                      >
-                        Clear
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          const text = await navigator.clipboard.readText();
-                          if (text) setDirectMediaInput(text.trim());
-                        } catch {
-                          /* ignore clipboard permission errors */
-                        }
-                      }}
-                      className="text-[10px] text-orange-400 hover:text-orange-300 font-semibold"
-                    >
-                      Paste from clipboard
-                    </button>
-                  </div>
-                </div>
-                <div className="relative">
-                  <input
-                    type="url"
-                    placeholder="https://example.com/movie.mp4, .m3u8, .mpd, or YouTube URL"
-                    value={directMediaInput}
-                    onChange={(e) => setDirectMediaInput(e.target.value)}
-                    className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 font-mono transition-colors"
-                  />
-                </div>
-
-                {/* Real-time URL validation feedback */}
-                {directMediaInput && (() => {
-                  const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
-                  const validation = validateStreamUrl(directMediaInput, isHttps);
-                  return (
-                    <div className="mt-1.5 space-y-1">
-                      {validation.isValid && (
-                        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-mono">
-                          <CheckCircle2 size={12} />
-                          <span>Supported {validation.format.toUpperCase()} stream detected</span>
-                        </div>
-                      )}
-                      {!validation.isValid && validation.unsupportedReason && (
-                        <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 leading-relaxed">
-                          <p className="font-semibold flex items-center gap-1">
-                            <AlertTriangle size={12} className="text-amber-400" />
-                            <span>Compatibility Notice</span>
-                          </p>
-                          <p className="mt-0.5 text-zinc-300 text-[10px]">{validation.unsupportedReason}</p>
-                          {validation.suggestedAction && (
-                            <p className="mt-1 text-amber-200 text-[10px] font-medium">{validation.suggestedAction}</p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Stream Title Input */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
-                  Stream Title (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Tears of Steel (1080p)"
-                  value={directMediaTitleInput}
-                  onChange={(e) => setDirectMediaTitleInput(e.target.value)}
-                  className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 transition-colors"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/[0.08]">
-                {directMediaUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      hasStoppedStreamRef.current = true;
-                      setDirectMediaUrl(null);
-                      setDirectMediaFallbackUrl(null);
-                      setDirectMediaTitle(null);
-                      setShowDirectMediaModal(false);
-                      void setWatchSessionDirectMediaAction(sessionId, null);
-                      void channelRef.current?.send({
-                        type: "broadcast",
-                        event: "theater:direct-media",
-                        payload: { url: null },
-                      });
-                      void channelRef.current?.track({
-                        userId,
-                        directMediaUrl: null,
-                        directMediaTitle: null,
-                      });
-                    }}
-                    className="px-3.5 py-2 text-xs font-medium text-rose-300 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-full transition-colors"
-                  >
-                    Stop Network Stream
-                  </button>
-                ) : (
-                  <div />
-                )}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowDirectMediaModal(false)}
-                    className="px-4 py-2 text-xs font-medium text-zinc-400 hover:text-white"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const raw = directMediaInput.trim();
-                      if (!raw) return;
-                      const resolved = resolveStreamUrl(raw);
-                      const derivedTitle =
-                        directMediaTitleInput.trim() ||
-                        resolved.derivedTitle ||
-                        "Network Stream";
-
-                      hasStoppedStreamRef.current = false;
-                      setDirectMediaUrl(resolved.url);
-                      setDirectMediaFallbackUrl(resolved.fallbackUrl || null);
-                      setDirectMediaTitle(derivedTitle);
-                      setShowDirectMediaModal(false);
-
-                      // Persist original input to database so partner joins and page reloads never revert to setup screen
-                      void setWatchSessionDirectMediaAction(sessionId, raw, derivedTitle);
-
-                      void channelRef.current?.send({
-                        type: "broadcast",
-                        event: "theater:direct-media",
-                        payload: {
-                          url: resolved.url,
-                          originalUrl: raw,
-                          fallbackUrl: resolved.fallbackUrl || null,
-                          title: derivedTitle,
-                        },
-                      });
-
-                      void channelRef.current?.track({
-                        userId,
-                        directMediaUrl: resolved.url,
-                        directMediaTitle: derivedTitle,
-                      });
-                    }}
-                    disabled={!directMediaInput.trim()}
-                    className="rounded-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 px-5 py-2 text-xs font-semibold text-white transition-all shadow-md shadow-orange-600/30 active:scale-95 flex items-center gap-1.5"
-                  >
-                    <Globe size={13} />
-                    <span>Open Network Stream 🎬</span>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* WebRTC Media Pipeline Diagnostics Modal */}
       <WebRTCDiagnosticInspector

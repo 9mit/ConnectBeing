@@ -16,6 +16,8 @@ import {
   ArrowRightLeft,
   Radio,
   Network,
+  Laptop,
+  Smartphone,
 } from "lucide-react";
 import type { WebRTCDiagnosticData, FailureMatrixCase } from "@/features/together/webrtc/useTheaterWebRTC";
 
@@ -342,7 +344,7 @@ export function WebRTCDiagnosticInspector({
                 )}
               </div>
               <p className="text-[10px] text-zinc-400 font-mono">
-                Role: <span className="text-white font-bold">{isHost ? "Desktop Host" : "Mobile Viewer"}</span> | PC ID: #{localDiag?.pcId || 1}
+                Role: <span className="text-white font-bold">{isHost ? "Theater Host" : "Theater Viewer"}</span> | PC ID: #{localDiag?.pcId || 1}
               </p>
             </div>
           </div>
@@ -358,6 +360,26 @@ export function WebRTCDiagnosticInspector({
 
         {/* Content body */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs">
+          {/* PC-to-PC Architecture Stability Advisory */}
+          <div className="p-3 rounded-xl border border-sky-500/20 bg-sky-950/20 flex items-start gap-3 text-sky-200">
+            <div className="w-8 h-8 rounded-lg bg-sky-500/20 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0 mt-0.5">
+              <Laptop size={16} />
+            </div>
+            <div className="space-y-1 text-[11px] leading-relaxed">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-white tracking-wide">
+                  Optimal Architecture: PC-to-PC Streaming
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono">
+                  PROVEN STABLE
+                </span>
+              </div>
+              <p className="text-zinc-300">
+                WebRTC screen & tab streaming operates with complete reliability when both Host and Viewer connect from desktop or laptop browsers (Chrome, Edge, Brave). Mobile browsers throttle background WebRTC connections and sleep video tracks. For mobile devices, Companion Mode offers the most dependable watch experience.
+              </p>
+            </div>
+          </div>
+
           {/* Failure Matrix Banner */}
           <div className={`p-3.5 rounded-xl border flex items-start gap-3 ${badge.bg}`}>
             <div className="shrink-0 mt-0.5">{badge.icon}</div>

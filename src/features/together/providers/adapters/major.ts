@@ -258,28 +258,3 @@ export class YouTubeProvider extends BaseStreamingProvider {
   }
 }
 
-export class WebVideoProvider extends BaseStreamingProvider {
-  readonly id = "webvideo";
-  readonly name = "Direct Sync (Network Stream)";
-  readonly brandColor = "#F97316";
-  readonly primaryRegions = ["GLOBAL"];
-  readonly capabilityLevel: CapabilityLevel = 1;
-
-  getCapabilities(): ProviderCapabilities {
-    return {
-      deepLink: true,
-      browserPlayback: true,
-      extensionControl: false,
-      playbackSynchronization: true,
-      currentTimeDetection: true,
-      playPauseControl: true,
-      seekControl: true,
-      episodeDetection: false,
-      metadataLookup: false,
-    };
-  }
-
-  async generateLaunchUrl(content: ContentReference): Promise<string> {
-    return content.customUrl || content.contentId || "";
-  }
-}

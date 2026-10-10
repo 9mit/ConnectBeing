@@ -9,7 +9,6 @@ import {
   Zee5Provider,
   CrunchyrollProvider,
   YouTubeProvider,
-  WebVideoProvider,
 } from "./adapters/major";
 import {
   MxPlayerProvider,
@@ -53,7 +52,6 @@ export class StreamingProviderRegistry {
     this.register(new Zee5Provider());
     this.register(new CrunchyrollProvider());
     this.register(new YouTubeProvider());
-    this.register(new WebVideoProvider());
 
     // Register Regional & Aggregator OTTs
     this.register(new MxPlayerProvider());
