@@ -1,7 +1,5 @@
 "use server";
 
-import { count, eq, or } from "drizzle-orm";
-
 import { db } from "@/db";
 import {
   calendarEvents,
@@ -12,8 +10,10 @@ import {
   movieMemories,
   quizResponses,
   timeCapsules,
+  userDevices,
   users,
 } from "@/db/schema";
+import { and, count, eq, isNull, or } from "drizzle-orm";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { isCoupleVerified } from "@/lib/couple-verification";
@@ -40,18 +40,27 @@ export async function getPrivacyStatusAction(): Promise<
     const partnerId =
       couple.userAId === user.id ? couple.userBId : couple.userAId;
 
-    const [partnerUser, memCountRows, moodCountRows] = await Promise.all([
-      db.query.users.findFirst({
-        where: eq(users.id, partnerId),
-      }),
-      db.select({ value: count() }).from(memories).where(eq(memories.coupleId, couple.id)),
-      db.select({ value: count() }).from(moods).where(eq(moods.coupleId, couple.id)),
-    ]);
+    const [partnerUser, memCountRows, moodCountRows, myDevs, partnerDevs] =
+      await Promise.all([
+        db.query.users.findFirst({
+          where: eq(users.id, partnerId),
+        }),
+        db.select({ value: count() }).from(memories).where(eq(memories.coupleId, couple.id)),
+        db.select({ value: count() }).from(moods).where(eq(moods.coupleId, couple.id)),
+        db.select({ value: count() }).from(userDevices).where(
+          and(eq(userDevices.userId, user.id), isNull(userDevices.revokedAt)),
+        ),
+        db.select({ value: count() }).from(userDevices).where(
+          and(eq(userDevices.userId, partnerId), isNull(userDevices.revokedAt)),
+        ),
+      ]);
 
     const isVerified = isCoupleVerified(couple);
+    const hasDevices = (myDevs[0]?.value ?? 0) > 0 && (partnerDevs[0]?.value ?? 0) > 0;
+    const hasLegacy = Boolean(user.e2eePublicKey && partnerUser?.e2eePublicKey);
 
     return ok({
-      e2eeEnabled: !!(user.e2eePublicKey && partnerUser?.e2eePublicKey),
+      e2eeEnabled: hasDevices || hasLegacy,
       myPublicKey: user.e2eePublicKey,
       partnerPublicKey: partnerUser?.e2eePublicKey ?? null,
       verifiedUntil: couple.verifiedUntil?.toISOString() ?? null,

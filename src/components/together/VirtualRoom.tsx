@@ -49,6 +49,14 @@ import {
   joinWatchSessionAction,
   sendWatchMessageAction,
 } from "@/actions/together";
+import { getPartnerE2eePublicKeyAction } from "@/actions/e2ee";
+import {
+  decryptText,
+  deriveSharedAesKey,
+  encryptText,
+  isE2eeCiphertext,
+  loadOrCreatePrivateKey,
+} from "@/lib/crypto/e2ee";
 import { authorizeRealtimeTopicAction } from "@/actions/realtime-auth";
 import { createClient } from "@/lib/supabase/client";
 import { getProvider } from "@/features/together/providers";
@@ -257,19 +265,63 @@ export function VirtualRoom({
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
   const reactionTimersRef = useRef<number[]>([]);
   const positionTimerRef = useRef<number | null>(null);
+  const aesKeyRef = useRef<CryptoKey | null>(null);
+  const [e2eeReady, setE2eeReady] = useState(false);
 
   // Default cinematic backdrop if no poster provided
   const backdrop =
     posterUrl ||
     "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1600&auto=format&fit=crop&q=80";
 
-  // Join session participant record & load initial chat
+  const decryptWhisper = useCallback(async (content: string): Promise<string> => {
+    if (!isE2eeCiphertext(content) || !aesKeyRef.current) return content;
+    try {
+      return await decryptText(aesKeyRef.current, content);
+    } catch {
+      return "🔒 Encrypted whisper";
+    }
+  }, []);
+
+  // Initialize E2EE key for whispers
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const pair = await loadOrCreatePrivateKey(userId);
+        const partner = await getPartnerE2eePublicKeyAction();
+        if (partner.ok && partner.data.publicKey && coupleId) {
+          const { importPublicKey } = await import("@/lib/crypto/e2ee");
+          const partnerKey = await importPublicKey(partner.data.publicKey);
+          const key = await deriveSharedAesKey(pair.privateKey, partnerKey, coupleId);
+          if (active) {
+            aesKeyRef.current = key;
+            setE2eeReady(true);
+          }
+        }
+      } catch {
+        if (active) setE2eeReady(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [userId, coupleId]);
+
+  // Join session participant record & load initial chat (decrypting where needed)
   useEffect(() => {
     void joinWatchSessionAction(sessionId);
-    void getWatchMessagesAction(sessionId).then((res) => {
-      if (res.ok) setMessages(res.data);
+    void getWatchMessagesAction(sessionId).then(async (res) => {
+      if (res.ok) {
+        const decrypted = await Promise.all(
+          res.data.map(async (m) => ({
+            ...m,
+            content: await decryptWhisper(m.content),
+          })),
+        );
+        setMessages(decrypted);
+      }
     });
-  }, [sessionId]);
+  }, [sessionId, decryptWhisper, e2eeReady]);
 
   // Attach local media stream to local video element (Host - visual preview only, permanently muted)
   // and attach real-time resize listener to immediately reflect host window minimize/maximize
@@ -845,11 +897,16 @@ export function VirtualRoom({
       .on("broadcast", { event: "theater:drm-detected" }, ({ payload }: { payload: any }) => {
         setPartnerDrmReported(Boolean(payload?.isBlack));
       })
-      .on("broadcast", { event: "theater:message" }, ({ payload }: { payload: any }) => {
+      .on("broadcast", { event: "theater:message" }, async ({ payload }: { payload: any }) => {
         if (!payload || payload.userId === userId) return;
+        const decryptedContent = await decryptWhisper(payload.content);
+        const resolvedMsg: WatchMsg = {
+          ...payload,
+          content: decryptedContent,
+        };
         setMessages((prev) => {
-          if (prev.some((m) => m.id === payload.id)) return prev;
-          return [...prev, payload];
+          if (prev.some((m) => m.id === resolvedMsg.id)) return prev;
+          return [...prev, resolvedMsg];
         });
         if (!chatOpen) {
           setUnreadCount((c) => c + 1);
@@ -929,7 +986,7 @@ export function VirtualRoom({
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [chatOpen, sessionId, userId]);
+  }, [chatOpen, sessionId, userId, decryptWhisper]);
 
   // Fullscreen change listener
   useEffect(() => {
@@ -990,25 +1047,32 @@ export function VirtualRoom({
     // 1. Immediate optimistic update locally
     setMessages((prev) => [...prev, msg]);
 
-    // 2. Realtime broadcast directly to partner over websocket
-    void channelRef.current?.send({
-      type: "broadcast",
-      event: "theater:message",
-      payload: msg,
-    });
+    // 2. Encrypt whisper and broadcast/persist in background
+    void (async () => {
+      const cipher = aesKeyRef.current
+        ? await encryptText(aesKeyRef.current, content)
+        : content;
 
-    // 3. Persist to database in background
-    void sendWatchMessageAction({
-      sessionId,
-      content,
-      playbackPosition: pos,
-    }).then((res) => {
-      if (res.ok && res.data.id) {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? { ...m, id: res.data.id } : m)),
-        );
-      }
-    });
+      // Broadcast ciphertext to partner over websocket
+      void channelRef.current?.send({
+        type: "broadcast",
+        event: "theater:message",
+        payload: { ...msg, content: cipher },
+      });
+
+      // Persist ciphertext to database
+      void sendWatchMessageAction({
+        sessionId,
+        content: cipher,
+        playbackPosition: pos,
+      }).then((res) => {
+        if (res.ok && res.data.id) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === tempId ? { ...m, id: res.data.id } : m)),
+          );
+        }
+      });
+    })();
   };
 
   const providerSearchUrl = useMemo(() => {

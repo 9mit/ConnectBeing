@@ -205,6 +205,68 @@ export const onboardingProfiles = pgTable("onboarding_profiles", {
 });
 
 // ---------------------------------------------------------------------------
+// user_devices — Multi-device E2EE public keys & device registration
+// ---------------------------------------------------------------------------
+
+export const userDevices = pgTable(
+  "user_devices",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    deviceName: text("device_name").notNull(),
+    publicKey: text("public_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("user_devices_user_id_idx").on(table.userId),
+    uniqueIndex("user_devices_user_device_uidx").on(
+      table.userId,
+      table.deviceId,
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// user_key_escrow — Client-side encrypted private key backup (Zero-Knowledge)
+// The server cannot decrypt this: key derivation happens on client with PBKDF2/passphrase
+// ---------------------------------------------------------------------------
+
+export const userKeyEscrow = pgTable(
+  "user_key_escrow",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceId: text("device_id").notNull(),
+    encryptedKeyPackage: text("encrypted_key_package").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("user_key_escrow_user_id_idx").on(table.userId),
+    uniqueIndex("user_key_escrow_user_device_uidx").on(
+      table.userId,
+      table.deviceId,
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // invite_tokens — store SHA-256(token) only; raw token never persisted
 // ---------------------------------------------------------------------------
 
@@ -1190,6 +1252,22 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     fields: [users.id],
     references: [subscriptions.userId],
   }),
+  devices: many(userDevices),
+  keyEscrows: many(userKeyEscrow),
+}));
+
+export const userDevicesRelations = relations(userDevices, ({ one }) => ({
+  user: one(users, {
+    fields: [userDevices.userId],
+    references: [users.id],
+  }),
+}));
+
+export const userKeyEscrowRelations = relations(userKeyEscrow, ({ one }) => ({
+  user: one(users, {
+    fields: [userKeyEscrow.userId],
+    references: [users.id],
+  }),
 }));
 
 export const onboardingProfilesRelations = relations(
@@ -1574,3 +1652,9 @@ export type NewCoupleMember = typeof coupleMembers.$inferInsert;
 
 export type DoodleCanvas = typeof doodleCanvases.$inferSelect;
 export type NewDoodleCanvas = typeof doodleCanvases.$inferInsert;
+
+export type UserDevice = typeof userDevices.$inferSelect;
+export type NewUserDevice = typeof userDevices.$inferInsert;
+
+export type UserKeyEscrow = typeof userKeyEscrow.$inferSelect;
+export type NewUserKeyEscrow = typeof userKeyEscrow.$inferInsert;

@@ -41,12 +41,18 @@ function assertCoupleStorageKey(
 
 const presignSchema = z.object({
   kind: z.enum(["ephemeral", "memory"]),
-  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  mimeType: z.enum([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/octet-stream",
+  ]),
 });
 
 function extForMime(mime: string): string {
   if (mime === "image/png") return "png";
   if (mime === "image/webp") return "webp";
+  if (mime === "application/octet-stream") return "enc";
   return "jpg";
 }
 
@@ -145,21 +151,27 @@ export async function confirmEphemeralUploadAction(
       message: "Too many ephemeral confirmations. Try again later.",
     });
 
-    const bytes = await downloadStorageObject(parsed.storageKey);
-    const moderation = await getModerationProvider().checkImage(
-      bytes,
-      parsed.mimeType,
-    );
+    const isEncrypted =
+      parsed.encrypted || parsed.mimeType === "application/octet-stream";
 
-    if (!moderation.safe) {
-      await removeStorageObject(parsed.storageKey);
-      cleanupKey = undefined;
-      throw new AppError(
-        "MODERATION_REJECTED",
-        "Image rejected by content moderation.",
-        422,
-        { reasonCode: moderation.reasonCode ?? "UNSAFE_CONTENT" },
+    if (!isEncrypted) {
+      // Plaintext legacy fallback: run server-side moderation
+      const bytes = await downloadStorageObject(parsed.storageKey);
+      const moderation = await getModerationProvider().checkImage(
+        bytes,
+        parsed.mimeType,
       );
+
+      if (!moderation.safe) {
+        await removeStorageObject(parsed.storageKey);
+        cleanupKey = undefined;
+        throw new AppError(
+          "MODERATION_REJECTED",
+          "Image rejected by content moderation.",
+          422,
+          { reasonCode: moderation.reasonCode ?? "UNSAFE_CONTENT" },
+        );
+      }
     }
 
     const mediaId = createId();

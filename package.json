@@ -9,6 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit && next lint",
+    "test:e2ee": "tsx scripts/e2ee_security_verification.mjs",
     "db:audit": "node scripts/adversarial_audit.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

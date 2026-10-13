@@ -133,11 +133,6 @@ export async function sendMessageAction(
       where: eq(onboardingProfiles.userId, user.id),
     });
     const senderName = profile?.name?.trim() || "Your partner";
-    const preview = parsed.content
-      ? parsed.content.length > 50
-        ? parsed.content.slice(0, 47) + "..."
-        : parsed.content
-      : "Sent a message";
 
     if (partnerId) {
       await createPartnerNotification({
@@ -145,7 +140,7 @@ export async function sendMessageAction(
         senderUserId: user.id,
         partnerUserId: partnerId,
         title: "💬 New Message",
-        body: `${senderName}: "${preview}"`,
+        body: `${senderName} sent you a message`,
         kind: "general",
         link: "/chat",
       }).catch(() => {});

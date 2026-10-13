@@ -56,8 +56,8 @@ export const sendMessageSchema = z.object({
     .string()
     .trim()
     .min(1)
-    .max(8000)
-    .regex(/^e2ee:v1:/, "Messages must be end-to-end encrypted."),
+    .max(32768)
+    .regex(/^(?:e2ee:v2:|e2ee:v1:)/, "Messages must be end-to-end encrypted."),
   clientMsgId: z.string().trim().min(8).max(64).optional(),
 });
 
@@ -97,7 +97,13 @@ export const memoryMetaSchema = z.object({
 
 export const ephemeralConfirmSchema = z.object({
   storageKey: z.string().min(1).max(500),
-  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  mimeType: z.enum([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/octet-stream",
+  ]),
+  encrypted: z.boolean().optional(),
 });
 
 export const viewEphemeralSchema = z.object({
@@ -144,7 +150,13 @@ export const createWatchSessionSchema = z.object({
 
 export const watchSessionMessageSchema = z.object({
   sessionId: z.string().min(1),
-  content: z.string().trim().min(1).max(1000),
+  // Whispers in theater room must be end-to-end encrypted
+  content: z
+    .string()
+    .trim()
+    .min(1)
+    .max(32768)
+    .regex(/^(?:e2ee:v2:|e2ee:v1:)/, "Whispers must be end-to-end encrypted."),
   playbackPosition: z.number().int().min(0).nullish(),
 });
 

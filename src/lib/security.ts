@@ -41,9 +41,10 @@ export async function rateLimitOrThrow(params: {
 }
 
 export const E2EE_PREFIX = "e2ee:v1:";
+export const E2EE_V2_PREFIX = "e2ee:v2:";
 
 export function isE2eePayload(content: string): boolean {
-  return content.startsWith(E2EE_PREFIX);
+  return content.startsWith(E2EE_V2_PREFIX) || content.startsWith(E2EE_PREFIX);
 }
 
 /** Strict couple-scoped storage object path. */
@@ -56,7 +57,7 @@ export function isValidCoupleStorageKey(
   // Escape coupleId for regex safety even though pre-validated above (defense-in-depth)
   const escapedCoupleId = coupleId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(
-    `^${kind}/${escapedCoupleId}/[a-zA-Z0-9_-]+\\.(jpe?g|png|webp)$`,
+    `^${kind}/${escapedCoupleId}/[a-zA-Z0-9_-]+\\.(jpe?g|png|webp|bin|enc)$`,
     "i",
   );
   return pattern.test(storageKey);

@@ -65,8 +65,11 @@ export async function analyzeConversation(
     // Ciphertext length is still a useful activity proxy without decrypting.
     const len = m.content?.length ?? 0;
     totalLen += len;
-    if (m.content && approxEmojiCount(m.content) > 0) emojiHits += 1;
-    if (m.content?.includes("?")) questions += 1;
+    const isCipher = Boolean(m.content?.startsWith("e2ee:"));
+    if (!isCipher && m.content) {
+      if (approxEmojiCount(m.content) > 0) emojiHits += 1;
+      if (m.content.includes("?")) questions += 1;
+    }
     bySender.set(m.senderId, (bySender.get(m.senderId) ?? 0) + 1);
 
     if (gapAnchor) {
