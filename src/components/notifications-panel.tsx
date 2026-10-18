@@ -89,9 +89,11 @@ export function NotificationsPanel({
     };
     window.addEventListener("focus", handleFocus);
 
+    // Realtime events and window focus trigger immediate refreshes;
+    // this backup interval polls every 60s as a fallback.
     const interval = setInterval(() => {
       void loadData();
-    }, 12000);
+    }, 60000);
 
     return () => {
       window.removeEventListener("focus", handleFocus);

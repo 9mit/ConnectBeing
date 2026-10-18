@@ -398,6 +398,31 @@ export async function confirmMemoryUploadAction(
   }
 }
 
+async function batchSignStorageUrls(
+  keys: string[],
+  expiresIn = 3600,
+): Promise<Map<string, string>> {
+  const urlMap = new Map<string, string>();
+  if (keys.length === 0) return urlMap;
+
+  const admin = createAdminClient();
+  try {
+    const { data } = await admin.storage
+      .from(MEDIA_BUCKET)
+      .createSignedUrls(keys, expiresIn);
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        if (item?.path && item?.signedUrl) {
+          urlMap.set(item.path, item.signedUrl);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[media] batch createSignedUrls error:", err);
+  }
+  return urlMap;
+}
+
 export async function listMemoriesAction(): Promise<
   ActionResult<{
     memories: Array<{
@@ -417,21 +442,18 @@ export async function listMemoriesAction(): Promise<
       limit: 100,
     });
 
-    const admin = createAdminClient();
-    const mapped = await Promise.all(
-      rows.map(async (m) => {
-        const { data } = await admin.storage
-          .from(MEDIA_BUCKET)
-          .createSignedUrl(m.storageKey, 3600);
-        return {
-          id: m.id,
-          caption: m.caption,
-          takenAt: m.takenAt.toISOString(),
-          eventLabel: m.eventLabel,
-          url: data?.signedUrl ?? null,
-        };
-      }),
+    const urlMap = await batchSignStorageUrls(
+      rows.map((m) => m.storageKey),
+      3600,
     );
+
+    const mapped = rows.map((m) => ({
+      id: m.id,
+      caption: m.caption,
+      takenAt: m.takenAt.toISOString(),
+      eventLabel: m.eventLabel,
+      url: urlMap.get(m.storageKey) ?? null,
+    }));
 
     return ok({ memories: mapped });
   } catch (e) {
@@ -522,22 +544,19 @@ export async function listTimelineAction(): Promise<
       }),
     ]);
 
-    const admin = createAdminClient();
-    const photoItems = await Promise.all(
-      photos.map(async (m) => {
-        const { data } = await admin.storage
-          .from(MEDIA_BUCKET)
-          .createSignedUrl(m.storageKey, 3600);
-        return {
-          id: m.id,
-          kind: "photo" as const,
-          title: m.eventLabel || m.caption || "Photo memory",
-          at: m.takenAt.toISOString(),
-          subtitle: m.caption,
-          url: data?.signedUrl ?? null,
-        };
-      }),
+    const photoUrlMap = await batchSignStorageUrls(
+      photos.map((p) => p.storageKey),
+      3600,
     );
+
+    const photoItems = photos.map((m) => ({
+      id: m.id,
+      kind: "photo" as const,
+      title: m.eventLabel || m.caption || "Photo memory",
+      at: m.takenAt.toISOString(),
+      subtitle: m.caption,
+      url: photoUrlMap.get(m.storageKey) ?? null,
+    }));
 
     const movieItems = movies.map((m) => ({
       id: m.id,

@@ -267,12 +267,13 @@ export async function unlockTimeCapsuleAction(
   capsuleId: string,
 ): Promise<ActionResult<{ unlocked: boolean; message: string }>> {
   try {
+    const validCapsuleId = z.string().trim().min(1, "Capsule ID is required").max(128).parse(capsuleId);
     const { couple } = await requireActiveCouple();
     await requireCoupleVerified(couple);
 
     const capsule = await db.query.timeCapsules.findFirst({
       where: and(
-        eq(timeCapsules.id, capsuleId),
+        eq(timeCapsules.id, validCapsuleId),
         eq(timeCapsules.coupleId, couple.id),
       ),
     });
@@ -293,7 +294,7 @@ export async function unlockTimeCapsuleAction(
       await db
         .update(timeCapsules)
         .set({ isUnlocked: true, unlockedAt: new Date() })
-        .where(eq(timeCapsules.id, capsuleId));
+        .where(eq(timeCapsules.id, validCapsuleId));
     }
 
     return ok({ unlocked: true, message: capsule.message });

@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { achievements as achievementRows, userAchievements } from "@/db/schema";
@@ -58,12 +58,7 @@ export async function listAchievementsAction(): Promise<
     const unlocked = await db
       .select()
       .from(userAchievements)
-      .where(
-        and(
-          eq(userAchievements.coupleId, couple.id),
-          eq(userAchievements.userId, user.id),
-        ),
-      );
+      .where(eq(userAchievements.coupleId, couple.id));
 
     const byId = new Map(unlocked.map((u) => [u.achievementId, u]));
 

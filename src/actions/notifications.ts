@@ -126,12 +126,13 @@ export async function markNotificationReadAction(
     const { user, couple } = await requireActiveCouple();
 
     if (notificationId) {
+      const validId = z.string().trim().min(1).max(128).parse(notificationId);
       await db
         .update(inAppNotifications)
         .set({ read: true })
         .where(
           and(
-            eq(inAppNotifications.id, notificationId),
+            eq(inAppNotifications.id, validId),
             eq(inAppNotifications.userId, user.id),
             eq(inAppNotifications.coupleId, couple.id),
           ),

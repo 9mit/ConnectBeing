@@ -10,7 +10,6 @@ import { db } from "@/db";
 import { inviteTokens, onboardingProfiles } from "@/db/schema";
 import { getAuthenticatedUserContext } from "@/lib/auth";
 import { hashInviteToken } from "@/lib/crypto/invite-token";
-import { setPendingInviteCookie } from "@/lib/invite-cookie";
 import { redis } from "@/lib/redis";
 import { BRAND } from "@/lib/brand";
 
@@ -22,11 +21,6 @@ export default async function InviteTokenPage({
   params: { token: string };
 }) {
   const token = params.token;
-
-  // Set HTTP-only cookie so invite token survives auth transitions
-  if (/^[a-f0-9]{64}$/i.test(token)) {
-    setPendingInviteCookie(token);
-  }
 
   // Authoritative server-side identity & couple resolution
   const ctx = await getAuthenticatedUserContext();

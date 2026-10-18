@@ -41,7 +41,20 @@ export async function POST(request: NextRequest) {
   const email = parsed.data.email.toLowerCase();
 
   try {
+    const clientIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "anon";
+
     const { rateLimitOrThrow } = await import("@/lib/security");
+    if (clientIp !== "anon") {
+      await rateLimitOrThrow({
+        key: `auth:register:ip:${clientIp}`,
+        limit: 15,
+        windowSeconds: 60 * 15,
+        message: "Too many registrations from this network. Try again later.",
+      });
+    }
     await rateLimitOrThrow({
       key: `rl:register:${email}`,
       limit: 5,

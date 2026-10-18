@@ -160,6 +160,7 @@ export async function deleteCalendarEventAction(
   eventId: string,
 ): Promise<ActionResult<{ deleted: true }>> {
   try {
+    const validEventId = z.string().trim().min(1, "Event ID is required").max(128).parse(eventId);
     const { couple } = await requireActiveCouple();
     await requireCoupleVerified(couple);
 
@@ -167,7 +168,7 @@ export async function deleteCalendarEventAction(
       .delete(calendarEvents)
       .where(
         and(
-          eq(calendarEvents.id, eventId),
+          eq(calendarEvents.id, validEventId),
           eq(calendarEvents.coupleId, couple.id),
         ),
       )
@@ -194,12 +195,13 @@ export async function toggleCalendarEventAction(
   eventId: string,
 ): Promise<ActionResult<{ completed: boolean }>> {
   try {
+    const validEventId = z.string().trim().min(1, "Event ID is required").max(128).parse(eventId);
     const { couple } = await requireActiveCouple();
     await requireCoupleVerified(couple);
 
     const existing = await db.query.calendarEvents.findFirst({
       where: and(
-        eq(calendarEvents.id, eventId),
+        eq(calendarEvents.id, validEventId),
         eq(calendarEvents.coupleId, couple.id),
       ),
     });
@@ -214,7 +216,7 @@ export async function toggleCalendarEventAction(
       .set({ completed: nextCompleted })
       .where(
         and(
-          eq(calendarEvents.id, eventId),
+          eq(calendarEvents.id, validEventId),
           eq(calendarEvents.coupleId, couple.id),
         ),
       );

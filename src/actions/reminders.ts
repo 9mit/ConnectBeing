@@ -81,7 +81,7 @@ export async function createReminderAction(
         title: "⏰ Reminder Added",
         body: `${senderName} added a shared reminder: "${parsed.title}"`,
         kind: "general",
-        link: "/play",
+        link: "/challenges",
       }).catch(() => {});
 
       await db
@@ -93,14 +93,14 @@ export async function createReminderAction(
           title: "⏰ Reminder Created",
           body: `You set a shared reminder: "${parsed.title}"`,
           kind: "general",
-          link: "/play",
+          link: "/challenges",
           read: true,
         })
         .catch(() => {});
     }
 
     try {
-      revalidatePath("/play");
+      revalidatePath("/challenges");
       revalidatePath("/notifications");
     } catch {
       // ignore

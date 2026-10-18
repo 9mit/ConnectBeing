@@ -45,12 +45,45 @@ export function SettingsPanel({
     if (!initialSettings) {
       void loadSettings();
     }
+    if (typeof window !== "undefined") {
+      const storedSound = localStorage.getItem("madlove_sound_enabled");
+      if (storedSound !== null) setSoundEnabled(storedSound === "true");
+      const storedGlow = localStorage.getItem("madlove_ambient_glow");
+      if (storedGlow !== null) {
+        const isGlow = storedGlow === "true";
+        setAmbientGlow(isGlow);
+        if (!isGlow) document.documentElement.classList.add("glow-disabled");
+      }
+    }
   }, [initialSettings]);
+
+  function handleSoundToggle(val: boolean) {
+    setSoundEnabled(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("madlove_sound_enabled", String(val));
+    }
+  }
+
+  function handleGlowToggle(val: boolean) {
+    setAmbientGlow(val);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("madlove_ambient_glow", String(val));
+      if (val) {
+        document.documentElement.classList.remove("glow-disabled");
+      } else {
+        document.documentElement.classList.add("glow-disabled");
+      }
+    }
+  }
 
   function handleSave(e: React.FormEvent) {
     e.preventDefault();
     startTransition(async () => {
       setError(null);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("madlove_sound_enabled", String(soundEnabled));
+        localStorage.setItem("madlove_ambient_glow", String(ambientGlow));
+      }
       const res = await updateCoupleSettingsAction({
         theme: theme as "rose-dusk" | "midnight-violet" | "imperial-gold" | "celestial-sky",
         petName,
@@ -182,7 +215,7 @@ export function SettingsPanel({
               <input
                 type="checkbox"
                 checked={soundEnabled}
-                onChange={(e) => setSoundEnabled(e.target.checked)}
+                onChange={(e) => handleSoundToggle(e.target.checked)}
                 className="w-4 h-4 accent-amber-400"
               />
             </label>
@@ -195,7 +228,7 @@ export function SettingsPanel({
               <input
                 type="checkbox"
                 checked={ambientGlow}
-                onChange={(e) => setAmbientGlow(e.target.checked)}
+                onChange={(e) => handleGlowToggle(e.target.checked)}
                 className="w-4 h-4 accent-amber-400"
               />
             </label>

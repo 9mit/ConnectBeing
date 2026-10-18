@@ -42,8 +42,28 @@ export function LocationShare({
     null,
   );
   const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [fuzzyMode, setFuzzyMode] = useState(false);
+  const fuzzyModeRef = useRef(false);
   const uptimeRef = useRef(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("madlove_fuzzy_location");
+      if (stored === "true") {
+        setFuzzyMode(true);
+        fuzzyModeRef.current = true;
+      }
+    }
+  }, []);
+
+  const handleFuzzyToggle = (checked: boolean) => {
+    setFuzzyMode(checked);
+    fuzzyModeRef.current = checked;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("madlove_fuzzy_location", String(checked));
+    }
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -89,8 +109,12 @@ export function LocationShare({
       }
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
+          let lat = pos.coords.latitude;
+          let lng = pos.coords.longitude;
+          if (fuzzyModeRef.current) {
+            lat = Math.round(lat * 100) / 100;
+            lng = Math.round(lng * 100) / 100;
+          }
           setMyPos({ lat, lng });
           void channelRef.current?.send({
             type: "broadcast",
@@ -157,6 +181,25 @@ export function LocationShare({
           <Navigation className="w-4 h-4" />
           <span>{enabled ? "Stop Sharing" : "Share Live Location"}</span>
         </button>
+      </div>
+
+      {/* Privacy Mode Option */}
+      <div className="flex items-center justify-between px-5 py-3 rounded-2xl border border-white/[0.08] bg-purple-950/30 backdrop-blur-md">
+        <div className="flex items-center gap-3">
+          <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div>
+            <p className="text-xs font-semibold text-white">Approximate Area Privacy Mode</p>
+            <p className="text-[11px] text-slate-400">
+              Blurs exact coordinates to ~1km city precision to protect private addresses while preserving distance calculations.
+            </p>
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={fuzzyMode}
+          onChange={(e) => handleFuzzyToggle(e.target.checked)}
+          className="w-4 h-4 accent-amber-400 cursor-pointer ml-4"
+        />
       </div>
 
       {/* Distance Metric Card */}

@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { watchSessions } from "@/db/schema";
 import { getRoomCustomizationAction } from "@/actions/room";
 import { AppShell } from "@/components/app-shell";
-import { redirectPathForAuthError, requireActiveCouple } from "@/lib/auth";
+import { requireVerifiedCoupleOrRedirect } from "@/lib/auth";
 import { getProvider } from "@/features/together/providers";
 import { BRAND } from "@/lib/brand";
 
@@ -28,14 +28,7 @@ export default async function RoomPage({
 }: {
   params: { sessionId: string };
 }) {
-  let user, couple;
-  try {
-    const auth = await requireActiveCouple();
-    user = auth.user;
-    couple = auth.couple;
-  } catch (error) {
-    redirect(redirectPathForAuthError(error));
-  }
+  const { user, couple } = await requireVerifiedCoupleOrRedirect();
 
   const session = await db.query.watchSessions.findFirst({
     where: and(

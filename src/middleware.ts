@@ -7,7 +7,6 @@ const PUBLIC_PATHS = new Set([
   "/begin",
   "/login",
   "/register",
-  "/invite",
   "/forgot-password",
   "/update-password",
   "/privacy",
@@ -118,6 +117,20 @@ export async function middleware(request: NextRequest) {
       });
     }
     return redirectResponse;
+  }
+
+  // 5. Cache invite token in HTTP-only cookie during visit to survive registration/login
+  if (pathname.startsWith("/invite/")) {
+    const inviteToken = pathname.replace("/invite/", "").trim();
+    if (/^[a-f0-9]{64}$/i.test(inviteToken)) {
+      response.cookies.set("madlove_pending_invite", inviteToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 60 * 72,
+      });
+    }
   }
 
   return response;

@@ -1,14 +1,18 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { aiInsights } from "@/db/schema";
+import {
+  aiInsights,
+  memories,
+  movieMemories,
+  relationshipEvents,
+} from "@/db/schema";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { requireActiveCouple } from "@/lib/auth";
 import { createId } from "@/lib/ids";
 import { runRelationshipIntelligence } from "@/lib/rie";
-import { listTimelineAction } from "@/actions/media";
 
 export async function getInsightsAction(): Promise<
   ActionResult<{
@@ -194,6 +198,18 @@ export async function refreshInsightsAction(): Promise<
   }
 }
 
+const EVENT_TITLES: Record<string, string> = {
+  mood_logged: "Vibe Check Logged",
+  quiz_completed: "Daily Quiz Finished",
+  call_started: "Couple Call Started",
+  call_ended: "Couple Call Together",
+  watch_started: "Watch Party Started",
+  watch_ended: "Watch Party Finished",
+  challenge_completed: "Couple Quest Completed",
+  achievement_unlocked: "Milestone Unlocked",
+  memory_added: "Memory Saved to Vault",
+};
+
 export async function getRecentEventsAction(): Promise<
   ActionResult<{
     events: Array<{
@@ -207,19 +223,80 @@ export async function getRecentEventsAction(): Promise<
   }>
 > {
   try {
-    const timeline = await listTimelineAction();
-    if (!timeline.ok) {
-      return { ok: false, error: timeline.error };
+    const { couple } = await requireActiveCouple();
+    const [events, movies, photos] = await Promise.all([
+      db.query.relationshipEvents.findMany({
+        where: eq(relationshipEvents.coupleId, couple.id),
+        orderBy: [desc(relationshipEvents.createdAt)],
+        limit: 8,
+      }),
+      db.query.movieMemories.findMany({
+        where: eq(movieMemories.coupleId, couple.id),
+        orderBy: [desc(movieMemories.date)],
+        limit: 4,
+      }),
+      db.query.memories.findMany({
+        where: eq(memories.coupleId, couple.id),
+        orderBy: [desc(memories.takenAt)],
+        limit: 4,
+      }),
+    ]);
+
+    const items: Array<{
+      id: string;
+      kind: string;
+      title: string;
+      at: string;
+      subtitle: string | null;
+      url: string | null;
+      rawDate: Date;
+    }> = [];
+
+    for (const e of events) {
+      items.push({
+        id: e.id,
+        kind: "event",
+        title: EVENT_TITLES[e.eventType] ?? "Shared Moment",
+        at: e.createdAt.toISOString(),
+        subtitle:
+          (e.payload as Record<string, unknown> | null)?.capsuleTitle
+            ? String((e.payload as Record<string, unknown>).capsuleTitle)
+            : (e.payload as Record<string, unknown> | null)?.code
+              ? String((e.payload as Record<string, unknown>).code)
+              : null,
+        url: null,
+        rawDate: e.createdAt,
+      });
     }
+
+    for (const m of movies) {
+      items.push({
+        id: m.id,
+        kind: "movie",
+        title: m.title,
+        at: m.date.toISOString(),
+        subtitle: `${m.watchDuration} min Together night`,
+        url: m.posterUrl,
+        rawDate: m.date,
+      });
+    }
+
+    for (const p of photos) {
+      items.push({
+        id: p.id,
+        kind: "photo",
+        title: p.eventLabel || p.caption || "Photo Memory",
+        at: p.takenAt.toISOString(),
+        subtitle: p.caption,
+        url: null,
+        rawDate: p.takenAt,
+      });
+    }
+
+    items.sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime());
+
     return ok({
-      events: timeline.data.items.slice(0, 12).map((item) => ({
-        id: item.id,
-        kind: item.kind,
-        title: item.title,
-        at: item.at,
-        subtitle: item.subtitle,
-        url: item.url,
-      })),
+      events: items.slice(0, 8).map(({ rawDate, ...rest }) => rest),
     });
   } catch (e) {
     return fail(e);

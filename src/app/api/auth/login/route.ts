@@ -77,7 +77,20 @@ export async function POST(request: NextRequest) {
 
     const locked = existing?.lockedUntil && existing.lockedUntil > new Date();
 
+    const clientIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "anon";
+
     const { rateLimitOrThrow } = await import("@/lib/security");
+    if (clientIp !== "anon") {
+      await rateLimitOrThrow({
+        key: `auth:login:ip:${clientIp}`,
+        limit: 30,
+        windowSeconds: 60 * 15,
+        message: "Too many login attempts from this network. Try again later.",
+      });
+    }
     await rateLimitOrThrow({
       key: `auth:login:${email}`,
       limit: 20,

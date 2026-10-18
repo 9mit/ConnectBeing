@@ -85,6 +85,22 @@ function getSharedAudioContext(): AudioContext | null {
 
 function playGentleNudgeSound() {
   try {
+    if (typeof window !== "undefined") {
+      const soundPref = localStorage.getItem("madlove_sound_enabled");
+      if (soundPref === "false") {
+        return;
+      }
+    }
+
+    // Mobile haptic feedback for partner connections
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      try {
+        navigator.vibrate([25, 40, 25]);
+      } catch {
+        // Ignore unsupported vibration constraints
+      }
+    }
+
     const ctx = getSharedAudioContext();
     if (!ctx) return;
     const now = ctx.currentTime;
