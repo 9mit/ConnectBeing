@@ -19,7 +19,6 @@ import {
   Compass,
   Film,
   AlertCircle,
-  AlertTriangle,
   RefreshCw,
   Loader2,
   Volume2,
@@ -183,7 +182,6 @@ export function VirtualRoom({
 
   // Real-time track dimension state for host preview (updates immediately on resize event)
   const [hostCaptureDimensions, setHostCaptureDimensions] = useState<{ width: number; height: number } | null>(null);
-  const [isUpgradingStream, setIsUpgradingStream] = useState(false);
 
   // Theater Session & Playback States
   const [playbackState, setPlaybackState] = useState<"playing" | "paused">(() => {
@@ -344,6 +342,16 @@ export function VirtualRoom({
       const height = (video.videoHeight > 0 ? video.videoHeight : settings?.height) || 0;
       if (width > 0 && height > 0) {
         setHostCaptureDimensions({ width, height });
+        // Silently and automatically enforce high resolution if Chromium captured below 1080p
+        if (width < 1280 && typeof vTrack?.applyConstraints === "function") {
+          vTrack
+            .applyConstraints({
+              width: { ideal: 1920, max: 3840 },
+              height: { ideal: 1080, max: 2160 },
+              frameRate: { ideal: 60, max: 60 },
+            })
+            .catch(() => {});
+        }
         if (webrtcDiagStatsRef?.current?.localVideoTrack) {
           webrtcDiagStatsRef.current.localVideoTrack.settings = {
             ...webrtcDiagStatsRef.current.localVideoTrack.settings,
@@ -1240,16 +1248,7 @@ export function VirtualRoom({
        remoteStream.getAudioTracks().some((t) => t.readyState === "live" && t.enabled) ||
        roomState === "LIVE");
 
-  // Effective host source resolution: combines immediate element resize detection with WebRTC diagnostic stats
-  const sourceWidth = hostCaptureDimensions?.width ?? webrtcDiagStats?.localVideoTrack?.settings?.width;
-  const sourceHeight = hostCaptureDimensions?.height ?? webrtcDiagStats?.localVideoTrack?.settings?.height;
-  const isSourceResolutionLow = Boolean(
-    isHost &&
-    isHostCapturing &&
-    typeof sourceWidth === "number" &&
-    sourceWidth > 0 &&
-    sourceWidth < 1280
-  );
+
 
   // DRM Black Screen Detector for PC screen sharing Hotstar/Netflix
   // Strictly restricted to Host: running getImageData canvas polling on mobile hardware-decoded remote video
@@ -1971,34 +1970,7 @@ export function VirtualRoom({
               )}
             </AnimatePresence>
 
-            {/* Host source resolution banner if captured window is smaller than 720p */}
-            {isSourceResolutionLow && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-between gap-3 px-4 py-2 rounded-2xl bg-amber-950/90 border border-amber-500/50 text-amber-200 text-xs shadow-2xl backdrop-blur-md max-w-[95vw] pointer-events-auto">
-                <div className="flex items-center gap-2 min-w-0 text-left">
-                  <AlertTriangle size={15} className="text-amber-400 shrink-0" />
-                  <span className="leading-snug">
-                    <strong className="text-amber-300 font-semibold">Movie window captured at {sourceWidth}×{sourceHeight || Math.round((sourceWidth! * 9) / 16)}:</strong>{" "}
-                    Keep movie window OPEN &amp; MAXIMIZED (don&apos;t minimize to taskbar). If already maximized, upgrade stream:
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  disabled={isUpgradingStream}
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    setIsUpgradingStream(true);
-                    try {
-                      await refreshScreenShare();
-                    } finally {
-                      setIsUpgradingStream(false);
-                    }
-                  }}
-                  className="shrink-0 px-3.5 py-1.5 rounded-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer ml-auto"
-                >
-                  {isUpgradingStream ? "🔄 Upgrading..." : "🔄 Upgrade to 1080p"}
-                </button>
-              </div>
-            )}
+
 
             {/* A. HOST VIEW: LOCAL SHARED TAB STREAM (VISUAL PREVIEW ONLY - PERMANENTLY MUTED TO PREVENT ECHO) */}
             {isHost && (
@@ -2014,17 +1986,38 @@ export function VirtualRoom({
                   const video = localVideoRef.current;
                   if (video && video.videoWidth > 0 && video.videoHeight > 0) {
                     setHostCaptureDimensions({ width: video.videoWidth, height: video.videoHeight });
+                    if (video.videoWidth < 1280 && localStream) {
+                      const vTrack = localStream.getVideoTracks()[0];
+                      vTrack
+                        ?.applyConstraints({
+                          width: { ideal: 1920, max: 3840 },
+                          height: { ideal: 1080, max: 2160 },
+                          frameRate: { ideal: 60, max: 60 },
+                        })
+                        .catch(() => {});
+                    }
                   }
                 }}
                 onLoadedMetadata={() => {
                   const video = localVideoRef.current;
                   if (video && video.videoWidth > 0 && video.videoHeight > 0) {
                     setHostCaptureDimensions({ width: video.videoWidth, height: video.videoHeight });
+                    if (video.videoWidth < 1280 && localStream) {
+                      const vTrack = localStream.getVideoTracks()[0];
+                      vTrack
+                        ?.applyConstraints({
+                          width: { ideal: 1920, max: 3840 },
+                          height: { ideal: 1080, max: 2160 },
+                          frameRate: { ideal: 60, max: 60 },
+                        })
+                        .catch(() => {});
+                    }
                   }
                 }}
                 className={`h-full w-full object-contain ${
                   isHostCapturing ? "block" : "hidden"
                 }`}
+                style={{ maxHeight: "100%", maxWidth: "100%", imageRendering: "auto" }}
               />
             )}
 

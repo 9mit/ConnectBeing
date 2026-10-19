@@ -455,6 +455,46 @@ function prioritizeCodecsInSdp(sdp: string): string {
     }
 
     lines[videoMediaLineIndex] = `${prefix.join(" ")} ${finalPayloads.join(" ")}`;
+
+    // Inject b=AS:8000 and b=TIAS:8000000 into the video media section to inform BWE of high-bandwidth capacity
+    let hasBandwidth = false;
+    for (let i = videoMediaLineIndex + 1; i < lines.length; i++) {
+      if (lines[i].startsWith("m=")) {
+        break;
+      }
+      if (lines[i].startsWith("b=AS:") || lines[i].startsWith("b=TIAS:")) {
+        hasBandwidth = true;
+        if (lines[i].startsWith("b=AS:")) lines[i] = "b=AS:8000";
+        if (lines[i].startsWith("b=TIAS:")) lines[i] = "b=TIAS:8000000";
+      }
+    }
+    if (!hasBandwidth) {
+      lines.splice(videoMediaLineIndex + 1, 0, "b=AS:8000", "b=TIAS:8000000");
+    }
+
+    // Enhance fmtp lines to unlock 1080p 60fps profile capabilities
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith("a=fmtp:")) {
+        const parts = lines[i].substring(7).split(" ");
+        const pt = parts[0];
+        const codec = rtpMap.get(pt);
+        if (codec === "H264") {
+          let lineContent = lines[i];
+          if (!lineContent.includes("max-fs=")) {
+            lineContent += ";max-fs=8160;max-mbps=490000";
+          }
+          if (!lineContent.includes("level-asymmetry-allowed=")) {
+            lineContent += ";level-asymmetry-allowed=1";
+          }
+          lines[i] = lineContent;
+        } else if (codec === "VP8" || codec === "VP9") {
+          if (!lines[i].includes("max-fs=")) {
+            lines[i] += ";max-fs=8160;max-fr=60";
+          }
+        }
+      }
+    }
+
     return isCrlf ? lines.join("\r\n") : lines.join("\n");
   } catch (err) {
     console.warn("[WebRTC] SDP codec prioritization fallback:", err);
@@ -727,8 +767,8 @@ export function useTheaterWebRTC({
     });
   }, [userId]);
 
-  // Apply bitrate and motion cadence optimization for movie screen sharing
-  const applyBitrateCap = useCallback(async (pc: RTCPeerConnection, maxKbps = 2500) => {
+  // Apply bitrate and high-fidelity video optimization for movie screen sharing
+  const applyBitrateCap = useCallback(async (pc: RTCPeerConnection, maxKbps = 8000) => {
     try {
       const sender = pc.getSenders().find((s) => s.track?.kind === "video");
       if (!sender) return;
@@ -737,13 +777,17 @@ export function useTheaterWebRTC({
         return;
       }
       try {
-        (params as any).degradationPreference = "maintain-framerate";
+        // "maintain-resolution" guarantees that WebRTC will NEVER degrade resolution to low quality
+        (params as any).degradationPreference = "maintain-resolution";
       } catch {
         // ignore if degradationPreference not supported
       }
       params.encodings[0]!.maxBitrate = maxKbps * 1000;
-      params.encodings[0]!.maxFramerate = 30;
+      params.encodings[0]!.maxFramerate = 60;
       params.encodings[0]!.scaleResolutionDownBy = 1.0;
+      try {
+        (params.encodings[0] as any).networkPriority = "high";
+      } catch {}
       await sender.setParameters(params);
     } catch {
       // Fallback 1: try setting with framerate cap and degradationPreference without scaleResolutionDownBy if rejected
@@ -753,10 +797,11 @@ export function useTheaterWebRTC({
         const params = sender.getParameters();
         if (params.encodings && params.encodings.length > 0) {
           try {
-            (params as any).degradationPreference = "maintain-framerate";
+            (params as any).degradationPreference = "maintain-resolution";
           } catch {}
           params.encodings[0]!.maxBitrate = maxKbps * 1000;
-          params.encodings[0]!.maxFramerate = 30;
+          params.encodings[0]!.maxFramerate = 60;
+          params.encodings[0]!.scaleResolutionDownBy = 1.0;
           await sender.setParameters(params);
         }
       } catch {
@@ -1429,13 +1474,13 @@ export function useTheaterWebRTC({
       if (currentVideoTrack && currentVideoTrack.readyState === "live") {
         try {
           await currentVideoTrack.applyConstraints({
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-            frameRate: { ideal: 30, max: 30 },
+            width: { ideal: 1920, max: 3840 },
+            height: { ideal: 1080, max: 2160 },
+            frameRate: { ideal: 60, max: 60 },
           });
           const settings = currentVideoTrack.getSettings();
           if (settings.width && settings.width >= 1280) {
-            void applyBitrateCap(pc);
+            void applyBitrateCap(pc, 8000);
             return true;
           }
         } catch {
@@ -1443,17 +1488,22 @@ export function useTheaterWebRTC({
         }
       }
 
-      // Step 2: Acquire fresh display media stream with ideal 1080p constraints
+      // Step 2: Acquire fresh display media stream with ideal 1080p/4K constraints
       let newStream: MediaStream;
       try {
         newStream = await navigator.mediaDevices.getDisplayMedia({
           video: {
             displaySurface: "browser",
-            frameRate: { ideal: 30, max: 30 },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            frameRate: { ideal: 60, max: 60 },
+            width: { ideal: 1920, max: 3840 },
+            height: { ideal: 1080, max: 2160 },
           },
-          audio: true,
+          audio: {
+            autoGainControl: false,
+            channelCount: 2,
+            echoCancellation: false,
+            noiseSuppression: false,
+          },
           selfBrowserSurface: "exclude",
           surfaceSwitching: "include",
           systemAudio: "include",
@@ -1461,9 +1511,9 @@ export function useTheaterWebRTC({
       } catch {
         newStream = await navigator.mediaDevices.getDisplayMedia({
           video: {
-            frameRate: { ideal: 30, max: 30 },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            frameRate: { ideal: 60, max: 60 },
+            width: { ideal: 1920, max: 3840 },
+            height: { ideal: 1080, max: 2160 },
           },
           audio: true,
         });
@@ -1527,17 +1577,22 @@ export function useTheaterWebRTC({
 
       updateState("AWAITING_SCREEN_SHARE");
 
-      // Request native browser/tab stream at 1080p target resolution @ 30 FPS without forced downscale limits
+      // Request native browser/tab stream at 1080p/4K target resolution @ 60 FPS without forced downscale limits
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getDisplayMedia({
           video: {
             displaySurface: "browser",
-            frameRate: { ideal: 30, max: 30 },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            frameRate: { ideal: 60, max: 60 },
+            width: { ideal: 1920, max: 3840 },
+            height: { ideal: 1080, max: 2160 },
           },
-          audio: true,
+          audio: {
+            autoGainControl: false,
+            channelCount: 2,
+            echoCancellation: false,
+            noiseSuppression: false,
+          },
           selfBrowserSurface: "exclude",
           surfaceSwitching: "include",
           systemAudio: "include",
@@ -1546,17 +1601,31 @@ export function useTheaterWebRTC({
         try {
           stream = await navigator.mediaDevices.getDisplayMedia({
             video: {
-              frameRate: { ideal: 30, max: 30 },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
+              frameRate: { ideal: 60, max: 60 },
+              width: { ideal: 1920, max: 3840 },
+              height: { ideal: 1080, max: 2160 },
             },
             audio: true,
-          });
+            selfBrowserSurface: "exclude",
+            surfaceSwitching: "include",
+            systemAudio: "include",
+          } as any);
         } catch {
-          stream = await navigator.mediaDevices.getDisplayMedia({
-            video: true,
-            audio: true,
-          });
+          try {
+            stream = await navigator.mediaDevices.getDisplayMedia({
+              video: {
+                frameRate: { ideal: 60, max: 60 },
+                width: { ideal: 1920, max: 3840 },
+                height: { ideal: 1080, max: 2160 },
+              },
+              audio: true,
+            });
+          } catch {
+            stream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
+              audio: true,
+            });
+          }
         }
       }
 
@@ -1565,8 +1634,19 @@ export function useTheaterWebRTC({
         throw new Error("Captured stream does not contain a live video track.");
       }
 
+      // Immediately request optimal 1080p/4K constraints on the captured track
+      try {
+        await videoTrack.applyConstraints({
+          width: { ideal: 1920, max: 3840 },
+          height: { ideal: 1080, max: 2160 },
+          frameRate: { ideal: 60, max: 60 },
+        });
+      } catch {
+        // Fallback silently if browser rejects advanced track constraints
+      }
+
       // CRITICAL: Set contentHint = 'motion' to switch Chromium from kScreenshare to kRealtimeVideo.
-      // This enables motion pacer smoothing and maintains stable 30 FPS clock instead of damage-rect throttling.
+      // This enables motion pacer smoothing and maintains stable high-FPS clock instead of damage-rect throttling.
       if ("contentHint" in videoTrack) {
         (videoTrack as any).contentHint = "motion";
       }
@@ -2777,26 +2857,27 @@ export function useTheaterWebRTC({
         const srcWidth = settings?.width ?? 0;
         const srcHeight = settings?.height ?? 0;
 
-        // If host capture resolution is low, periodically nudge Chromium to re-sample the window at 1080p
-        if (srcWidth > 0 && srcWidth < 1280 && now - lastConstraintAttemptRef.current >= 8000) {
+        // If host capture resolution is low, periodically nudge Chromium to re-sample the window at 1080p/4K
+        if (srcWidth > 0 && srcWidth < 1280 && now - lastConstraintAttemptRef.current >= 4000) {
           lastConstraintAttemptRef.current = now;
           localVTrack
             ?.applyConstraints({
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
+              width: { ideal: 1920, max: 3840 },
+              height: { ideal: 1080, max: 2160 },
+              frameRate: { ideal: 60, max: 60 },
             })
             .catch(() => {});
         }
 
         if (sender && srcWidth > 0) {
           let candidate: AdaptiveQualityProfile = "HIGH";
-          if (bwKbps >= 2200 && lossRatio < 0.02 && rttMs < 800) {
+          if (bwKbps >= 4500 && lossRatio < 0.02 && rttMs < 600) {
             candidate = "ULTRA";
-          } else if ((bwKbps >= 1300 || (bwKbps === 0 && lossRatio < 0.03)) && lossRatio < 0.04 && rttMs < 950) {
+          } else if ((bwKbps >= 2500 || (bwKbps === 0 && lossRatio < 0.03)) && lossRatio < 0.04 && rttMs < 850) {
             candidate = "HIGH";
-          } else if ((bwKbps >= 700 || (bwKbps === 0 && lossRatio < 0.05)) && lossRatio < 0.06 && rttMs < 1100) {
+          } else if ((bwKbps >= 1500 || (bwKbps === 0 && lossRatio < 0.05)) && lossRatio < 0.06 && rttMs < 1000) {
             candidate = "MEDIUM";
-          } else if (bwKbps >= 350 && lossRatio < 0.10) {
+          } else if (bwKbps >= 800 && lossRatio < 0.10) {
             candidate = "LOW";
           } else if (bwKbps > 0 || lossRatio >= 0.10 || rttMs >= 1200) {
             candidate = "MINIMUM";
@@ -2828,46 +2909,36 @@ export function useTheaterWebRTC({
                 const enc = params.encodings[0]!;
                 
                 let scaleDown = 1.0;
-                let maxBitrate = 2500;
-                let maxFramerate = 30;
-                const degPref = "maintain-framerate";
+                let maxBitrate = 8000;
+                let maxFramerate = 60;
+                const degPref = "maintain-resolution";
 
                 if (state.targetProfile === "ULTRA") {
-                  maxBitrate = 3000;
-                  maxFramerate = 30;
+                  maxBitrate = 10000;
+                  maxFramerate = 60;
                   scaleDown = 1.0;
                 } else if (state.targetProfile === "HIGH") {
+                  maxBitrate = 7000;
+                  maxFramerate = 60;
+                  scaleDown = 1.0;
+                } else if (state.targetProfile === "MEDIUM") {
+                  maxBitrate = 4000;
+                  maxFramerate = 30;
+                  scaleDown = 1.0;
+                } else if (state.targetProfile === "LOW") {
                   maxBitrate = 2000;
                   maxFramerate = 30;
                   scaleDown = 1.0;
-                } else if (state.targetProfile === "MEDIUM") {
-                  maxBitrate = 1300;
-                  maxFramerate = 30;
-                  // Only apply mild downscale if source is larger than 720p
-                  scaleDown = srcWidth <= 1280 ? 1.0 : 1.25;
-                } else if (state.targetProfile === "LOW") {
-                  maxBitrate = 750;
-                  maxFramerate = 24;
-                  // Never downscale sources <= 720p (prevents blur on 492px or 720p capture)
-                  scaleDown = srcWidth <= 720 ? 1.0 : 1.5;
                 } else {
-                  maxBitrate = 350;
-                  maxFramerate = 20;
-                  // Never downscale sources <= 480p
-                  scaleDown = srcWidth <= 480 ? 1.0 : 1.5;
-                }
-                
-                // Never reduce resolution below 320px
-                if (srcWidth / scaleDown < 320 && srcWidth >= 320) {
-                  scaleDown = srcWidth / 320;
-                } else if (srcWidth < 320) {
+                  maxBitrate = 1000;
+                  maxFramerate = 24;
                   scaleDown = 1.0;
                 }
 
                 try { (params as any).degradationPreference = degPref; } catch {}
                 enc.maxBitrate = maxBitrate * 1000;
                 enc.maxFramerate = maxFramerate;
-                enc.scaleResolutionDownBy = Math.max(1.0, scaleDown);
+                enc.scaleResolutionDownBy = 1.0;
 
                 sender.setParameters(params).catch(() => {});
 
